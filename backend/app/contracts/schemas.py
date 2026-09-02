@@ -113,6 +113,8 @@ class DialogSummary(ApiModel):
     status: DialogStatus
     mode: DialogMode
     confidence: float
+    is_processing: bool = False
+    processing_error: str | None = None
     assigned_operator: UserRef | None = None
     last_message_preview: str | None = None
     title: str | None = None

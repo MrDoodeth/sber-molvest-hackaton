@@ -30,6 +30,8 @@ export default function UserDialogPage() {
     queryKey: queryKeys.dialog.detail(dialogId),
     queryFn: ({ signal }) => dialogsApi.detail(dialogId, signal),
     enabled: Boolean(dialogId),
+    refetchInterval: 2500,
+    refetchOnMount: "always",
   });
   const messages = useInfiniteQuery({
     queryKey: queryKeys.dialog.messages(dialogId),
@@ -37,6 +39,8 @@ export default function UserDialogPage() {
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     enabled: Boolean(dialogId),
+    refetchInterval: 2500,
+    refetchOnMount: "always",
   });
   const events = useUserDialogEvents(dialogId, () => {
     initialTurn.current = null;
@@ -101,11 +105,18 @@ export default function UserDialogPage() {
   }, [location.pathname, navigate]);
 
   useEffect(() => {
-    if (!initialTurn.current?.pendingTurn || (!initialTurnCompleted && detail.data?.mode !== "operator_support")) return;
+    if (
+      !initialTurn.current?.pendingTurn
+      || (
+        !initialTurnCompleted
+        && detail.data?.mode !== "operator_support"
+        && !detail.data?.processingError
+      )
+    ) return;
     initialTurn.current = null;
     setAwaitingTerminal(false);
     events.cancelTurn();
-  }, [detail.data?.mode, events, initialTurnCompleted]);
+  }, [detail.data?.mode, detail.data?.processingError, events, initialTurnCompleted]);
 
   const submitAttempt = (attempt: SendAttempt) => {
     if (!detail.data || send.isPending) return;
@@ -120,7 +131,10 @@ export default function UserDialogPage() {
   };
 
   if (!dialogId) return <ErrorState title="Диалог не найден" />;
-  const pendingTurn = awaitingTerminal && detail.data?.mode === "ai_support" && !initialTurnCompleted;
+  const processingError = events.eventError ?? detail.data?.processingError ?? undefined;
+  const pendingTurn = detail.data?.mode === "ai_support"
+    && !processingError
+    && (detail.data.isProcessing || (awaitingTerminal && !initialTurnCompleted));
   const visiblePhase = !pendingTurn
     ? "idle"
     : events.phase === "idle"
@@ -161,7 +175,7 @@ export default function UserDialogPage() {
             </div>
             {visiblePhase === "vision" && <div className="flex items-center gap-2 border-t border-indigo-100 bg-indigo-50 px-4 py-2 text-xs font-semibold text-indigo-800"><ImageIcon className="size-4 animate-pulse" /> Анализирую изображение…</div>}
             {visiblePhase === "thinking" && pendingTurn && <div className="flex items-center gap-3 border-t border-molvest-100 bg-molvest-50 px-4 py-2 text-xs font-semibold text-molvest-800"><span>Проверяю базу знаний и уверенность ответа…</span></div>}
-            {events.phase === "error" && <div className="flex items-center gap-2 border-t border-red-100 bg-red-50 px-4 py-2 text-xs font-semibold text-red-800"><XCircle className="size-4" /> {events.eventError || "Не удалось обработать сообщение."}</div>}
+            {processingError && <div className="flex items-center gap-2 border-t border-red-100 bg-red-50 px-4 py-2 text-xs font-semibold text-red-800"><XCircle className="size-4" /> {processingError}</div>}
             {detail.data.status === "active" ? (
               <ChatComposer
                 ref={textareaRef}

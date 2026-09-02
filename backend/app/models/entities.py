@@ -156,6 +156,11 @@ class Message(UUIDPrimaryKey, Base):
             "confidence IS NULL OR (confidence >= 0 AND confidence <= 1)",
             name="ck_message_confidence_range",
         ),
+        CheckConstraint(
+            "processing_status IS NULL OR processing_status IN "
+            "('pending', 'processing', 'completed', 'failed')",
+            name="ck_message_processing_status",
+        ),
         Index("ix_message_dialog_created", "dialog_id", "created_at", "id"),
     )
 
@@ -173,6 +178,8 @@ class Message(UUIDPrimaryKey, Base):
     sources: Mapped[list[dict[str, Any]]] = mapped_column(
         JSON_TYPE, default=list, server_default=sql_text("'[]'")
     )
+    processing_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    processing_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, server_default=func.now()
     )

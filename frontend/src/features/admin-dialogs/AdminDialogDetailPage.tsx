@@ -17,7 +17,13 @@ export default function AdminDialogDetailPage() {
   const toast = useToast();
   const [candidateId, setCandidateId] = useState<string>();
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const detail = useQuery({ queryKey: queryKeys.admin.dialog(dialogId), queryFn: ({ signal }) => adminApi.dialog(dialogId, signal), enabled: Boolean(dialogId) });
+  const detail = useQuery({
+    queryKey: queryKeys.admin.dialog(dialogId),
+    queryFn: ({ signal }) => adminApi.dialog(dialogId, signal),
+    enabled: Boolean(dialogId),
+    refetchInterval: 2500,
+    refetchOnMount: "always",
+  });
   const activeCandidateId = candidateId ?? detail.data?.candidate?.id;
   const createCandidate = useMutation({
     mutationFn: () => adminApi.createCandidate(dialogId),

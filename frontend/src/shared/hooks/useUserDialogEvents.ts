@@ -45,17 +45,25 @@ export function useUserDialogEvents(dialogId: string, onTerminal?: () => void) {
           setConfidence(event.value);
           setPhase("thinking");
           queryClient.setQueryData<DialogDetailDto>(queryKeys.dialog.detail(dialogId), (current) =>
-            current ? { ...current, confidence: event.value } : current,
+            current
+              ? { ...current, confidence: event.value, isProcessing: true, processingError: undefined }
+              : current,
           );
           break;
         case "assistant_token":
           setPhase("streaming");
+          queryClient.setQueryData<DialogDetailDto>(queryKeys.dialog.detail(dialogId), (current) =>
+            current ? { ...current, isProcessing: true, processingError: undefined } : current,
+          );
           startTransition(() => setAssistantText((current) => `${current ?? ""}${event.token}`));
           break;
         case "assistant_done":
           appendPersistedMessage(queryClient, dialogId, event.message);
           setAssistantText(null);
           setPhase("idle");
+          queryClient.setQueryData<DialogDetailDto>(queryKeys.dialog.detail(dialogId), (current) =>
+            current ? { ...current, isProcessing: false, processingError: undefined } : current,
+          );
           void queryClient.invalidateQueries({ queryKey: queryKeys.dialog.detail(dialogId) });
           void queryClient.invalidateQueries({ queryKey: queryKeys.user.dialogs() });
           onTerminal?.();
@@ -65,7 +73,15 @@ export function useUserDialogEvents(dialogId: string, onTerminal?: () => void) {
           setAssistantText(null);
           setPhase("idle");
           queryClient.setQueryData<DialogDetailDto>(queryKeys.dialog.detail(dialogId), (current) =>
-            current ? { ...current, mode: "operator_support", assignedOperator: event.operator } : current,
+            current
+              ? {
+                  ...current,
+                  mode: "operator_support",
+                  assignedOperator: event.operator,
+                  isProcessing: false,
+                  processingError: undefined,
+                }
+              : current,
           );
           void queryClient.invalidateQueries({ queryKey: queryKeys.user.dialogs() });
           onTerminal?.();
@@ -78,6 +94,9 @@ export function useUserDialogEvents(dialogId: string, onTerminal?: () => void) {
         case "dialog_closed":
           setAssistantText(null);
           setPhase("idle");
+          queryClient.setQueryData<DialogDetailDto>(queryKeys.dialog.detail(dialogId), (current) =>
+            current ? { ...current, isProcessing: false, processingError: undefined, status: "closed" } : current,
+          );
           void queryClient.invalidateQueries({ queryKey: queryKeys.dialog.detail(dialogId) });
           void queryClient.invalidateQueries({ queryKey: queryKeys.dialog.messages(dialogId) });
           void queryClient.invalidateQueries({ queryKey: queryKeys.user.dialogs() });
@@ -87,6 +106,10 @@ export function useUserDialogEvents(dialogId: string, onTerminal?: () => void) {
           setEventError(event.message);
           setAssistantText(null);
           setPhase("error");
+          queryClient.setQueryData<DialogDetailDto>(queryKeys.dialog.detail(dialogId), (current) =>
+            current ? { ...current, isProcessing: false, processingError: event.message } : current,
+          );
+          void queryClient.invalidateQueries({ queryKey: queryKeys.user.dialogs() });
           onTerminal?.();
           break;
       }
@@ -103,6 +126,9 @@ export function useUserDialogEvents(dialogId: string, onTerminal?: () => void) {
       setEventError(undefined);
       setConfidence(undefined);
       setPhase(hasScreenshot ? "vision" : "thinking");
+      queryClient.setQueryData<DialogDetailDto>(queryKeys.dialog.detail(dialogId), (current) =>
+        current ? { ...current, isProcessing: true, processingError: undefined } : current,
+      );
     },
     cancelTurn: () => {
       setAssistantText(null);

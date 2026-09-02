@@ -35,6 +35,8 @@ export default function OperatorWorkspace() {
     queryKey: queryKeys.dialog.detail(dialogId ?? ""),
     queryFn: ({ signal }) => operatorApi.detail(dialogId!, signal),
     enabled: Boolean(dialogId),
+    refetchInterval: 2500,
+    refetchOnMount: "always",
   });
   const messages = useInfiniteQuery({
     queryKey: queryKeys.dialog.messages(dialogId ?? ""),
@@ -42,6 +44,8 @@ export default function OperatorWorkspace() {
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     enabled: Boolean(dialogId),
+    refetchInterval: 2500,
+    refetchOnMount: "always",
   });
   const events = useOperatorDialogEvents(dialogId);
   const allMessages = messages.data ? mergePersistedMessages(...messages.data.pages.map((page) => page.items)) : [];
@@ -50,6 +54,8 @@ export default function OperatorWorkspace() {
   const draftConfidence = events.confidence ?? currentDraft?.confidence;
   const triggerMessageId = events.triggerMessageId ?? currentDraft?.triggerMessageId;
   const triggerMessage = allMessages.find((message) => message.id === triggerMessageId);
+  const isGeneratingDraft = detail.data?.mode === "operator_support" && detail.data.isProcessing;
+  const processingError = events.eventError ?? detail.data?.processingError ?? undefined;
   const isAssignedToMe = Boolean(detail.data?.assignedOperator?.id && detail.data.assignedOperator.id === me.data?.id);
 
   useEffect(() => setMobilePane(dialogId ? "chat" : "queue"), [dialogId]);
@@ -176,7 +182,7 @@ export default function OperatorWorkspace() {
                 {messages.isError && <ErrorState description={messages.error.message} onRetry={() => void messages.refetch()} />}
                 {messages.data && <MessageList messages={allMessages} showConfidence showAttachmentAnalysis topAction={messages.hasNextPage ? <Button className="mx-auto" size="sm" variant="ghost" pending={messages.isFetchingNextPage} onClick={() => void messages.fetchNextPage()}><RotateCcw className="size-3.5" /> Ранние сообщения</Button> : undefined} empty={<EmptyState title="История пуста" description="Сообщения появятся после синхронизации с backend." />} />}
               </div>
-              {events.eventError && <div className="border-t border-red-100 bg-red-50 px-4 py-2 text-xs font-semibold text-red-800">{events.eventError}</div>}
+              {processingError && <div className="border-t border-red-100 bg-red-50 px-4 py-2 text-xs font-semibold text-red-800">{processingError}</div>}
               {failedAttempt && <div className="flex items-center justify-between gap-3 border-t border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-900"><span>Ответ не подтверждён. Retry сохранит тот же UUID.</span><Button size="sm" variant="secondary" pending={send.isPending} onClick={() => submitAttempt(failedAttempt)}>Повторить</Button></div>}
               {detail.data.status === "active" && isAssignedToMe && (
                 <ChatComposer ref={textareaRef} value={text} onChange={(value) => { setText(value); if (failedAttempt?.text !== value.trim()) setFailedAttempt(undefined); }} onSend={submit} pending={send.isPending} placeholder="Ответ пользователю…" attachments={attachments} attachmentError={attachmentError} onAttachmentChange={updateAttachments} onAttachmentError={setAttachmentError} footer={<button type="button" className="font-semibold text-indigo-600 lg:hidden" onClick={() => setMobilePane("draft")}>Открыть AI черновик</button>} />
@@ -198,9 +204,10 @@ export default function OperatorWorkspace() {
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-4">
             {!dialogId && <EmptyState icon={<PanelRight className="size-8" />} title="Черновик не выбран" description="Откройте тикет, чтобы увидеть предложение GigaChat." />}
-            {dialogId && !draftText && events.draftText === null && <EmptyState icon={<MessagesSquare className="size-8" />} title="Черновика пока нет" description="Он появится после нового сообщения пользователя и сохранится на backend." />}
-            {dialogId && events.draftText !== null && <StreamingMessage text={events.draftText} label="GigaChat готовит черновик" />}
-            {dialogId && draftText && events.draftText === null && (
+            {dialogId && isGeneratingDraft && <StreamingMessage text={events.draftText ?? ""} label="GigaChat готовит черновик" />}
+            {dialogId && !isGeneratingDraft && !draftText && events.draftText === null && <EmptyState icon={<MessagesSquare className="size-8" />} title="Черновика пока нет" description="Он появится после нового сообщения пользователя и сохранится на backend." />}
+            {dialogId && !isGeneratingDraft && events.draftText !== null && <StreamingMessage text={events.draftText} label="GigaChat готовит черновик" />}
+            {dialogId && !isGeneratingDraft && draftText && events.draftText === null && (
               <div className="rounded-2xl border border-indigo-100 bg-white p-4 shadow-sm">
                 {triggerMessage && <div className="mb-4 rounded-xl bg-stone-50 p-3 text-xs leading-5 text-stone-600"><strong className="block text-[10px] uppercase tracking-wider text-stone-400">К сообщению пользователя</strong><span className="mt-1 line-clamp-3 block">{triggerMessage.text || "Сообщение с вложением"}</span></div>}
                 <p className="whitespace-pre-wrap text-sm leading-6 text-stone-800">{draftText}</p>

@@ -35,6 +35,13 @@ class MessageAuthor(StrEnum):
     SYSTEM = "system"
 
 
+class MessageProcessingStatus(StrEnum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
 class FeedbackVerdict(StrEnum):
     HELPFUL = "helpful"
     AI_ERROR = "ai_error"

@@ -13,7 +13,7 @@ export default function UserHomePage() {
           <p className="mx-auto mt-3 max-w-xl text-sm leading-7 text-stone-600">Выберите обращение слева или создайте новый чат. Если GigaChat не уверен в решении, к этой же переписке подключится специалист.</p>
           <div className="mt-8 grid gap-3 text-left sm:grid-cols-3">
             <div className="rounded-2xl border border-white bg-white/75 p-4 shadow-sm backdrop-blur"><Bot className="size-5 text-indigo-600" /><strong className="mt-3 block text-sm">Ответ по БЗ</strong><span className="mt-1 block text-xs leading-5 text-stone-500">Инструкции и документы 1С</span></div>
-            <div className="rounded-2xl border border-white bg-white/75 p-4 shadow-sm backdrop-blur"><Image className="size-5 text-molvest-600" /><strong className="mt-3 block text-sm">Скриншот ошибки</strong><span className="mt-1 block text-xs leading-5 text-stone-500">Один файл в сообщении</span></div>
+            <div className="rounded-2xl border border-white bg-white/75 p-4 shadow-sm backdrop-blur"><Image className="size-5 text-molvest-600" /><strong className="mt-3 block text-sm">Файлы ошибки</strong><span className="mt-1 block text-xs leading-5 text-stone-500">До 10 файлов в сообщении</span></div>
             <div className="rounded-2xl border border-white bg-white/75 p-4 shadow-sm backdrop-blur"><ShieldCheck className="size-5 text-sky-600" /><strong className="mt-3 block text-sm">Живой оператор</strong><span className="mt-1 block text-xs leading-5 text-stone-500">Без нового тикета</span></div>
           </div>
         </div>

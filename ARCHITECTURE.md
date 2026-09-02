@@ -3286,7 +3286,7 @@ MVP-модель оставляем минимальной: каждая сущ�
 | `User` | `id`, `role`, `display_name` | Авторизация и role guards: `user / operator / admin` |
 | `Dialog` | `id`, `user_id`, `status`, `mode`, `channel`, `dialog_confidence`, `assigned_operator_id?`, `escalated_at?`, `closed_at?`, `created_at`, `updated_at` | Сам тикет. `Dialog` одновременно является пользовательским обращением и операторским тикетом |
 | `DialogFeedback` | `id`, `dialog_id`, `verdict`, `created_at` | Финальная оценка закрытого Dialog: `helpful / ai_error`; отсутствие записи = «ожидает оценки» |
-| `Message` | `id`, `dialog_id`, `author_type`, `text`, `confidence?`, `sources?`, `created_at` | Сообщения `user / assistant / operator / system`; `confidence` хранится у trigger-turn, `sources` — snapshot RAG-ссылок |
+| `Message` | `id`, `dialog_id`, `author_type`, `text`, `confidence?`, `sources?`, `processing_status?`, `processing_error?`, `created_at` | Сообщения `user / assistant / operator / system`; состояние user trigger-turn сохраняется для восстановления генерации после reload |
 | `Attachment` | `id`, `message_id`, `storage_key`, `mime_type`, `gigachat_file_id?`, `extracted_text?`, `visual_summary?`, `remote_deleted_at?` | Runtime screenshot/document + результат screenshot parse |
 | `OperatorDraft` | `id`, `dialog_id`, `trigger_message_id`, `text`, `confidence`, `sources?`, `created_at` | AI GigaChat draft для оператора; хранится, чтобы не теряться после refresh |
 | `KnowledgeSection` | `id`, `name`, `is_enabled`, `created_at` | Раздел БЗ и master switch |
@@ -3887,7 +3887,7 @@ OpenAPI-схема FastAPI и Swagger UI `/docs` — источник истин
 | GET | `/api/me` | текущий пользователь + role |
 | GET | `/api/dialogs` | dialogs текущего user |
 | POST | `/api/dialogs` | создать новый Dialog |
-| GET | `/api/dialogs/{dialogId}` | metadata Dialog |
+| GET | `/api/dialogs/{dialogId}` | metadata Dialog, включая `is_processing` и `processing_error` |
 | GET | `/api/dialogs/{dialogId}/messages?cursor=&limit=50` | история сообщений |
 | POST | `/api/dialogs/{dialogId}/messages` | отправить text + optional attachment |
 | POST | `/api/dialogs/{dialogId}/close` | пользователь закрывает AI-resolved тикет |
@@ -3901,12 +3901,12 @@ multipart/form-data
 
 client_message_id
 text
-attachment?   # максимум 1
+attachments   # repeated, максимум 10
 ```
 
 `client_message_id = UUID` нужен для idempotency/retry.
 
-Backend возвращает persisted user `Message` сразу, а GigaChat processing идёт дальше через SSE.
+Backend возвращает persisted user `Message` сразу, а GigaChat processing идёт дальше через SSE. Состояние trigger-message (`pending / processing / completed / failed`) хранится в БД, поэтому после reload frontend восстанавливает placeholder или показывает сохранённую ошибку даже при потерянном SSE-событии. Списки и открытые панели дополнительно обновляются polling-запросами.
 
 ### 20.2 Operator
 

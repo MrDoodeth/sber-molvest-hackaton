@@ -8,7 +8,12 @@ import { cn, formatRelativeDate, truncateTitle } from "../../shared/utils";
 
 export default function UserDialogsNav({ mobile = false }: { mobile?: boolean }) {
   const navigate = useNavigate();
-  const dialogs = useQuery({ queryKey: queryKeys.user.dialogs(), queryFn: ({ signal }) => dialogsApi.list(signal) });
+  const dialogs = useQuery({
+    queryKey: queryKeys.user.dialogs(),
+    queryFn: ({ signal }) => dialogsApi.list(signal),
+    refetchInterval: 2500,
+    refetchOnMount: "always",
+  });
 
   return (
     <aside className={cn("flex min-h-0 flex-col border-stone-200 bg-white", mobile ? "h-full" : "hidden border-r md:flex md:w-80 md:shrink-0")}>

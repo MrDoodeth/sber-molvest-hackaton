@@ -125,7 +125,7 @@ export function AttachmentCard({ attachment, showAnalysis = false }: { attachmen
           <span className="absolute inset-x-0 bottom-0 truncate bg-black/65 px-1.5 py-1 text-[10px] font-bold text-white">{attachment.fileName}</span>
         </div>
       )}
-      {attachment.sizeBytes !== undefined && <span className="truncate px-1 text-[10px] opacity-65">{formatBytes(attachment.sizeBytes)}</span>}
+      {typeof attachment.sizeBytes === "number" && <span className="truncate px-1 text-[10px] opacity-65">{formatBytes(attachment.sizeBytes)}</span>}
       {showAnalysis && (attachment.extractedText || attachment.visualSummary) && (
         <details className="mt-1 w-72 max-w-[calc(100vw-3rem)] rounded-xl bg-black/5 px-3 py-2 text-xs">
           <summary className="cursor-pointer font-bold">Анализ изображения</summary>

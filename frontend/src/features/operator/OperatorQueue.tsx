@@ -21,6 +21,8 @@ export default function OperatorQueue({
   const queue = useQuery({
     queryKey: queryKeys.operator.queue(scope),
     queryFn: ({ signal }) => operatorApi.queue(scope, signal),
+    refetchInterval: 2500,
+    refetchOnMount: "always",
   });
   return (
     <aside className={cn("min-h-0 flex-col border-r border-stone-200 bg-white", className)}>

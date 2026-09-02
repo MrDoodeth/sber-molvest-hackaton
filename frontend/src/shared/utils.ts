@@ -35,8 +35,8 @@ export function formatPercent(value: number): string {
   return `${Math.round(normalized)}%`;
 }
 
-export function formatBytes(bytes?: number): string {
-  if (bytes === undefined) return "";
+export function formatBytes(bytes?: number | null): string {
+  if (bytes == null) return "";
   if (bytes < 1024) return `${bytes} Б`;
   if (bytes < 1024 ** 2) return `${Math.round(bytes / 1024)} КБ`;
   return `${(bytes / 1024 ** 2).toFixed(1)} МБ`;

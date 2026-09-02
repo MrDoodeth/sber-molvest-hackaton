@@ -80,6 +80,8 @@ def dialog_summary(
     owner: User | None = None,
     first_user_message: Message | None = None,
     has_attachment: bool = False,
+    is_processing: bool = False,
+    processing_error: str | None = None,
     feedback: DialogFeedback | None = None,
     candidate: KnowledgeCandidate | None = None,
 ) -> DialogSummary:
@@ -92,6 +94,8 @@ def dialog_summary(
         status=dialog.status,
         mode=dialog.mode,
         confidence=dialog.dialog_confidence,
+        is_processing=is_processing,
+        processing_error=processing_error,
         assigned_operator=user_ref(operator) if operator else None,
         last_message_preview=preview,
         title=(
@@ -118,6 +122,8 @@ def dialog_detail(
     *,
     first_user_message: Message | None = None,
     has_attachment: bool = False,
+    is_processing: bool = False,
+    processing_error: str | None = None,
     feedback: DialogFeedback | None = None,
     candidate: KnowledgeCandidate | None = None,
     latest_draft: OperatorDraft | None = None,
@@ -129,6 +135,8 @@ def dialog_detail(
         owner=user,
         first_user_message=first_user_message,
         has_attachment=has_attachment,
+        is_processing=is_processing,
+        processing_error=processing_error,
         feedback=feedback,
         candidate=candidate,
     )

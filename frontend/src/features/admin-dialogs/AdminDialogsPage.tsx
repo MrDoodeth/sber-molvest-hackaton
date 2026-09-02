@@ -29,6 +29,8 @@ export default function AdminDialogsPage() {
   const dialogs = useQuery({
     queryKey: queryKeys.admin.dialogs(filters),
     queryFn: ({ signal }) => adminApi.dialogs(filters, signal),
+    refetchInterval: 2500,
+    refetchOnMount: "always",
   });
   const patchFilters = (patch: Record<string, string | undefined>) => {
     const next = new URLSearchParams(searchParams);

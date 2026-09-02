@@ -30,7 +30,7 @@ export interface AttachmentDto {
   messageId: string;
   fileName: string;
   mimeType: string;
-  sizeBytes?: number;
+  sizeBytes?: number | null;
   url?: string;
   extractedText?: string;
   visualSummary?: string;
@@ -66,6 +66,8 @@ export interface DialogSummary {
   status: DialogStatus;
   mode: DialogMode;
   confidence: number;
+  isProcessing: boolean;
+  processingError?: string | null;
   assignedOperator?: UserRef;
   lastMessagePreview?: string;
   title?: string;

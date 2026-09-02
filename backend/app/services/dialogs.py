@@ -30,6 +30,7 @@ from app.core.enums import (
     DialogMode,
     DialogStatus,
     MessageAuthor,
+    MessageProcessingStatus,
     PromptType,
     UserRole,
 )
@@ -136,19 +137,19 @@ class DialogService:
             )
             pending: list[tuple[uuid.UUID, uuid.UUID, DialogMode]] = []
             for dialog in dialogs:
-                trigger = await session.scalar(
-                    select(Message)
-                    .where(
-                        Message.dialog_id == dialog.id,
-                        Message.author_type == MessageAuthor.USER,
+                triggers = list(
+                    await session.scalars(
+                        select(Message)
+                        .where(
+                            Message.dialog_id == dialog.id,
+                            Message.author_type == MessageAuthor.USER,
+                        )
+                        .order_by(Message.created_at, Message.id)
                     )
-                    .order_by(Message.created_at.desc(), Message.id.desc())
-                    .limit(1)
                 )
-                if trigger is not None and not await self._turn_completed(
-                    session, trigger, dialog
-                ):
-                    pending.append((trigger.id, dialog.id, dialog.mode))
+                for trigger in triggers:
+                    if not await self._turn_completed(session, trigger, dialog):
+                        pending.append((trigger.id, dialog.id, dialog.mode))
         for message_id, dialog_id, mode in pending:
             self._schedule_processing(message_id, dialog_id, mode)
 
@@ -309,6 +310,10 @@ class DialogService:
                     dialog.status == DialogStatus.ACTIVE
                     and existing.author_type == MessageAuthor.USER
                 ):
+                    if existing.processing_status == MessageProcessingStatus.FAILED:
+                        existing.processing_status = MessageProcessingStatus.PENDING
+                        existing.processing_error = None
+                        await session.commit()
                     self._schedule_processing(existing.id, dialog_id, dialog.mode)
                 return message_dto(
                     existing, existing_attachments.get(existing.id, [])
@@ -334,6 +339,11 @@ class DialogService:
                 ),
                 text=normalized_text,
                 sources=[],
+                processing_status=(
+                    MessageProcessingStatus.PENDING
+                    if requester.role == UserRole.USER
+                    else None
+                ),
             )
             session.add(message)
             try:
@@ -629,6 +639,10 @@ class DialogService:
                     mode = dialog.mode
                     if await self._turn_completed(session, trigger, dialog):
                         return
+                    trigger.processing_status = MessageProcessingStatus.PROCESSING
+                    trigger.processing_error = None
+                    dialog.updated_at = datetime.now(UTC)
+                    await session.commit()
                     runtime_settings = await self._settings_service.get_runtime(session)
                     prompt_type = (
                         PromptType.USER_SUPPORT
@@ -781,6 +795,7 @@ class DialogService:
                                 started,
                                 runtime_settings,
                                 prompt_version,
+                                message_id,
                             )
                             return
                     else:
@@ -826,7 +841,11 @@ class DialogService:
 
                 if mode == DialogMode.AI_SUPPORT:
                     dto = await self._persist_assistant(
-                        dialog_id, generated_text, confidence, source_snapshot
+                        dialog_id,
+                        generated_text,
+                        confidence,
+                        source_snapshot,
+                        trigger_message_id=message_id,
                     )
                     await self._broker.publish(
                         user_dialog_channel(dialog_id),
@@ -871,6 +890,7 @@ class DialogService:
                         ),
                         None,
                         source_snapshot,
+                        trigger_message_id=message_id,
                     )
                     await self._broker.publish(
                         user_dialog_channel(dialog_id),
@@ -893,6 +913,9 @@ class DialogService:
                         "Unable to persist policy-safe response for message %s",
                         message_id,
                     )
+                    await self._mark_turn_failed(
+                        message_id, "Не удалось обработать сообщение"
+                    )
                     await self._broker.publish(
                         user_dialog_channel(dialog_id),
                         {
@@ -901,6 +924,11 @@ class DialogService:
                         },
                     )
             elif dialog_id is not None:
+                await self._mark_turn_failed(
+                    message_id,
+                    "GigaChat не может обработать запрос из-за "
+                    "тематических ограничений",
+                )
                 await self._broker.publish(
                     operator_dialog_channel(dialog_id),
                     {
@@ -912,6 +940,7 @@ class DialogService:
                     },
                 )
         except ProviderError as exc:
+            await self._mark_turn_failed(message_id, str(exc))
             if dialog_id is not None:
                 channel = (
                     user_dialog_channel(dialog_id)
@@ -923,6 +952,7 @@ class DialogService:
                 )
         except Exception:
             logger.exception("Dialog turn processing failed for message %s", message_id)
+            await self._mark_turn_failed(message_id, "Не удалось обработать сообщение")
             if dialog_id is not None:
                 channel = (
                     user_dialog_channel(dialog_id)
@@ -1015,6 +1045,7 @@ class DialogService:
         started: float,
         runtime_settings: RuntimeSettings,
         prompt_version: int,
+        trigger_message_id: uuid.UUID,
     ) -> None:
         async with self._session_factory() as session:
             dialog = await session.get(Dialog, dialog_id, with_for_update=True)
@@ -1034,6 +1065,11 @@ class DialogService:
                 sources=sources,
             )
             session.add(system_message)
+            await self._set_trigger_status(
+                session,
+                trigger_message_id,
+                MessageProcessingStatus.COMPLETED,
+            )
             await session.commit()
             dto = message_dto(system_message)
             summary = await self._summary(session, dialog, system_message)
@@ -1067,6 +1103,8 @@ class DialogService:
         text: str,
         confidence: float | None,
         sources: list[dict[str, object]],
+        *,
+        trigger_message_id: uuid.UUID | None = None,
     ) -> MessageDto:
         async with self._session_factory() as session:
             dialog = await session.get(Dialog, dialog_id, with_for_update=True)
@@ -1080,6 +1118,12 @@ class DialogService:
                 sources=sources,
             )
             session.add(message)
+            if trigger_message_id is not None:
+                await self._set_trigger_status(
+                    session,
+                    trigger_message_id,
+                    MessageProcessingStatus.COMPLETED,
+                )
             dialog.updated_at = datetime.now(UTC)
             await session.commit()
             return message_dto(message)
@@ -1099,6 +1143,12 @@ class DialogService:
                 )
             )
             if existing is not None:
+                await self._set_trigger_status(
+                    session,
+                    trigger_message_id,
+                    MessageProcessingStatus.COMPLETED,
+                )
+                await session.commit()
                 return draft_dto(existing)
             draft = OperatorDraft(
                 dialog_id=dialog_id,
@@ -1108,6 +1158,14 @@ class DialogService:
                 sources=sources,
             )
             session.add(draft)
+            await self._set_trigger_status(
+                session,
+                trigger_message_id,
+                MessageProcessingStatus.COMPLETED,
+            )
+            dialog = await session.get(Dialog, dialog_id)
+            if dialog is not None:
+                dialog.updated_at = datetime.now(UTC)
             try:
                 await session.commit()
             except IntegrityError:
@@ -1119,8 +1177,49 @@ class DialogService:
                 )
                 if existing is None:
                     raise
+                await self._set_trigger_status(
+                    session,
+                    trigger_message_id,
+                    MessageProcessingStatus.COMPLETED,
+                )
+                dialog = await session.get(Dialog, dialog_id)
+                if dialog is not None:
+                    dialog.updated_at = datetime.now(UTC)
+                await session.commit()
                 return draft_dto(existing)
             return draft_dto(draft)
+
+    @staticmethod
+    async def _set_trigger_status(
+        session: AsyncSession,
+        message_id: uuid.UUID,
+        status: MessageProcessingStatus,
+        error: str | None = None,
+    ) -> None:
+        trigger = await session.get(Message, message_id)
+        if trigger is None or trigger.author_type != MessageAuthor.USER:
+            return
+        trigger.processing_status = status
+        trigger.processing_error = error
+
+    async def _mark_turn_failed(self, message_id: uuid.UUID, error: str) -> None:
+        try:
+            async with self._session_factory() as session:
+                trigger = await session.get(Message, message_id)
+                if (
+                    trigger is None
+                    or trigger.author_type != MessageAuthor.USER
+                    or trigger.processing_status == MessageProcessingStatus.COMPLETED
+                ):
+                    return
+                trigger.processing_status = MessageProcessingStatus.FAILED
+                trigger.processing_error = error[:4000]
+                dialog = await session.get(Dialog, trigger.dialog_id)
+                if dialog is not None:
+                    dialog.updated_at = datetime.now(UTC)
+                await session.commit()
+        except Exception:
+            logger.exception("Unable to persist processing failure for %s", message_id)
 
     async def _record_metric(
         self,
@@ -1166,6 +1265,11 @@ class DialogService:
         trigger: Message,
         dialog: Dialog,
     ) -> bool:
+        if trigger.processing_status in {
+            MessageProcessingStatus.COMPLETED,
+            MessageProcessingStatus.FAILED,
+        }:
+            return True
         draft_id = await session.scalar(
             select(OperatorDraft.id)
             .where(OperatorDraft.trigger_message_id == trigger.id)
@@ -1185,6 +1289,17 @@ class DialogService:
         if assistant_id is not None:
             return True
         if dialog.mode == DialogMode.OPERATOR_SUPPORT:
+            operator_message_id = await session.scalar(
+                select(Message.id)
+                .where(
+                    Message.dialog_id == trigger.dialog_id,
+                    Message.author_type == MessageAuthor.OPERATOR,
+                    Message.created_at > trigger.created_at,
+                )
+                .limit(1)
+            )
+            if operator_message_id is not None:
+                return True
             escalation_id = await session.scalar(
                 select(Message.id)
                 .where(
@@ -1197,6 +1312,33 @@ class DialogService:
             )
             return escalation_id is not None
         return False
+
+    async def _processing_state(
+        self, session: AsyncSession, dialog: Dialog
+    ) -> tuple[bool, str | None]:
+        if dialog.status != DialogStatus.ACTIVE:
+            return False, None
+        trigger = await session.scalar(
+            select(Message)
+            .where(
+                Message.dialog_id == dialog.id,
+                Message.author_type == MessageAuthor.USER,
+            )
+            .order_by(Message.created_at.desc(), Message.id.desc())
+            .limit(1)
+        )
+        if trigger is None:
+            return False, None
+        if trigger.processing_status == MessageProcessingStatus.FAILED:
+            return False, trigger.processing_error
+        if await self._turn_completed(session, trigger, dialog):
+            return False, None
+        if trigger.processing_status in {
+            MessageProcessingStatus.PENDING,
+            MessageProcessingStatus.PROCESSING,
+        }:
+            return True, None
+        return True, None
 
     async def _detail(
         self,
@@ -1250,6 +1392,7 @@ class DialogService:
                 .order_by(OperatorDraft.created_at.desc(), OperatorDraft.id.desc())
                 .limit(1)
             )
+        is_processing, processing_error = await self._processing_state(session, dialog)
         return dialog_detail(
             dialog,
             owner,
@@ -1257,6 +1400,8 @@ class DialogService:
             operator,
             first_user_message=first_user_message,
             has_attachment=has_attachment,
+            is_processing=is_processing,
+            processing_error=processing_error,
             feedback=feedback,
             candidate=candidate,
             latest_draft=latest_draft,
@@ -1275,6 +1420,7 @@ class DialogService:
                 .order_by(Message.created_at.desc(), Message.id.desc())
                 .limit(1)
             )
+        is_processing, processing_error = await self._processing_state(session, dialog)
         operator = (
             await session.get(User, dialog.assigned_operator_id)
             if dialog.assigned_operator_id
@@ -1312,6 +1458,8 @@ class DialogService:
             owner=owner,
             first_user_message=first_user_message,
             has_attachment=has_attachment,
+            is_processing=is_processing,
+            processing_error=processing_error,
             feedback=feedback,
             candidate=candidate,
         )

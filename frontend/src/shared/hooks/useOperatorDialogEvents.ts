@@ -38,16 +38,32 @@ export function useOperatorDialogEvents(dialogId?: string) {
       switch (event.type) {
         case "user_message":
           appendPersistedMessage(queryClient, dialogId, event.message);
+          setDraftText("");
+          setDraft(undefined);
+          setTriggerMessageId(event.message.id);
+          setConfidence(undefined);
+          setEventError(undefined);
+          queryClient.setQueryData<OperatorDialogDetailDto>(queryKeys.dialog.detail(dialogId), (current) =>
+            current ? { ...current, isProcessing: true, processingError: undefined } : current,
+          );
           void queryClient.invalidateQueries({ queryKey: queryKeys.dialog.detail(dialogId) });
           void queryClient.invalidateQueries({ queryKey: queryKeys.operator.queues() });
           break;
         case "confidence":
+          setEventError(undefined);
           setConfidence(event.value);
           setTriggerMessageId(event.triggerMessageId);
+          queryClient.setQueryData<OperatorDialogDetailDto>(queryKeys.dialog.detail(dialogId), (current) =>
+            current ? { ...current, isProcessing: true, processingError: undefined } : current,
+          );
           break;
         case "draft_token":
+          setEventError(undefined);
           if (triggerMessageId !== event.triggerMessageId) setDraftText("");
           setTriggerMessageId(event.triggerMessageId);
+          queryClient.setQueryData<OperatorDialogDetailDto>(queryKeys.dialog.detail(dialogId), (current) =>
+            current ? { ...current, isProcessing: true, processingError: undefined } : current,
+          );
           startTransition(() => setDraftText((current) => `${current ?? ""}${event.token}`));
           break;
         case "draft_done":
@@ -56,12 +72,22 @@ export function useOperatorDialogEvents(dialogId?: string) {
           setConfidence(event.draft.confidence);
           setTriggerMessageId(event.draft.triggerMessageId);
           queryClient.setQueryData<OperatorDialogDetailDto>(queryKeys.dialog.detail(dialogId), (current) =>
-            current ? { ...current, latestDraft: event.draft } : current,
+            current
+              ? {
+                  ...current,
+                  latestDraft: event.draft,
+                  isProcessing: false,
+                  processingError: undefined,
+                }
+              : current,
           );
           queryClient.setQueryData(queryKeys.operator.draft(dialogId), event.draft);
           break;
         case "dialog_closed":
           setDraftText(null);
+          queryClient.setQueryData<OperatorDialogDetailDto>(queryKeys.dialog.detail(dialogId), (current) =>
+            current ? { ...current, isProcessing: false, processingError: undefined, status: "closed" } : current,
+          );
           void queryClient.invalidateQueries({ queryKey: queryKeys.dialog.detail(dialogId) });
           void queryClient.invalidateQueries({ queryKey: queryKeys.dialog.messages(dialogId) });
           void queryClient.invalidateQueries({ queryKey: queryKeys.operator.queues() });
@@ -69,6 +95,10 @@ export function useOperatorDialogEvents(dialogId?: string) {
         case "error":
           setEventError(event.message);
           setDraftText(null);
+          queryClient.setQueryData<OperatorDialogDetailDto>(queryKeys.dialog.detail(dialogId), (current) =>
+            current ? { ...current, isProcessing: false, processingError: event.message } : current,
+          );
+          void queryClient.invalidateQueries({ queryKey: queryKeys.operator.queues() });
           break;
       }
     },
