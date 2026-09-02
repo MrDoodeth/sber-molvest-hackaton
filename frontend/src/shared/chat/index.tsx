@@ -129,7 +129,7 @@ function authorMeta(message: MessageDto) {
 export function MessageBubble({ message, showConfidence = false, showAttachmentAnalysis = false }: { message: MessageDto; showConfidence?: boolean; showAttachmentAnalysis?: boolean }) {
   if (message.authorType === "system") {
     return (
-      <div className="my-3 flex justify-center">
+      <div className="message-enter my-3 flex justify-center">
         <div className="max-w-xl rounded-full border border-dashed border-stone-300 bg-stone-50 px-4 py-2 text-center text-xs font-semibold text-stone-600">
           {message.text}
           {showConfidence && message.confidence !== undefined && <span className="ml-2 text-stone-400">Confidence {formatPercent(message.confidence)}</span>}
@@ -140,7 +140,7 @@ export function MessageBubble({ message, showConfidence = false, showAttachmentA
   const meta = authorMeta(message);
   const Icon = meta.icon;
   return (
-    <article className={cn("flex", meta.align)} data-message-id={message.id}>
+    <article className={cn("message-enter flex", meta.align)} data-message-id={message.id}>
       <div className={cn("max-w-[88%] rounded-2xl px-4 py-3 sm:max-w-[74%]", meta.bubble, message.authorType === "user" ? "rounded-br-md" : "rounded-bl-md")}>
         <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-[0.08em] opacity-70">
           <Icon className="size-3.5" aria-hidden="true" />
@@ -160,7 +160,7 @@ export function MessageBubble({ message, showConfidence = false, showAttachmentA
 
 export function StreamingMessage({ text, label = "GigaChat формирует ответ" }: { text: string; label?: string }) {
   return (
-    <div className="flex justify-start" aria-live="polite">
+    <div className="message-enter flex justify-start" aria-live="polite">
       <div className="max-w-[88%] rounded-2xl rounded-bl-md border border-indigo-100 bg-white px-4 py-3 text-stone-800 shadow-sm sm:max-w-[74%]">
         <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-[0.08em] text-indigo-600">
           <Bot className="size-3.5" /> {label}

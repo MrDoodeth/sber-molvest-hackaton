@@ -2,10 +2,11 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, MessageCircleMore, RotateCcw } from "lucide-react";
 import { useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import type { DialogDetailDto } from "../../api/types";
+import type { DialogDetailDto, DialogSummary, MessageDto } from "../../api/types";
 import { dialogsApi } from "../../api/dialogs";
 import { queryKeys } from "../../api/queryKeys";
 import { ChatComposer, MessageList } from "../../shared/chat";
+import type { MessageInfiniteData } from "../../shared/hooks/messageCache";
 import { Button, EmptyState, useToast } from "../../shared/ui";
 import {
   getErrorMessage,
@@ -24,15 +25,31 @@ export default function NewUserDialogPage() {
   const [attachment, setAttachment] = useState<File>();
   const [attachmentError, setAttachmentError] = useState<string>();
   const [failedAttempt, setFailedAttempt] = useState<SendAttempt>();
+  const [optimisticMessage, setOptimisticMessage] = useState<MessageDto>();
 
   const startDialog = useMutation({
     mutationFn: async (attempt: SendAttempt) => {
       const dialog = createdDialogRef.current ?? await dialogsApi.create();
       createdDialogRef.current = dialog;
-      await dialogsApi.sendMessage(dialog.id, attempt);
-      return { dialog, hasScreenshot: Boolean(attempt.attachment?.type.startsWith("image/")) };
+      const message = await dialogsApi.sendMessage(dialog.id, attempt);
+      return { dialog, message, hasScreenshot: Boolean(attempt.attachment?.type.startsWith("image/")) };
     },
-    onSuccess: ({ dialog, hasScreenshot }) => {
+    onSuccess: ({ dialog, message, hasScreenshot }) => {
+      const hydratedDialog: DialogDetailDto = {
+        ...dialog,
+        title: message.text || undefined,
+        lastMessagePreview: message.text || undefined,
+        hasAttachment: message.attachments.length > 0,
+        updatedAt: message.createdAt,
+      };
+      queryClient.setQueryData(queryKeys.dialog.detail(dialog.id), hydratedDialog);
+      queryClient.setQueryData<MessageInfiniteData>(queryKeys.dialog.messages(dialog.id), {
+        pages: [{ items: [message], nextCursor: null }],
+        pageParams: [undefined],
+      });
+      queryClient.setQueryData<DialogSummary[]>(queryKeys.user.dialogs(), (current) =>
+        current ? [hydratedDialog, ...current.filter((item) => item.id !== dialog.id)] : current,
+      );
       void queryClient.invalidateQueries({ queryKey: queryKeys.user.dialogs() });
       navigate(`/user/dialogs/${dialog.id}`, {
         replace: true,
@@ -40,6 +57,9 @@ export default function NewUserDialogPage() {
       });
     },
     onError: (error, attempt) => {
+      setOptimisticMessage(undefined);
+      setText(attempt.text);
+      setAttachment(attempt.attachment);
       setFailedAttempt(attempt);
       toast(getErrorMessage(error), "error");
       requestAnimationFrame(() => textareaRef.current?.focus());
@@ -48,6 +68,25 @@ export default function NewUserDialogPage() {
 
   const submitAttempt = (attempt: SendAttempt) => {
     if (startDialog.isPending) return;
+    setOptimisticMessage({
+      id: attempt.clientMessageId,
+      dialogId: "new",
+      authorType: "user",
+      text: attempt.text,
+      attachments: attempt.attachment ? [{
+        id: `local-${attempt.clientMessageId}`,
+        messageId: attempt.clientMessageId,
+        fileName: attempt.attachment.name,
+        mimeType: attempt.attachment.type,
+        sizeBytes: attempt.attachment.size,
+      }] : [],
+      sources: [],
+      createdAt: new Date().toISOString(),
+    });
+    setText("");
+    setAttachment(undefined);
+    setAttachmentError(undefined);
+    setFailedAttempt(undefined);
     startDialog.mutate(attempt);
   };
   const submit = () => {
@@ -75,7 +114,8 @@ export default function NewUserDialogPage() {
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto">
           <MessageList
-            messages={[]}
+            messages={optimisticMessage ? [optimisticMessage] : []}
+            streamingText={optimisticMessage ? "" : null}
             empty={<EmptyState icon={<MessageCircleMore className="size-8" />} title="Начните разговор" description="Опишите проблему с 1С. Можно приложить один скриншот или документ." />}
           />
         </div>

@@ -39,8 +39,16 @@ export default function UserDialogPage() {
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     enabled: Boolean(dialogId),
   });
-  const events = useUserDialogEvents(dialogId, () => setAwaitingTerminal(false));
+  const events = useUserDialogEvents(dialogId, () => {
+    initialTurn.current = null;
+    setAwaitingTerminal(false);
+  });
   const allMessages = messages.data ? mergePersistedMessages(...messages.data.pages.map((page) => page.items)) : [];
+  const latestUserMessageIndex = allMessages.map((message) => message.authorType).lastIndexOf("user");
+  const hasPersistedTerminalMessage = latestUserMessageIndex >= 0 && allMessages
+    .slice(latestUserMessageIndex + 1)
+    .some((message) => message.authorType === "assistant" || message.authorType === "system");
+  const initialTurnCompleted = Boolean(initialTurn.current?.pendingTurn) && hasPersistedTerminalMessage;
 
   const send = useMutation({
     mutationFn: (attempt: SendAttempt) => dialogsApi.sendMessage(dialogId, attempt),
@@ -92,6 +100,13 @@ export default function UserDialogPage() {
     navigate(location.pathname, { replace: true, state: null });
   }, [location.pathname, navigate]);
 
+  useEffect(() => {
+    if (!initialTurn.current?.pendingTurn || (!initialTurnCompleted && detail.data?.mode !== "operator_support")) return;
+    initialTurn.current = null;
+    setAwaitingTerminal(false);
+    events.cancelTurn();
+  }, [detail.data?.mode, events, initialTurnCompleted]);
+
   const submitAttempt = (attempt: SendAttempt) => {
     if (!detail.data || send.isPending) return;
     if (detail.data.mode === "ai_support") {
@@ -113,9 +128,12 @@ export default function UserDialogPage() {
   };
 
   if (!dialogId) return <ErrorState title="Диалог не найден" />;
-  const visiblePhase = awaitingTerminal && events.phase === "idle"
-    ? initialTurn.current?.hasScreenshot ? "vision" : "thinking"
-    : events.phase;
+  const pendingTurn = awaitingTerminal && detail.data?.mode === "ai_support" && !initialTurnCompleted;
+  const visiblePhase = !pendingTurn
+    ? "idle"
+    : events.phase === "idle"
+      ? initialTurn.current?.hasScreenshot ? "vision" : "thinking"
+      : events.phase;
   return (
     <div className="flex h-[calc(100vh-65px)] min-h-[32rem]">
       <UserDialogsNav />
@@ -134,7 +152,7 @@ export default function UserDialogPage() {
                 <p className="mt-1 truncate text-xs text-stone-500">{detail.data.mode === "operator_support" ? detail.data.assignedOperator ? `На связи ${detail.data.assignedOperator.displayName}` : "Ожидаем свободного специалиста" : "GigaChat использует проверенные материалы базы знаний"}</p>
               </div>
               {detail.data.status === "active" && detail.data.mode === "ai_support" && allMessages.some((message) => message.authorType === "assistant") && (
-                <Button variant="secondary" size="sm" disabled={awaitingTerminal || send.isPending} onClick={() => setCloseOpen(true)}><CheckCircle2 className="size-4" /><span className="hidden sm:inline">Завершить обращение</span></Button>
+                <Button variant="secondary" size="sm" disabled={pendingTurn || send.isPending} onClick={() => setCloseOpen(true)}><CheckCircle2 className="size-4" /><span className="hidden sm:inline">Завершить обращение</span></Button>
               )}
             </header>
             <div className="min-h-0 flex-1 overflow-y-auto">
@@ -143,14 +161,14 @@ export default function UserDialogPage() {
               {messages.data && (
                 <MessageList
                   messages={allMessages}
-                  streamingText={events.phase === "streaming" || events.phase === "thinking" ? events.assistantText : null}
+                  streamingText={visiblePhase === "streaming" || visiblePhase === "thinking" ? events.assistantText ?? "" : null}
                   topAction={messages.hasNextPage ? <Button variant="ghost" size="sm" className="mx-auto" pending={messages.isFetchingNextPage} onClick={() => void messages.fetchNextPage()}><RotateCcw className="size-3.5" /> Загрузить ранние сообщения</Button> : undefined}
                   empty={<EmptyState title="Начните разговор" description="Опишите проблему с 1С. Можно приложить один скриншот или документ." />}
                 />
               )}
             </div>
             {visiblePhase === "vision" && <div className="flex items-center gap-2 border-t border-indigo-100 bg-indigo-50 px-4 py-2 text-xs font-semibold text-indigo-800"><ImageIcon className="size-4 animate-pulse" /> Анализирую изображение…</div>}
-            {visiblePhase === "thinking" && awaitingTerminal && <div className="flex items-center justify-between gap-3 border-t border-molvest-100 bg-molvest-50 px-4 py-2 text-xs font-semibold text-molvest-800"><span>Проверяю базу знаний и уверенность ответа…</span>{events.confidence !== undefined && <Badge tone="success">Контекст найден</Badge>}</div>}
+            {visiblePhase === "thinking" && pendingTurn && <div className="flex items-center justify-between gap-3 border-t border-molvest-100 bg-molvest-50 px-4 py-2 text-xs font-semibold text-molvest-800"><span>Проверяю базу знаний и уверенность ответа…</span>{events.confidence !== undefined && <Badge tone="success">Контекст найден</Badge>}</div>}
             {events.phase === "error" && <div className="flex items-center gap-2 border-t border-red-100 bg-red-50 px-4 py-2 text-xs font-semibold text-red-800"><XCircle className="size-4" /> {events.eventError || "Не удалось завершить обработку сообщения. Можно повторить отправку."}</div>}
             {failedAttempt && (
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
@@ -165,13 +183,13 @@ export default function UserDialogPage() {
                 onChange={updateText}
                 onSend={submit}
                 pending={send.isPending}
-                disabled={detail.data.mode === "ai_support" && awaitingTerminal}
+                disabled={detail.data.mode === "ai_support" && pendingTurn}
                 attachment={attachment}
                 attachmentError={attachmentError}
                 onAttachmentChange={updateAttachment}
                 onAttachmentError={setAttachmentError}
                 placeholder={detail.data.mode === "operator_support" ? "Сообщение специалисту…" : "Опишите вопрос по 1С…"}
-                footer={detail.data.mode === "ai_support" && awaitingTerminal ? <span className="flex items-center gap-1 font-semibold text-molvest-700"><LockKeyhole className="size-3" /> Дождитесь ответа</span> : undefined}
+                footer={detail.data.mode === "ai_support" && pendingTurn ? <span className="flex items-center gap-1 font-semibold text-molvest-700"><LockKeyhole className="size-3" /> Дождитесь ответа</span> : undefined}
               />
             ) : (
               <FeedbackPanel dialog={detail.data} pending={feedback.isPending} onFeedback={(verdict) => feedback.mutate(verdict)} />
