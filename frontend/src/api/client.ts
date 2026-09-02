@@ -19,16 +19,27 @@ interface ErrorShape {
   detail?: unknown;
 }
 
+const PAYLOAD_TOO_LARGE_MESSAGE = "Файл слишком большой. Изображение — до 15 МБ, документ — до 40 МБ.";
+
+function isHtmlError(value: string): boolean {
+  return /<\/?(?:html|head|body|title|h1)\b/i.test(value);
+}
+
 export function normalizeApiError(payload: unknown, status: number, statusText = ""): ApiError {
   const root = isRecord(payload) ? (payload as ErrorShape) : undefined;
   const detail = root && isRecord(root.detail) ? (root.detail as ErrorShape) : undefined;
   const source = detail ?? root;
   const stringDetail = root && typeof root.detail === "string" ? root.detail : undefined;
   const code = typeof source?.code === "string" ? source.code : `HTTP_${status}`;
-  const message =
+  const rawMessage =
     typeof source?.message === "string"
       ? source.message
       : stringDetail ?? (typeof payload === "string" ? payload : undefined) ?? statusText ?? "Не удалось выполнить запрос";
+  const message = status === 413
+    ? PAYLOAD_TOO_LARGE_MESSAGE
+    : isHtmlError(rawMessage)
+      ? "Не удалось выполнить запрос"
+      : rawMessage;
   const details = source?.details ?? (root && Array.isArray(root.detail) ? root.detail : undefined);
 
   return new ApiError(code, message || "Не удалось выполнить запрос", status, details);

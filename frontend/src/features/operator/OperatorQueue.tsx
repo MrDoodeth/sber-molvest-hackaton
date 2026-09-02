@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Clock3, Image as ImageIcon, Inbox, UserRound } from "lucide-react";
+import { Clock3, Inbox, UserRound } from "lucide-react";
 import { useState } from "react";
 import { operatorApi } from "../../api/operator";
 import { queryKeys } from "../../api/queryKeys";
@@ -54,11 +54,8 @@ export default function OperatorQueue({
               "mb-1 w-full rounded-2xl border p-3.5 text-left transition",
               selectedId === dialog.id ? "border-sky-200 bg-sky-50 shadow-sm" : "border-transparent hover:border-stone-200 hover:bg-stone-50",
             )}
-          >
-            <div className="flex items-start justify-between gap-2">
+            >
               <p className="text-sm font-bold leading-5 text-stone-900">{truncateTitle(dialog.title || dialog.lastMessagePreview || "Обращение пользователя")}</p>
-              {dialog.hasAttachment && <ImageIcon className="mt-0.5 size-4 shrink-0 text-indigo-500" aria-label="Есть вложение" />}
-            </div>
             <div className="mt-3 flex items-center gap-1.5 text-xs text-stone-500"><UserRound className="size-3.5" /> {dialog.user?.displayName || "Пользователь"}</div>
             <div className="mt-2 flex items-center justify-between gap-2">
               <span className="flex items-center gap-1 text-[11px] text-stone-400"><Clock3 className="size-3" /> {formatRelativeDate(dialog.escalatedAt || dialog.updatedAt)}</span>

@@ -134,24 +134,51 @@ class GigaChatProvider:
                 messages.append(HumanMessage(content=turn.text))
 
         current_text = request.current_text or "Проанализируй приложенный файл."
-        if request.attachment_file_id:
-            block_type = (
-                "image"
-                if (request.attachment_mime_type or "").startswith("image/")
-                else "file"
-            )
-            # GigaChat's file_id blocks extend LangChain's current TypedDict union.
-            content_blocks: list[Any] = [
-                {"type": "text", "text": current_text},
-                {
-                    "type": block_type,
-                    "file_id": request.attachment_file_id,
-                },
-            ]
+        if request.attachment_file_ids:
+            # GigaChat accepts one image per message, but up to ten images in a
+            # request. Keep the first image with the question and put the rest
+            # into separate user messages.
+            content_blocks: list[Any] = [{"type": "text", "text": current_text}]
+            additional_images: list[str] = []
+            first_image_added = False
+            for index, file_id in enumerate(request.attachment_file_ids):
+                mime_type = (
+                    request.attachment_mime_types[index]
+                    if index < len(request.attachment_mime_types)
+                    else ""
+                )
+                block_type = "image" if mime_type.startswith("image/") else "file"
+                block = {"type": block_type, "file_id": file_id}
+                if block_type == "image" and first_image_added:
+                    additional_images.append(file_id)
+                else:
+                    content_blocks.append(block)
+                    first_image_added = first_image_added or block_type == "image"
             messages.append(HumanMessage(content_blocks=content_blocks))
+            for file_id in additional_images:
+                messages.append(
+                    HumanMessage(
+                        content_blocks=[
+                            {
+                                "type": "text",
+                                "text": (
+                                    "Дополнительное изображение к текущему вопросу."
+                                ),
+                            },
+                            {"type": "image", "file_id": file_id},
+                        ]
+                    )
+                )
         else:
             messages.append(HumanMessage(content=current_text))
         return messages
+
+    @staticmethod
+    def _has_text_attachments(request: GenerationRequest) -> bool:
+        return any(
+            not mime_type.startswith("image/")
+            for mime_type in request.attachment_mime_types
+        )
 
     async def _structured(
         self,
@@ -322,15 +349,19 @@ class GigaChatProvider:
         try:
             request_id = uuid.uuid4()
             with self._request_headers(session_id, request_id):
-                async for chunk in client.astream(
-                    messages,
-                    config={
+                stream_kwargs: dict[str, Any] = {
+                    "config": {
                         "metadata": {
                             "session_id": str(session_id),
                             "request_id": str(request_id),
                         }
-                    },
-                ):
+                    }
+                }
+                if self._has_text_attachments(request):
+                    # Text files use the built-in get_file_content function;
+                    # without auto mode GigaChat only reads the first one.
+                    stream_kwargs["function_call"] = "auto"
+                async for chunk in client.astream(messages, **stream_kwargs):
                     metadata = getattr(chunk, "response_metadata", None) or {}
                     if metadata.get("finish_reason") == "blacklist":
                         raise ProviderPolicyError()

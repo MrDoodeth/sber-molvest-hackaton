@@ -91,8 +91,8 @@ class GenerationRequest:
     history: tuple[ChatTurn, ...] = ()
     evidence: tuple[Evidence, ...] = ()
     threshold: float = 0.8
-    attachment_file_id: str | None = None
-    attachment_mime_type: str | None = None
+    attachment_file_ids: tuple[str, ...] = ()
+    attachment_mime_types: tuple[str, ...] = ()
     screenshot_extracted_text: str | None = None
     screenshot_visual_summary: str | None = None
 

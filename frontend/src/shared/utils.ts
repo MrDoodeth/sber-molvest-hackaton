@@ -70,25 +70,31 @@ export function mergePersistedMessages(...groups: MessageDto[][]): MessageDto[] 
 export interface SendAttempt {
   clientMessageId: string;
   text: string;
-  attachment?: File;
+  attachments: File[];
 }
 
-export function createSendAttempt(text: string, attachment?: File): SendAttempt {
+export function createSendAttempt(text: string, attachments: File[] = []): SendAttempt {
   return {
     clientMessageId: crypto.randomUUID(),
     text,
-    attachment,
+    attachments,
   };
 }
 
 export function retryOrCreateSendAttempt(
   text: string,
-  attachment: File | undefined,
+  attachments: File[] = [],
   failedAttempt?: SendAttempt,
 ): SendAttempt {
   const normalized = text.trim();
-  if (failedAttempt?.text === normalized && failedAttempt.attachment === attachment) return failedAttempt;
-  return createSendAttempt(normalized, attachment);
+  if (
+    failedAttempt?.text === normalized
+    && failedAttempt.attachments.length === attachments.length
+    && failedAttempt.attachments.every((file, index) => file === attachments[index])
+  ) {
+    return failedAttempt;
+  }
+  return createSendAttempt(normalized, attachments);
 }
 
 export function canShowFeedback(dialog: Pick<DialogDetailDto, "status" | "feedback">): boolean {

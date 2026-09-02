@@ -5,11 +5,11 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { dialogsApi } from "../../api/dialogs";
 import { queryKeys } from "../../api/queryKeys";
 import type { FeedbackVerdict } from "../../api/types";
-import { ChatComposer, DialogStatusBadge, MessageList } from "../../shared/chat";
+import { ChatComposer, DialogStatusBadge, MessageList, isRuntimeImage } from "../../shared/chat";
 import { appendPersistedMessage } from "../../shared/hooks/messageCache";
 import { useUserDialogEvents } from "../../shared/hooks/useUserDialogEvents";
-import { Badge, Button, ConfirmDialog, EmptyState, ErrorState, PageLoader, useToast } from "../../shared/ui";
-import { getErrorMessage, mergePersistedMessages, retryOrCreateSendAttempt, truncateTitle, type SendAttempt } from "../../shared/utils";
+import { Button, ConfirmDialog, EmptyState, ErrorState, PageLoader, useToast } from "../../shared/ui";
+import { createSendAttempt, getErrorMessage, mergePersistedMessages, truncateTitle, type SendAttempt } from "../../shared/utils";
 import { FeedbackPanel } from "./FeedbackPanel";
 import UserDialogsNav from "./UserDialogsNav";
 
@@ -22,9 +22,8 @@ export default function UserDialogPage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const initialTurn = useRef(location.state as { pendingTurn?: boolean; hasScreenshot?: boolean } | null);
   const [text, setText] = useState("");
-  const [attachment, setAttachment] = useState<File>();
+  const [attachments, setAttachments] = useState<File[]>([]);
   const [attachmentError, setAttachmentError] = useState<string>();
-  const [failedAttempt, setFailedAttempt] = useState<SendAttempt>();
   const [awaitingTerminal, setAwaitingTerminal] = useState(Boolean(initialTurn.current?.pendingTurn));
   const [closeOpen, setCloseOpen] = useState(false);
   const detail = useQuery({
@@ -54,9 +53,8 @@ export default function UserDialogPage() {
     mutationFn: (attempt: SendAttempt) => dialogsApi.sendMessage(dialogId, attempt),
     onSuccess: (message) => {
       appendPersistedMessage(queryClient, dialogId, message);
-      setFailedAttempt(undefined);
       setText("");
-      setAttachment(undefined);
+      setAttachments([]);
       setAttachmentError(undefined);
       if (detail.data?.mode === "operator_support") setAwaitingTerminal(false);
       void queryClient.invalidateQueries({ queryKey: queryKeys.user.dialogs() });
@@ -64,8 +62,10 @@ export default function UserDialogPage() {
       requestAnimationFrame(() => textareaRef.current?.focus());
     },
     onError: (error, attempt) => {
-      setFailedAttempt(attempt);
       setAwaitingTerminal(false);
+      setText(attempt.text);
+      setAttachments([]);
+      setAttachmentError(undefined);
       events.cancelTurn();
       toast(getErrorMessage(error), "error");
       requestAnimationFrame(() => textareaRef.current?.focus());
@@ -111,20 +111,12 @@ export default function UserDialogPage() {
     if (!detail.data || send.isPending) return;
     if (detail.data.mode === "ai_support") {
       setAwaitingTerminal(true);
-      events.beginTurn(Boolean(attempt.attachment?.type.startsWith("image/")));
+      events.beginTurn(attempt.attachments.some(isRuntimeImage));
     }
     send.mutate(attempt);
   };
   const submit = () => {
-    submitAttempt(retryOrCreateSendAttempt(text, attachment, failedAttempt));
-  };
-  const updateText = (value: string) => {
-    setText(value);
-    if (failedAttempt && value.trim() !== failedAttempt.text) setFailedAttempt(undefined);
-  };
-  const updateAttachment = (file?: File) => {
-    setAttachment(file);
-    if (failedAttempt && file !== failedAttempt.attachment) setFailedAttempt(undefined);
+    submitAttempt(createSendAttempt(text.trim(), attachments));
   };
 
   if (!dialogId) return <ErrorState title="Диалог не найден" />;
@@ -163,30 +155,24 @@ export default function UserDialogPage() {
                   messages={allMessages}
                   streamingText={visiblePhase === "streaming" || visiblePhase === "thinking" ? events.assistantText ?? "" : null}
                   topAction={messages.hasNextPage ? <Button variant="ghost" size="sm" className="mx-auto" pending={messages.isFetchingNextPage} onClick={() => void messages.fetchNextPage()}><RotateCcw className="size-3.5" /> Загрузить ранние сообщения</Button> : undefined}
-                  empty={<EmptyState title="Начните разговор" description="Опишите проблему с 1С. Можно приложить один скриншот или документ." />}
+                  empty={<EmptyState title="Начните разговор" description="Опишите проблему с 1С. Можно приложить до 10 файлов." />}
                 />
               )}
             </div>
             {visiblePhase === "vision" && <div className="flex items-center gap-2 border-t border-indigo-100 bg-indigo-50 px-4 py-2 text-xs font-semibold text-indigo-800"><ImageIcon className="size-4 animate-pulse" /> Анализирую изображение…</div>}
-            {visiblePhase === "thinking" && pendingTurn && <div className="flex items-center justify-between gap-3 border-t border-molvest-100 bg-molvest-50 px-4 py-2 text-xs font-semibold text-molvest-800"><span>Проверяю базу знаний и уверенность ответа…</span>{events.confidence !== undefined && <Badge tone="success">Контекст найден</Badge>}</div>}
-            {events.phase === "error" && <div className="flex items-center gap-2 border-t border-red-100 bg-red-50 px-4 py-2 text-xs font-semibold text-red-800"><XCircle className="size-4" /> {events.eventError || "Не удалось завершить обработку сообщения. Можно повторить отправку."}</div>}
-            {failedAttempt && (
-              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
-                <span><strong>Отправка не подтверждена.</strong> Повтор использует тот же идентификатор и не создаст дубль.</span>
-                <Button size="sm" variant="secondary" pending={send.isPending} onClick={() => submitAttempt(failedAttempt)}><RotateCcw className="size-3.5" /> Повторить</Button>
-              </div>
-            )}
+            {visiblePhase === "thinking" && pendingTurn && <div className="flex items-center gap-3 border-t border-molvest-100 bg-molvest-50 px-4 py-2 text-xs font-semibold text-molvest-800"><span>Проверяю базу знаний и уверенность ответа…</span></div>}
+            {events.phase === "error" && <div className="flex items-center gap-2 border-t border-red-100 bg-red-50 px-4 py-2 text-xs font-semibold text-red-800"><XCircle className="size-4" /> {events.eventError || "Не удалось обработать сообщение."}</div>}
             {detail.data.status === "active" ? (
               <ChatComposer
                 ref={textareaRef}
                 value={text}
-                onChange={updateText}
+                onChange={setText}
                 onSend={submit}
                 pending={send.isPending}
                 disabled={detail.data.mode === "ai_support" && pendingTurn}
-                attachment={attachment}
+                attachments={attachments}
                 attachmentError={attachmentError}
-                onAttachmentChange={updateAttachment}
+                onAttachmentChange={setAttachments}
                 onAttachmentError={setAttachmentError}
                 placeholder={detail.data.mode === "operator_support" ? "Сообщение специалисту…" : "Опишите вопрос по 1С…"}
                 footer={detail.data.mode === "ai_support" && pendingTurn ? <span className="flex items-center gap-1 font-semibold text-molvest-700"><LockKeyhole className="size-3" /> Дождитесь ответа</span> : undefined}

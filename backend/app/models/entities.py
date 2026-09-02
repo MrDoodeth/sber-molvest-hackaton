@@ -180,7 +180,6 @@ class Message(UUIDPrimaryKey, Base):
 
 class Attachment(UUIDPrimaryKey, Base):
     __tablename__ = "attachments"
-    __table_args__ = (UniqueConstraint("message_id", name="uq_attachment_message"),)
 
     message_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("messages.id", ondelete="CASCADE"), index=True

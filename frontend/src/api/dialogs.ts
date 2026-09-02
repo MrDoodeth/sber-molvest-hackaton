@@ -12,7 +12,7 @@ import type {
 export interface SendMessageInput {
   clientMessageId: string;
   text: string;
-  attachment?: File;
+  attachments?: File[];
 }
 
 export const dialogsApi = {
@@ -30,7 +30,7 @@ export const dialogsApi = {
     const form = new FormData();
     form.set("client_message_id", input.clientMessageId);
     form.set("text", input.text);
-    if (input.attachment) form.set("attachment", input.attachment);
+    input.attachments?.forEach((attachment) => form.append("attachments", attachment));
     return apiRequest<MessageDto>(`/api/dialogs/${dialogId}/messages`, {
       method: "POST",
       body: form,

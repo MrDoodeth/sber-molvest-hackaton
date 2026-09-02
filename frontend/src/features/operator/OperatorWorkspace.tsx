@@ -26,6 +26,8 @@ export default function OperatorWorkspace() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [mobilePane, setMobilePane] = useState<MobilePane>(dialogId ? "chat" : "queue");
   const [text, setText] = useState("");
+  const [attachments, setAttachments] = useState<File[]>([]);
+  const [attachmentError, setAttachmentError] = useState<string>();
   const [failedAttempt, setFailedAttempt] = useState<SendAttempt>();
   const [closeOpen, setCloseOpen] = useState(false);
   const me = useQuery({ queryKey: queryKeys.me(), queryFn: ({ signal }) => authApi.me(signal) });
@@ -75,6 +77,8 @@ export default function OperatorWorkspace() {
     onSuccess: (message) => {
       appendPersistedMessage(queryClient, dialogId!, message);
       setText("");
+      setAttachments([]);
+      setAttachmentError(undefined);
       setFailedAttempt(undefined);
       void queryClient.invalidateQueries({ queryKey: queryKeys.dialog.detail(dialogId!) });
       requestAnimationFrame(() => textareaRef.current?.focus());
@@ -111,9 +115,13 @@ export default function OperatorWorkspace() {
   };
   const submit = () => {
     const normalized = text.trim();
-    if (!normalized) return;
-    const attempt = retryOrCreateSendAttempt(normalized, undefined, failedAttempt);
+    if (!normalized && !attachments.length) return;
+    const attempt = retryOrCreateSendAttempt(normalized, attachments, failedAttempt);
     submitAttempt(attempt);
+  };
+  const updateAttachments = (files: File[]) => {
+    setAttachments(files);
+    setFailedAttempt(undefined);
   };
   const insertDraft = (value: string) => {
     setText(value);
@@ -171,7 +179,7 @@ export default function OperatorWorkspace() {
               {events.eventError && <div className="border-t border-red-100 bg-red-50 px-4 py-2 text-xs font-semibold text-red-800">{events.eventError}</div>}
               {failedAttempt && <div className="flex items-center justify-between gap-3 border-t border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-900"><span>Ответ не подтверждён. Retry сохранит тот же UUID.</span><Button size="sm" variant="secondary" pending={send.isPending} onClick={() => submitAttempt(failedAttempt)}>Повторить</Button></div>}
               {detail.data.status === "active" && isAssignedToMe && (
-                <ChatComposer ref={textareaRef} value={text} onChange={(value) => { setText(value); if (failedAttempt?.text !== value.trim()) setFailedAttempt(undefined); }} onSend={submit} pending={send.isPending} placeholder="Ответ пользователю…" footer={<button type="button" className="font-semibold text-indigo-600 lg:hidden" onClick={() => setMobilePane("draft")}>Открыть AI черновик</button>} />
+                <ChatComposer ref={textareaRef} value={text} onChange={(value) => { setText(value); if (failedAttempt?.text !== value.trim()) setFailedAttempt(undefined); }} onSend={submit} pending={send.isPending} placeholder="Ответ пользователю…" attachments={attachments} attachmentError={attachmentError} onAttachmentChange={updateAttachments} onAttachmentError={setAttachmentError} footer={<button type="button" className="font-semibold text-indigo-600 lg:hidden" onClick={() => setMobilePane("draft")}>Открыть AI черновик</button>} />
               )}
               {detail.data.status === "active" && !isAssignedToMe && !detail.data.assignedOperator && <div className="border-t border-stone-200 bg-white p-4 text-center text-sm text-stone-500"><Headphones className="mr-2 inline size-4" />Возьмите тикет в работу, чтобы ответить пользователю.</div>}
               {detail.data.status === "closed" && (

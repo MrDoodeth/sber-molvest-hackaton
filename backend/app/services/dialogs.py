@@ -253,7 +253,7 @@ class DialogService:
         dialog_id: uuid.UUID,
         client_message_id: uuid.UUID,
         text: str,
-        upload: ValidatedUpload | None,
+        uploads: list[ValidatedUpload],
     ) -> tuple[MessageDto, bool]:
         async with self.dialog_lock(dialog_id):
             return await self._persist_message_locked(
@@ -261,7 +261,7 @@ class DialogService:
                 dialog_id=dialog_id,
                 client_message_id=client_message_id,
                 text=text,
-                upload=upload,
+                uploads=uploads,
             )
 
     async def _persist_message_locked(
@@ -271,10 +271,10 @@ class DialogService:
         dialog_id: uuid.UUID,
         client_message_id: uuid.UUID,
         text: str,
-        upload: ValidatedUpload | None,
+        uploads: list[ValidatedUpload],
     ) -> tuple[MessageDto, bool]:
         normalized_text = text.strip()
-        if not normalized_text and upload is None:
+        if not normalized_text and not uploads:
             raise UnprocessableError("Сообщение или вложение обязательно")
         if len(normalized_text) > 20_000:
             raise UnprocessableError("Текст сообщения слишком длинный")
@@ -302,13 +302,17 @@ class DialogService:
                     raise ConflictError(
                         "client_message_id уже использован другим автором"
                     )
-                attachments = await self._attachments_by_message(session, [existing.id])
+                existing_attachments = await self._attachments_by_message(
+                    session, [existing.id]
+                )
                 if (
                     dialog.status == DialogStatus.ACTIVE
                     and existing.author_type == MessageAuthor.USER
                 ):
                     self._schedule_processing(existing.id, dialog_id, dialog.mode)
-                return message_dto(existing, attachments.get(existing.id, [])), False
+                return message_dto(
+                    existing, existing_attachments.get(existing.id, [])
+                ), False
 
             self._assert_send_access(requester, dialog)
 
@@ -353,35 +357,41 @@ class DialogService:
                     raise ConflictError(
                         "client_message_id уже использован другим автором"
                     ) from exc
-                attachments = await self._attachments_by_message(session, [existing.id])
-                return message_dto(existing, attachments.get(existing.id, [])), False
+                existing_attachments = await self._attachments_by_message(
+                    session, [existing.id]
+                )
+                return message_dto(
+                    existing, existing_attachments.get(existing.id, [])
+                ), False
 
-            attachment: Attachment | None = None
+            stored_keys: list[str] = []
+            attachments: list[Attachment] = []
             try:
-                if upload is not None:
+                for upload in uploads:
                     storage_key = await self._attachment_service.store_runtime(
                         message.id, upload
                     )
-                    attachment = Attachment(
-                        message_id=message.id,
-                        storage_key=storage_key,
-                        mime_type=upload.mime_type,
+                    attachments.append(
+                        Attachment(
+                            message_id=message.id,
+                            storage_key=storage_key,
+                            mime_type=upload.mime_type,
+                        )
                     )
-                    session.add(attachment)
+                    stored_keys.append(storage_key)
+                session.add_all(attachments)
                 dialog.updated_at = datetime.now(UTC)
                 await session.commit()
             except Exception as exc:
                 await session.rollback()
-                if attachment is not None:
-                    await self._attachment_service.cleanup_local(
-                        [attachment.storage_key]
-                    )
+                if stored_keys:
+                    await self._attachment_service.cleanup_local(stored_keys)
                 if isinstance(exc, StorageError):
                     raise ServiceUnavailableError(
                         "Хранилище вложений временно недоступно"
                     ) from exc
                 raise
-            dto = message_dto(message, [attachment] if attachment else [])
+            dto = message_dto(message, attachments)
             mode = dialog.mode
 
         payload = dto.model_dump(mode="json")
@@ -644,66 +654,81 @@ class DialogService:
                         session, [item.id for item in previous] + [message_id]
                     )
                     trigger_attachments = all_attachments.get(message_id, [])
-                    attachment = trigger_attachments[0] if trigger_attachments else None
                     history = self._history(previous, all_attachments)
 
                 async with self._gigachat_semaphore:
-                    if attachment is not None and attachment.gigachat_file_id is None:
-                        content = await self._attachment_service.storage.get(
-                            attachment.storage_key
-                        )
-                        file_id = await self._llm_provider.upload_file(
-                            PurePosixPath(attachment.storage_key).name,
-                            content,
-                            runtime_settings.active_model,
-                            dialog_id,
-                        )
-                        async with self._session_factory() as session:
-                            persisted = await session.get(Attachment, attachment.id)
-                            if persisted is None:
-                                await self._llm_provider.delete_file(
-                                    file_id,
-                                    runtime_settings.active_model,
-                                    dialog_id,
-                                )
-                                return
-                            persisted.gigachat_file_id = file_id
-                            await session.commit()
-                        attachment.gigachat_file_id = file_id
-
-                    if (
-                        attachment is not None
-                        and attachment.mime_type in {"image/png", "image/jpeg"}
-                        and (
-                            attachment.extracted_text is None
-                            or attachment.visual_summary is None
-                        )
-                    ):
+                    attachment_file_ids: list[str] = []
+                    attachment_mime_types: list[str] = []
+                    for attachment in trigger_attachments:
                         if attachment.gigachat_file_id is None:
+                            content = await self._attachment_service.storage.get(
+                                attachment.storage_key
+                            )
+                            file_id = await self._llm_provider.upload_file(
+                                PurePosixPath(attachment.storage_key).name,
+                                content,
+                                runtime_settings.active_model,
+                                dialog_id,
+                            )
+                            async with self._session_factory() as session:
+                                persisted = await session.get(Attachment, attachment.id)
+                                if persisted is None:
+                                    await self._llm_provider.delete_file(
+                                        file_id,
+                                        runtime_settings.active_model,
+                                        dialog_id,
+                                    )
+                                    return
+                                persisted.gigachat_file_id = file_id
+                                await session.commit()
+                            attachment.gigachat_file_id = file_id
+                        if attachment.gigachat_file_id is not None:
+                            attachment_file_ids.append(attachment.gigachat_file_id)
+                            attachment_mime_types.append(attachment.mime_type)
+
+                    vision_attachment = next(
+                        (
+                            item
+                            for item in trigger_attachments
+                            if item.mime_type in {"image/png", "image/jpeg"}
+                        ),
+                        None,
+                    )
+                    if vision_attachment is not None and (
+                        vision_attachment.extracted_text is None
+                        or vision_attachment.visual_summary is None
+                    ):
+                        if vision_attachment.gigachat_file_id is None:
                             raise ProviderServerError("GigaChat file_id не сохранён")
                         analysis = await self._llm_provider.analyze_screenshot(
-                            attachment.gigachat_file_id,
+                            vision_attachment.gigachat_file_id,
                             trigger.text,
                             runtime_settings.active_model,
                             dialog_id,
                         )
                         async with self._session_factory() as session:
-                            persisted = await session.get(Attachment, attachment.id)
+                            persisted = await session.get(
+                                Attachment, vision_attachment.id
+                            )
                             if persisted is not None:
                                 persisted.extracted_text = analysis.extracted_text
                                 persisted.visual_summary = analysis.visual_summary
                                 await session.commit()
-                        attachment.extracted_text = analysis.extracted_text
-                        attachment.visual_summary = analysis.visual_summary
+                        vision_attachment.extracted_text = analysis.extracted_text
+                        vision_attachment.visual_summary = analysis.visual_summary
 
                     search_context = self._context_builder.build_embedding_context(
                         current_text=trigger.text,
                         history=history,
                         screenshot_extracted_text=(
-                            attachment.extracted_text if attachment else None
+                            vision_attachment.extracted_text
+                            if vision_attachment
+                            else None
                         ),
                         screenshot_visual_summary=(
-                            attachment.visual_summary if attachment else None
+                            vision_attachment.visual_summary
+                            if vision_attachment
+                            else None
                         ),
                         settings=runtime_settings,
                     )
@@ -716,17 +741,17 @@ class DialogService:
                         current_text=trigger.text,
                         history=history,
                         evidence=evidence,
-                        attachment_file_id=(
-                            attachment.gigachat_file_id if attachment else None
-                        ),
-                        attachment_mime_type=(
-                            attachment.mime_type if attachment else None
-                        ),
+                        attachment_file_ids=attachment_file_ids,
+                        attachment_mime_types=attachment_mime_types,
                         screenshot_extracted_text=(
-                            attachment.extracted_text if attachment else None
+                            vision_attachment.extracted_text
+                            if vision_attachment
+                            else None
                         ),
                         screenshot_visual_summary=(
-                            attachment.visual_summary if attachment else None
+                            vision_attachment.visual_summary
+                            if vision_attachment
+                            else None
                         ),
                         settings=runtime_settings,
                     )

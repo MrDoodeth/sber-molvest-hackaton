@@ -9,10 +9,16 @@ from app.core.config import Settings
 from app.core.errors import UnprocessableError
 from app.providers.interfaces import LLMProvider, ObjectStorage
 
+MAX_RUNTIME_ATTACHMENTS = 10
+MAX_RUNTIME_IMAGE_REQUEST_BYTES = 80 * 1024 * 1024
+
 RUNTIME_TYPES: dict[str, set[str]] = {
     ".png": {"image/png"},
     ".jpg": {"image/jpeg"},
     ".jpeg": {"image/jpeg"},
+    ".tif": {"image/tiff"},
+    ".tiff": {"image/tiff"},
+    ".bmp": {"image/bmp"},
     ".txt": {"text/plain"},
     ".doc": {"application/msword"},
     ".docx": {
@@ -49,6 +55,10 @@ class ValidatedUpload:
     @property
     def is_screenshot(self) -> bool:
         return self.mime_type in {"image/png", "image/jpeg"}
+
+    @property
+    def is_image(self) -> bool:
+        return self.mime_type.startswith("image/")
 
 
 def safe_file_name(raw_name: str | None) -> str:
@@ -115,7 +125,9 @@ class AttachmentService:
     async def store_runtime(
         self, message_id: uuid.UUID, upload: ValidatedUpload
     ) -> str:
-        key = f"attachments/{message_id}/{upload.file_name}"
+        # Keep the original filename in the last path segment while allowing
+        # multiple files with the same name in one message.
+        key = f"attachments/{message_id}/{uuid.uuid4()}/{upload.file_name}"
         await self.storage.put(key, upload.data, upload.mime_type)
         return key
 

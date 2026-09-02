@@ -27,8 +27,14 @@ from app.contracts.schemas import (
     MessageDto,
     MessagePage,
 )
+from app.core.errors import UnprocessableError
 from app.models import User
-from app.services.attachments import validate_upload
+from app.services.attachments import (
+    MAX_RUNTIME_ATTACHMENTS,
+    MAX_RUNTIME_IMAGE_REQUEST_BYTES,
+    ValidatedUpload,
+    validate_upload,
+)
 from app.services.broker import user_dialog_channel
 from app.services.container import ApplicationContainer
 
@@ -86,8 +92,9 @@ async def list_messages(
     status_code=201,
     summary="Persist a message and schedule AI processing",
     description=(
-        "Multipart command. `text` may be empty only when one attachment is "
-        "present. A repeated `(dialog_id, client_message_id)` returns the same "
+        "Multipart command. `text` may be empty only when attachments are "
+        "present. Up to 10 attachments can be sent in one message. A repeated "
+        "`(dialog_id, client_message_id)` returns the same "
         "persisted message with `200` and does not duplicate generation."
     ),
     responses={
@@ -105,37 +112,54 @@ async def send_message(
     ),
     text: str = Form(
         default="",
-        description="Message text; optional only when attachment is present.",
+        description="Message text; optional only when an attachment is present.",
     ),
-    attachment: UploadFile | None = File(
+    attachments: list[UploadFile] | None = File(
         default=None,
         description=(
-            "At most one runtime image (PNG/JPEG, 15 MB) or supported document (40 MB)."
+            "Up to 10 runtime attachments. Images are limited to 15 MB each; "
+            "supported documents to 40 MB each."
         ),
     ),
     user: User = Depends(get_current_user),
     container: ApplicationContainer = Depends(get_container),
 ) -> MessageDto:
-    validated = None
-    if attachment is not None:
+    uploaded_files = attachments or []
+    if len(uploaded_files) > MAX_RUNTIME_ATTACHMENTS:
+        raise UnprocessableError(
+            "Можно прикрепить не более 10 файлов",
+            {"max_files": MAX_RUNTIME_ATTACHMENTS},
+        )
+
+    validated: list[ValidatedUpload] = []
+    if uploaded_files:
         read_limit = max(
             container.settings.runtime_image_max_bytes,
             container.settings.runtime_document_max_bytes,
         )
-        data = await attachment.read(read_limit + 1)
-        validated = validate_upload(
-            file_name=attachment.filename,
-            content_type=attachment.content_type,
-            data=data,
-            permanent=False,
-            settings=container.settings,
-        )
+        for attachment in uploaded_files:
+            data = await attachment.read(read_limit + 1)
+            validated.append(
+                validate_upload(
+                    file_name=attachment.filename,
+                    content_type=attachment.content_type,
+                    data=data,
+                    permanent=False,
+                    settings=container.settings,
+                )
+            )
+        image_bytes = sum(len(item.data) for item in validated if item.is_image)
+        if image_bytes >= MAX_RUNTIME_IMAGE_REQUEST_BYTES:
+            raise UnprocessableError(
+                "Суммарный размер изображений не должен превышать 80 МБ",
+                {"max_bytes": MAX_RUNTIME_IMAGE_REQUEST_BYTES},
+            )
     message, created = await container.dialogs.persist_message(
         requester=user,
         dialog_id=dialog_id,
         client_message_id=client_message_id,
         text=text,
-        upload=validated,
+        uploads=validated,
     )
     response.status_code = 201 if created else 200
     return message

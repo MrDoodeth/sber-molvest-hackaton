@@ -1,16 +1,16 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, MessageCircleMore, RotateCcw } from "lucide-react";
+import { ArrowLeft, MessageCircleMore } from "lucide-react";
 import { useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { DialogDetailDto, DialogSummary, MessageDto } from "../../api/types";
 import { dialogsApi } from "../../api/dialogs";
 import { queryKeys } from "../../api/queryKeys";
-import { ChatComposer, MessageList } from "../../shared/chat";
+import { ChatComposer, MessageList, isRuntimeImage } from "../../shared/chat";
 import type { MessageInfiniteData } from "../../shared/hooks/messageCache";
-import { Button, EmptyState, useToast } from "../../shared/ui";
+import { EmptyState, useToast } from "../../shared/ui";
 import {
+  createSendAttempt,
   getErrorMessage,
-  retryOrCreateSendAttempt,
   type SendAttempt,
 } from "../../shared/utils";
 import UserDialogsNav from "./UserDialogsNav";
@@ -22,9 +22,8 @@ export default function NewUserDialogPage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const createdDialogRef = useRef<DialogDetailDto>();
   const [text, setText] = useState("");
-  const [attachment, setAttachment] = useState<File>();
+  const [attachments, setAttachments] = useState<File[]>([]);
   const [attachmentError, setAttachmentError] = useState<string>();
-  const [failedAttempt, setFailedAttempt] = useState<SendAttempt>();
   const [optimisticMessage, setOptimisticMessage] = useState<MessageDto>();
 
   const startDialog = useMutation({
@@ -32,7 +31,7 @@ export default function NewUserDialogPage() {
       const dialog = createdDialogRef.current ?? await dialogsApi.create();
       createdDialogRef.current = dialog;
       const message = await dialogsApi.sendMessage(dialog.id, attempt);
-      return { dialog, message, hasScreenshot: Boolean(attempt.attachment?.type.startsWith("image/")) };
+      return { dialog, message, hasScreenshot: attempt.attachments.some(isRuntimeImage) };
     },
     onSuccess: ({ dialog, message, hasScreenshot }) => {
       const hydratedDialog: DialogDetailDto = {
@@ -59,8 +58,8 @@ export default function NewUserDialogPage() {
     onError: (error, attempt) => {
       setOptimisticMessage(undefined);
       setText(attempt.text);
-      setAttachment(attempt.attachment);
-      setFailedAttempt(attempt);
+      setAttachments([]);
+      setAttachmentError(undefined);
       toast(getErrorMessage(error), "error");
       requestAnimationFrame(() => textareaRef.current?.focus());
     },
@@ -73,32 +72,23 @@ export default function NewUserDialogPage() {
       dialogId: "new",
       authorType: "user",
       text: attempt.text,
-      attachments: attempt.attachment ? [{
-        id: `local-${attempt.clientMessageId}`,
+      attachments: attempt.attachments.map((file, index) => ({
+        id: `local-${attempt.clientMessageId}-${index}`,
         messageId: attempt.clientMessageId,
-        fileName: attempt.attachment.name,
-        mimeType: attempt.attachment.type,
-        sizeBytes: attempt.attachment.size,
-      }] : [],
+        fileName: file.name,
+        mimeType: file.type,
+        sizeBytes: file.size,
+      })),
       sources: [],
       createdAt: new Date().toISOString(),
     });
     setText("");
-    setAttachment(undefined);
+    setAttachments([]);
     setAttachmentError(undefined);
-    setFailedAttempt(undefined);
     startDialog.mutate(attempt);
   };
   const submit = () => {
-    submitAttempt(retryOrCreateSendAttempt(text, attachment, failedAttempt));
-  };
-  const updateText = (value: string) => {
-    setText(value);
-    if (failedAttempt && value.trim() !== failedAttempt.text) setFailedAttempt(undefined);
-  };
-  const updateAttachment = (file?: File) => {
-    setAttachment(file);
-    if (failedAttempt && file !== failedAttempt.attachment) setFailedAttempt(undefined);
+    submitAttempt(createSendAttempt(text.trim(), attachments));
   };
 
   return (
@@ -116,24 +106,18 @@ export default function NewUserDialogPage() {
           <MessageList
             messages={optimisticMessage ? [optimisticMessage] : []}
             streamingText={optimisticMessage ? "" : null}
-            empty={<EmptyState icon={<MessageCircleMore className="size-8" />} title="Начните разговор" description="Опишите проблему с 1С. Можно приложить один скриншот или документ." />}
+            empty={<EmptyState icon={<MessageCircleMore className="size-8" />} title="Начните разговор" description="Опишите проблему с 1С. Можно приложить до 10 файлов." />}
           />
         </div>
-        {failedAttempt && (
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
-            <span><strong>Отправка не подтверждена.</strong> Повтор использует тот же идентификатор и не создаст дубль сообщения.</span>
-            <Button size="sm" variant="secondary" pending={startDialog.isPending} onClick={() => submitAttempt(failedAttempt)}><RotateCcw className="size-3.5" /> Повторить</Button>
-          </div>
-        )}
         <ChatComposer
           ref={textareaRef}
           value={text}
-          onChange={updateText}
+          onChange={setText}
           onSend={submit}
           pending={startDialog.isPending}
-          attachment={attachment}
+          attachments={attachments}
           attachmentError={attachmentError}
-          onAttachmentChange={updateAttachment}
+          onAttachmentChange={setAttachments}
           onAttachmentError={setAttachmentError}
           placeholder="Опишите вопрос по 1С…"
         />
