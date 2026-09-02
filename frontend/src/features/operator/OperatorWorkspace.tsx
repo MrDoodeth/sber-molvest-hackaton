@@ -8,7 +8,7 @@ import type { CandidateRef } from "../../api/types";
 import { Bot, CheckCircle2, Clipboard, Headphones, Inbox, MessagesSquare, PanelRight, RotateCcw, Sparkles, UserCheck } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ChatComposer, DialogStatusBadge, MessageList, MessageSources, StreamingMessage } from "../../shared/chat";
+import { ChatComposer, DialogStatusBadge, MarkdownContent, MessageList, MessageSources, StreamingMessage } from "../../shared/chat";
 import { appendPersistedMessage } from "../../shared/hooks/messageCache";
 import { useOperatorDialogEvents } from "../../shared/hooks/useOperatorDialogEvents";
 import { Badge, Button, ConfirmDialog, EmptyState, ErrorState, PageLoader, Tabs, useToast } from "../../shared/ui";
@@ -210,7 +210,7 @@ export default function OperatorWorkspace() {
             {dialogId && !isGeneratingDraft && draftText && events.draftText === null && (
               <div className="rounded-2xl border border-indigo-100 bg-white p-4 shadow-sm">
                 {triggerMessage && <div className="mb-4 rounded-xl bg-stone-50 p-3 text-xs leading-5 text-stone-600"><strong className="block text-[10px] uppercase tracking-wider text-stone-400">К сообщению пользователя</strong><span className="mt-1 line-clamp-3 block">{triggerMessage.text || "Сообщение с вложением"}</span></div>}
-                <p className="whitespace-pre-wrap text-sm leading-6 text-stone-800">{draftText}</p>
+                <MarkdownContent text={draftText} className="text-stone-800" />
                 {draftConfidence !== undefined && <div className="mt-4"><Badge tone={draftConfidence < 0.5 ? "danger" : "giga"}>Confidence {formatPercent(draftConfidence)}</Badge></div>}
                 <MessageSources sources={currentDraft?.sources ?? []} />
                 <div className="mt-5 flex flex-wrap gap-2">

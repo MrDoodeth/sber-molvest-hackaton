@@ -7,6 +7,23 @@ import {
   useRef,
   useState,
 } from "react";
+import Markdown from "react-markdown";
+import type { Components } from "react-markdown";
+import { PrismLight as SyntaxHighlighter } from "react-syntax-highlighter";
+import bash from "react-syntax-highlighter/dist/esm/languages/prism/bash";
+import css from "react-syntax-highlighter/dist/esm/languages/prism/css";
+import javascript from "react-syntax-highlighter/dist/esm/languages/prism/javascript";
+import json from "react-syntax-highlighter/dist/esm/languages/prism/json";
+import markdown from "react-syntax-highlighter/dist/esm/languages/prism/markdown";
+import markup from "react-syntax-highlighter/dist/esm/languages/prism/markup";
+import python from "react-syntax-highlighter/dist/esm/languages/prism/python";
+import shellSession from "react-syntax-highlighter/dist/esm/languages/prism/shell-session";
+import sql from "react-syntax-highlighter/dist/esm/languages/prism/sql";
+import tsx from "react-syntax-highlighter/dist/esm/languages/prism/tsx";
+import typescript from "react-syntax-highlighter/dist/esm/languages/prism/typescript";
+import yaml from "react-syntax-highlighter/dist/esm/languages/prism/yaml";
+import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
+import remarkGfm from "remark-gfm";
 import {
   Bot,
   ChevronDown,
@@ -39,6 +56,99 @@ const IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"];
 const DOCUMENT_EXTENSIONS = [".txt", ".doc", ".docx", ".pdf", ".epub", ".ppt", ".pptx", ".xlsx"];
 const EMPTY_ATTACHMENTS: File[] = [];
 export const RUNTIME_ATTACHMENT_ACCEPT = [...IMAGE_EXTENSIONS, ...DOCUMENT_EXTENSIONS].join(",");
+
+SyntaxHighlighter.registerLanguage("bash", bash);
+SyntaxHighlighter.registerLanguage("css", css);
+SyntaxHighlighter.registerLanguage("javascript", javascript);
+SyntaxHighlighter.registerLanguage("json", json);
+SyntaxHighlighter.registerLanguage("markdown", markdown);
+SyntaxHighlighter.registerLanguage("markup", markup);
+SyntaxHighlighter.registerLanguage("python", python);
+SyntaxHighlighter.registerLanguage("shell-session", shellSession);
+SyntaxHighlighter.registerLanguage("sql", sql);
+SyntaxHighlighter.registerLanguage("tsx", tsx);
+SyntaxHighlighter.registerLanguage("typescript", typescript);
+SyntaxHighlighter.registerLanguage("yaml", yaml);
+SyntaxHighlighter.alias("bash", ["sh", "shell"]);
+SyntaxHighlighter.alias("javascript", ["js"]);
+SyntaxHighlighter.alias("json", ["jsonc"]);
+SyntaxHighlighter.alias("markup", ["html", "xml"]);
+SyntaxHighlighter.alias("markdown", ["md"]);
+SyntaxHighlighter.alias("python", ["py"]);
+SyntaxHighlighter.alias("typescript", ["ts"]);
+SyntaxHighlighter.alias("yaml", ["yml"]);
+
+const markdownPlugins = [remarkGfm];
+const highlightLanguages = new Set([
+  "bash",
+  "css",
+  "javascript",
+  "json",
+  "markdown",
+  "markup",
+  "python",
+  "shell-session",
+  "sql",
+  "tsx",
+  "typescript",
+  "yaml",
+]);
+const languageAliases: Record<string, string> = {
+  html: "markup",
+  js: "javascript",
+  jsonc: "json",
+  md: "markdown",
+  py: "python",
+  sh: "bash",
+  shell: "bash",
+  ts: "typescript",
+  xml: "markup",
+  yml: "yaml",
+};
+
+function normalizeCodeLanguage(className?: string): string | undefined {
+  const match = /(?:^|\s)language-([^\s]+)/.exec(className ?? "");
+  if (!match) return undefined;
+  const language = languageAliases[match[1].toLowerCase()] ?? match[1].toLowerCase();
+  return highlightLanguages.has(language) ? language : undefined;
+}
+
+const markdownComponents: Components = {
+  a({ children, node, ...props }) {
+    void node;
+    return <a {...props} target="_blank" rel="noreferrer" className="font-semibold text-indigo-700 underline decoration-indigo-200 underline-offset-2 hover:decoration-indigo-700">{children}</a>;
+  },
+  code({ children, className, node, ...props }) {
+    void node;
+    const language = normalizeCodeLanguage(className);
+    if (!language) {
+      return <code {...props} className={cn("rounded-md bg-stone-100 px-1.5 py-0.5 font-mono text-[0.9em]", className)}>{children}</code>;
+    }
+    return (
+      <SyntaxHighlighter
+        language={language}
+        style={oneDark}
+        PreTag="div"
+        customStyle={{ margin: 0, borderRadius: "0.75rem", padding: "0.875rem", fontSize: "0.78rem", lineHeight: 1.6 }}
+        codeTagProps={{ className: "font-mono" }}
+      >
+        {String(children).replace(/\n$/, "")}
+      </SyntaxHighlighter>
+    );
+  },
+  input({ node, ...props }) {
+    void node;
+    return <input {...props} disabled className="mr-1.5 align-middle accent-indigo-600" />;
+  },
+};
+
+export function MarkdownContent({ text, className }: { text: string; className?: string }) {
+  return (
+    <div className={cn("markdown-body", className)}>
+      <Markdown remarkPlugins={markdownPlugins} skipHtml components={markdownComponents}>{text}</Markdown>
+    </div>
+  );
+}
 
 export function isRuntimeImage(file: File): boolean {
   const extension = `.${file.name.split(".").pop()?.toLowerCase() ?? ""}`;
@@ -169,7 +279,7 @@ export function MessageBubble({ message, showConfidence = false, showAttachmentA
           {meta.label}
           {showConfidence && message.confidence !== undefined && <span>· {formatPercent(message.confidence)}</span>}
         </div>
-        <p className="whitespace-pre-wrap break-words text-sm leading-6">{message.text}</p>
+        {message.authorType === "assistant" || message.authorType === "operator" ? <MarkdownContent text={message.text} /> : <p className="whitespace-pre-wrap break-words text-sm leading-6">{message.text}</p>}
         {message.attachments.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-2.5">
             {message.attachments.map((attachment) => (
@@ -191,7 +301,7 @@ export function StreamingMessage({ text, label = "GigaChat формирует о
         <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-[0.08em] text-indigo-600">
           <Bot className="size-3.5" /> {label}
         </div>
-        {text ? <p className="whitespace-pre-wrap break-words text-sm leading-6">{text}<span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-indigo-500 align-middle" /></p> : <div className="flex gap-1 py-2"><i className="size-1.5 animate-bounce rounded-full bg-indigo-400" /><i className="size-1.5 animate-bounce rounded-full bg-indigo-400 [animation-delay:120ms]" /><i className="size-1.5 animate-bounce rounded-full bg-indigo-400 [animation-delay:240ms]" /></div>}
+        {text ? <><MarkdownContent text={text} /><span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-indigo-500 align-middle" aria-hidden="true" /></> : <div className="flex gap-1 py-2"><i className="size-1.5 animate-bounce rounded-full bg-indigo-400" /><i className="size-1.5 animate-bounce rounded-full bg-indigo-400 [animation-delay:120ms]" /><i className="size-1.5 animate-bounce rounded-full bg-indigo-400 [animation-delay:240ms]" /></div>}
       </div>
     </div>
   );

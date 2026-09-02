@@ -45,7 +45,6 @@ export default function UserDialogsNav({ mobile = false }: { mobile?: boolean })
               <p className="text-sm font-bold leading-5 text-molvest-950">{truncateTitle(dialog.title || dialog.lastMessagePreview || "Новое обращение")}</p>
               <span className="shrink-0 text-[10px] text-stone-400">{formatRelativeDate(dialog.updatedAt)}</span>
             </div>
-            {dialog.lastMessagePreview && dialog.title && <p className="mt-1.5 line-clamp-2 text-xs leading-5 text-stone-500">{dialog.lastMessagePreview}</p>}
           </NavLink>
         ))}
       </nav>

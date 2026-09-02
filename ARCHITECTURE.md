@@ -3853,6 +3853,11 @@ streamingDraftText
 
 Не вызываем React Query `setQueryData()` на каждый token.
 
+Текст assistant/draft рендерится через `react-markdown` с `remark-gfm`. Блоки
+кода передаются в `PrismLight` из `react-syntax-highlighter` с явным набором
+зарегистрированных языков. Raw HTML от модели не включается (`skipHtml`), так
+как ответ модели является недоверенным пользовательским контентом.
+
 На:
 
 ```text
@@ -3906,7 +3911,13 @@ attachments   # repeated, максимум 10
 
 `client_message_id = UUID` нужен для idempotency/retry.
 
-Backend возвращает persisted user `Message` сразу, а GigaChat processing идёт дальше через SSE. Состояние trigger-message (`pending / processing / completed / failed`) хранится в БД, поэтому после reload frontend восстанавливает placeholder или показывает сохранённую ошибку даже при потерянном SSE-событии. Списки и открытые панели дополнительно обновляются polling-запросами.
+Backend возвращает persisted user `Message` сразу, а GigaChat processing запускается
+через FastAPI `BackgroundTasks` после отправки HTTP-ответа и идёт дальше через SSE.
+Так новый route успевает подключить `EventSource` до первого token event. Состояние
+trigger-message (`pending / processing / completed / failed`) хранится в БД, поэтому
+после reload frontend восстанавливает placeholder или показывает сохранённую ошибку
+даже при потерянном SSE-событии. Списки и открытые панели дополнительно обновляются
+polling-запросами.
 
 ### 20.2 Operator
 

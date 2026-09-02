@@ -68,6 +68,7 @@ from app.services.broker import (
     user_dialog_channel,
 )
 from app.services.context import ContextBuilder
+from app.services.model_output import ModelOutputStreamFilter
 from app.services.rag import RAGService
 from app.services.settings import PromptService, RuntimeSettings, SettingsService
 from app.services.tasks import TaskSupervisor
@@ -255,6 +256,7 @@ class DialogService:
         client_message_id: uuid.UUID,
         text: str,
         uploads: list[ValidatedUpload],
+        defer_processing: bool = False,
     ) -> tuple[MessageDto, bool]:
         async with self.dialog_lock(dialog_id):
             return await self._persist_message_locked(
@@ -263,6 +265,7 @@ class DialogService:
                 client_message_id=client_message_id,
                 text=text,
                 uploads=uploads,
+                defer_processing=defer_processing,
             )
 
     async def _persist_message_locked(
@@ -273,6 +276,7 @@ class DialogService:
         client_message_id: uuid.UUID,
         text: str,
         uploads: list[ValidatedUpload],
+        defer_processing: bool,
     ) -> tuple[MessageDto, bool]:
         normalized_text = text.strip()
         if not normalized_text and not uploads:
@@ -314,7 +318,8 @@ class DialogService:
                         existing.processing_status = MessageProcessingStatus.PENDING
                         existing.processing_error = None
                         await session.commit()
-                    self._schedule_processing(existing.id, dialog_id, dialog.mode)
+                    if not defer_processing:
+                        self._schedule_processing(existing.id, dialog_id, dialog.mode)
                 return message_dto(
                     existing, existing_attachments.get(existing.id, [])
                 ), False
@@ -411,13 +416,28 @@ class DialogService:
                     operator_dialog_channel(dialog_id),
                     {"type": "user_message", "message": payload},
                 )
-            self._schedule_processing(message.id, dialog_id, mode)
+            if not defer_processing:
+                self._schedule_processing(message.id, dialog_id, mode)
         else:
             await self._broker.publish(
                 user_dialog_channel(dialog_id),
                 {"type": "operator_message", "message": payload},
             )
         return dto, True
+
+    async def schedule_processing(self, message_id: uuid.UUID) -> None:
+        """Schedule a persisted user turn after its HTTP response is sent."""
+        async with self._session_factory() as session:
+            message = await session.get(Message, message_id)
+            if message is None or message.author_type != MessageAuthor.USER:
+                return
+            dialog = await session.get(Dialog, message.dialog_id)
+            if dialog is None or dialog.status != DialogStatus.ACTIVE:
+                return
+            if await self._turn_completed(session, message, dialog):
+                return
+            mode = dialog.mode
+        self._schedule_processing(message_id, message.dialog_id, mode)
 
     async def operator_queue(self, operator: User, scope: str) -> list[DialogSummary]:
         if operator.role != UserRole.OPERATOR:
@@ -808,7 +828,7 @@ class DialogService:
                             },
                         )
 
-                    chunks: list[str] = []
+                    output_filter = ModelOutputStreamFilter()
                     usage: ProviderUsage | None = None
                     async for chunk in self._llm_provider.stream_text(
                         generation_request,
@@ -820,22 +840,24 @@ class DialogService:
                             usage = chunk.usage
                         if not chunk.text:
                             continue
-                        chunks.append(chunk.text)
+                        visible_text = output_filter.push(chunk.text)
+                        if not visible_text:
+                            continue
                         if mode == DialogMode.AI_SUPPORT:
                             await self._broker.publish(
                                 user_dialog_channel(dialog_id),
-                                {"type": "assistant_token", "token": chunk.text},
+                                {"type": "assistant_token", "token": visible_text},
                             )
                         else:
                             await self._broker.publish(
                                 operator_dialog_channel(dialog_id),
                                 {
                                     "type": "draft_token",
-                                    "token": chunk.text,
+                                    "token": visible_text,
                                     "triggerMessageId": str(message_id),
                                 },
                             )
-                    generated_text = "".join(chunks).strip()
+                    generated_text = output_filter.final()
                     if not generated_text:
                         raise ProviderServerError("GigaChat вернул пустой ответ")
 

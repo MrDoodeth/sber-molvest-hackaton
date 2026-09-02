@@ -5,6 +5,7 @@ from urllib.parse import quote
 
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     Depends,
     File,
     Form,
@@ -27,6 +28,7 @@ from app.contracts.schemas import (
     MessageDto,
     MessagePage,
 )
+from app.core.enums import MessageAuthor
 from app.core.errors import UnprocessableError
 from app.models import User
 from app.services.attachments import (
@@ -107,6 +109,7 @@ async def list_messages(
 async def send_message(
     dialog_id: uuid.UUID,
     response: Response,
+    background_tasks: BackgroundTasks,
     client_message_id: uuid.UUID = Form(
         description="Stable UUID reused for network retries."
     ),
@@ -160,7 +163,10 @@ async def send_message(
         client_message_id=client_message_id,
         text=text,
         uploads=validated,
+        defer_processing=True,
     )
+    if message.author_type == MessageAuthor.USER:
+        background_tasks.add_task(container.dialogs.schedule_processing, message.id)
     response.status_code = 201 if created else 200
     return message
 

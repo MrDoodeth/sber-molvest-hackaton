@@ -14,6 +14,12 @@ After the first image build, use `make dev`. Backend changes under `backend/app`
 restart Uvicorn, while frontend changes under `frontend/src` are applied through
 Vite HMR.
 
+The development stack creates the database schema directly from the current
+SQLAlchemy models and does not run Alembic migrations. When model changes make
+the existing development database incompatible, reset it with
+`docker compose -f docker-compose.dev.yml down -v` and run `make dev` again.
+Production keeps the persistent database and runs Alembic from the backend image.
+
 - Frontend: <http://localhost:5173>
 - Swagger UI: <http://localhost:8000/docs>
 - ReDoc: <http://localhost:8000/redoc>
