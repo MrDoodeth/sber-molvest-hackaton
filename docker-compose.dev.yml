@@ -1,0 +1,106 @@
+name: molvest-dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-molvest}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-molvest}
+      POSTGRES_DB: ${POSTGRES_DB:-molvest}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-molvest}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - molvest-dev
+
+  qdrant:
+    image: qdrant/qdrant:v1.15.1
+    ports:
+      - "${QDRANT_HTTP_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - qdrant_dev_data:/qdrant/storage
+    networks:
+      - molvest-dev
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command:
+      - sh
+      - -c
+      - alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/app
+    environment:
+      ENVIRONMENT: development
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-molvest}:${POSTGRES_PASSWORD:-molvest}@postgres:5432/${POSTGRES_DB:-molvest}
+      GIGACHAT_CREDENTIALS: ${GIGACHAT_CREDENTIALS:-}
+      GIGACHAT_SCOPE: ${GIGACHAT_SCOPE:-GIGACHAT_API_PERS}
+      GIGACHAT_CA_BUNDLE_FILE: /etc/ssl/certs/ca-certificates.crt
+      JWT_SECRET: ${JWT_SECRET:-local-development-secret-change-in-production}
+      JWT_TTL_MINUTES: ${JWT_TTL_MINUTES:-480}
+      AUTH_COOKIE_SECURE: "false"
+      DEMO_AUTH_ENABLED: ${DEMO_AUTH_ENABLED:-true}
+      CORS_ORIGINS: http://localhost:${FRONTEND_PORT:-5173}
+      QDRANT_URL: http://qdrant:6333
+      EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-cpu}
+      SSE_HEARTBEAT_SECONDS: ${SSE_HEARTBEAT_SECONDS:-15}
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      CREATE_SCHEMA_ON_STARTUP: "false"
+      SEED_ON_STARTUP: ${SEED_ON_STARTUP:-true}
+      WATCHFILES_FORCE_POLLING: "true"
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - ./backend/app:/app/app
+      - ./backend/alembic:/app/alembic
+      - ./backend/alembic.ini:/app/alembic.ini:ro
+      - backend_dev_storage:/app/var/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    networks:
+      - molvest-dev
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: development
+    environment:
+      VITE_API_PROXY_TARGET: http://backend:8000
+      CHOKIDAR_USEPOLLING: "true"
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/index.html:/app/index.html:ro
+      - ./frontend/vite.config.ts:/app/vite.config.ts:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - molvest-dev
+
+volumes:
+  postgres_dev_data:
+  qdrant_dev_data:
+  backend_dev_storage:
+
+networks:
+  molvest-dev:
+    driver: bridge

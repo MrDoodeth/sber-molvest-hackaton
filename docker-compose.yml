@@ -1,0 +1,90 @@
+name: molvest-prod
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-molvest}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-molvest}
+      POSTGRES_DB: ${POSTGRES_DB:-molvest}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-molvest}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - molvest
+
+  qdrant:
+    image: qdrant/qdrant:v1.15.1
+    restart: unless-stopped
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - molvest
+
+  backend:
+    restart: unless-stopped
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-molvest}:${POSTGRES_PASSWORD:-molvest}@postgres:5432/${POSTGRES_DB:-molvest}
+      GIGACHAT_CREDENTIALS: ${GIGACHAT_CREDENTIALS:-}
+      GIGACHAT_SCOPE: ${GIGACHAT_SCOPE:-GIGACHAT_API_PERS}
+      GIGACHAT_CA_BUNDLE_FILE: /etc/ssl/certs/ca-certificates.crt
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set for production}
+      JWT_TTL_MINUTES: ${JWT_TTL_MINUTES:-480}
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-true}
+      DEMO_AUTH_ENABLED: ${DEMO_AUTH_ENABLED:-true}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-cpu}
+      SSE_HEARTBEAT_SECONDS: ${SSE_HEARTBEAT_SECONDS:-15}
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      CREATE_SCHEMA_ON_STARTUP: "false"
+      SEED_ON_STARTUP: ${SEED_ON_STARTUP:-true}
+    expose:
+      - "8000"
+    volumes:
+      - backend_storage:/app/var/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/docs"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    networks:
+      - molvest
+
+  frontend:
+    restart: unless-stopped
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: production
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - molvest
+
+volumes:
+  postgres_data:
+  qdrant_data:
+  backend_storage:
+
+networks:
+  molvest:
+    driver: bridge

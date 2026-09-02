@@ -271,7 +271,7 @@ flowchart TB
 | Фоновые задачи | FastAPI `BackgroundTasks` / простой in-process worker | Для MVP достаточно для переиндексации небольшого объёма документов без отдельной очереди |
 | Объектное хранилище | MinIO (S3-совместимо) | Скриншоты, исходные документы | Быстро извлекает текст/коды ошибки локально перед retrieval; GigaChat всё равно получает исходное изображение и выполняет смысловой Vision-анализ |
 | Наблюдаемость | Application logs + базовые метрики backend | Latency, ошибки, confidence, источники ответа и эскалации без внешнего SaaS |
-| Проверка RAG | Простой `scripts/evaluate_rag.py` + `tests/rag_golden.json` | Скрипт прогоняет тестовые вопросы через retrieval и показывает, попал ли ожидаемый источник в top-k |
+| Проверка RAG | `tests/rag/evaluate_rag.py` + `tests/rag/rag_golden.json` | Скрипт прогоняет тестовые вопросы через retrieval и показывает, попал ли ожидаемый источник в top-k |
 | Деплой | Docker Compose (демо) → Kubernetes (прод) | Скорость на хакатоне, понятный путь роста |
 
 
@@ -319,7 +319,7 @@ flowchart TB
 | % обработанных без эскалации | count(escalated=false) / total | Снижение обращений к операторам на 30–40% |
 | Среднее время ответа | p50/p95 от вопроса до ответа | <5 сек |
 | Количество эскалаций | count(escalated=true) / период | Тренд к снижению |
-| Проверка retrieval | `scripts/evaluate_rag.py`: сколько golden-вопросов нашли ожидаемый источник в top-3 | Используем как внутреннюю проверку при изменениях RAG |
+| Проверка retrieval | `tests/rag/evaluate_rag.py`: сколько golden-вопросов нашли ожидаемый источник в top-3 | Используем как внутреннюю проверку при изменениях RAG |
 
 ## 8. MVP и Production Roadmap
 
@@ -344,7 +344,7 @@ flowchart TB
 | Анализ скриншотов | Встроен в каждый диалог, GigaChat Vision → извлечённый контекст → RAG |
 | Админ-панель | Управление разделами/документами, ползунок confidence, мониторинг и логи |
 | Обновление знаний | Загрузка новых документов и переиндексация; закрытые кейсы как кандидаты в БЗ |
-| Документация | `ARCHITECTURE.md`, `README.md`, далее `API.md`/инструкция администратора |
+| Документация | `ARCHITECTURE.md`, `README.md`, Swagger UI `/docs` и ReDoc `/redoc` |
 | Метрики эффективности | % без эскалации, среднее время ответа, количество эскалаций, confidence |
 
 ## 9. Риски и митигации
@@ -3201,8 +3201,8 @@ gigachat SDK (implementation detail)
 RAG проверяем отдельно от generation:
 
 ```text
-tests/rag_golden.json
-scripts/evaluate_rag.py
+tests/rag/rag_golden.json
+tests/rag/evaluate_rag.py
 ```
 
 Минимум 10–20 вопросов с ожидаемым документом.
@@ -3876,7 +3876,7 @@ Frontend:
 
 ## 20. Backend API contract для frontend
 
-API — ориентир для frontend/backend разработки. Названия можно уточнить в `API.md`, но ответственность endpoints должна сохраниться.
+OpenAPI-схема FastAPI и Swagger UI `/docs` — источник истины для frontend/backend разработки; ответственность endpoints должна сохраняться.
 
 ### 20.1 Shared / User
 
@@ -5003,17 +5003,14 @@ System Prompts, AI Settings, Monitoring.
 │   │   ├── channels/
 │   │   ├── contracts/
 │   │   └── models/
-│   └── tests/
-│
-├── scripts/
-│   └── evaluate_rag.py
 ├── tests/
-│   └── rag_golden.json
-├── infra/
-│   └── docker-compose.yml
-└── docs/
-    ├── ARCHITECTURE.md
-    └── API.md
+│   └── rag/
+│       ├── evaluate_rag.py
+│       └── rag_golden.json
+├── docker-compose.yml            # production
+├── docker-compose.dev.yml        # hot reload development
+├── ARCHITECTURE.md
+└── README.md
 ```
 
 ## 33. Источники

@@ -1,0 +1,323 @@
+from __future__ import annotations
+
+import uuid
+from datetime import datetime
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.core.enums import (
+    CandidateSource,
+    CandidateStatus,
+    DialogChannel,
+    DialogMode,
+    DialogStatus,
+    DocumentSourceType,
+    FeedbackVerdict,
+    IndexStatus,
+    MessageAuthor,
+    PromptType,
+    UserRole,
+)
+
+
+class ApiModel(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+        from_attributes=True,
+    )
+
+
+class ErrorResponse(ApiModel):
+    code: str
+    message: str
+    details: Any | None = None
+
+
+class UserRef(ApiModel):
+    id: uuid.UUID
+    display_name: str
+
+
+class CurrentUser(UserRef):
+    role: UserRole
+
+
+class DemoLoginRequest(ApiModel):
+    role: UserRole
+
+
+class SourceRef(ApiModel):
+    document_id: uuid.UUID
+    title: str
+    label: str
+
+
+class AttachmentDto(ApiModel):
+    id: uuid.UUID
+    message_id: uuid.UUID
+    file_name: str
+    mime_type: str
+    url: str
+    size_bytes: int | None = None
+    extracted_text: str | None = None
+    visual_summary: str | None = None
+
+
+class MessageDto(ApiModel):
+    id: uuid.UUID
+    dialog_id: uuid.UUID
+    author_type: MessageAuthor
+    author: UserRef | None = None
+    text: str
+    confidence: float | None = None
+    attachments: list[AttachmentDto] = Field(default_factory=list)
+    sources: list[SourceRef] = Field(default_factory=list)
+    created_at: datetime
+
+
+class MessagePage(ApiModel):
+    items: list[MessageDto]
+    next_cursor: uuid.UUID | None = None
+
+
+class FeedbackRequest(ApiModel):
+    verdict: FeedbackVerdict
+
+
+class FeedbackDto(ApiModel):
+    id: uuid.UUID
+    dialog_id: uuid.UUID
+    verdict: FeedbackVerdict
+    created_at: datetime
+
+
+class CandidateRef(ApiModel):
+    id: uuid.UUID
+    status: CandidateStatus
+    source: CandidateSource
+
+
+class OperatorDraftDto(ApiModel):
+    id: uuid.UUID
+    dialog_id: uuid.UUID
+    trigger_message_id: uuid.UUID
+    text: str
+    confidence: float
+    sources: list[SourceRef]
+    created_at: datetime
+
+
+class DialogSummary(ApiModel):
+    id: uuid.UUID
+    status: DialogStatus
+    mode: DialogMode
+    confidence: float
+    assigned_operator: UserRef | None = None
+    last_message_preview: str | None = None
+    title: str | None = None
+    user: UserRef | None = None
+    has_attachment: bool = False
+    escalated_at: datetime | None = None
+    closed_at: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime
+    feedback: FeedbackDto | None = None
+    candidate: CandidateRef | None = None
+
+
+class DialogDetail(DialogSummary):
+    user: UserRef
+    channel: DialogChannel
+    created_at: datetime
+    latest_draft: OperatorDraftDto | None = None
+
+
+class KnowledgeSectionCreate(ApiModel):
+    name: str = Field(min_length=1, max_length=255)
+
+    @field_validator("name")
+    @classmethod
+    def strip_name(cls, value: str) -> str:
+        return value.strip()
+
+
+class KnowledgeSectionPatch(ApiModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    is_enabled: bool | None = None
+
+    @field_validator("name")
+    @classmethod
+    def strip_optional_name(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else None
+
+
+class KnowledgeSectionDto(ApiModel):
+    id: uuid.UUID
+    name: str
+    is_enabled: bool
+    is_system: bool
+    document_count: int = 0
+    created_at: datetime
+
+
+class KnowledgeDocumentPatch(ApiModel):
+    section_id: uuid.UUID | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=500)
+    one_c_version: str | None = Field(default=None, max_length=100)
+    tags: list[str] | None = None
+    is_enabled: bool | None = None
+
+
+class KnowledgeDocumentDto(ApiModel):
+    id: uuid.UUID
+    section_id: uuid.UUID
+    section_name: str
+    source_type: DocumentSourceType
+    title: str
+    file_name: str
+    one_c_version: str | None = None
+    tags: list[str]
+    is_enabled: bool
+    index_status: IndexStatus
+    index_error: str | None = None
+    indexed_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class KnowledgeDocumentsResponse(ApiModel):
+    items: list[KnowledgeDocumentDto]
+
+
+class PromptDto(ApiModel):
+    id: uuid.UUID
+    type: PromptType
+    content: str
+    is_active: bool
+    version: int
+    updated_at: datetime
+    updated_by: UserRef | None = None
+
+
+class PromptUpdate(ApiModel):
+    content: str = Field(min_length=1)
+
+    @field_validator("content")
+    @classmethod
+    def strip_content(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Prompt must not be blank")
+        return value
+
+
+class SettingsCapabilities(ApiModel):
+    gigachat_context_limit: int
+    embedding_context_limit: int
+
+
+class ModelOptionDto(ApiModel):
+    id: str
+    label: str
+    context_limit: int
+
+
+class AdminSettingsResponse(ApiModel):
+    active_model: str
+    gigachat_context_ratio: float
+    gigachat_max_output_tokens: int
+    embedding_context_ratio: float
+    rag_top_k: int
+    operator_escalation_threshold: float
+    capabilities: SettingsCapabilities
+    available_models: list[ModelOptionDto]
+
+
+class AdminSettingsUpdate(ApiModel):
+    active_model: str
+    gigachat_context_ratio: float = Field(ge=0, le=1)
+    gigachat_max_output_tokens: int = Field(gt=0)
+    embedding_context_ratio: float = Field(ge=0, le=1)
+    rag_top_k: int = Field(ge=1)
+    operator_escalation_threshold: float = Field(ge=0, le=1)
+
+
+class CaseCard(ApiModel):
+    title: str = Field(min_length=1, max_length=500)
+    problem: str = Field(min_length=1)
+    symptoms: str = Field(min_length=1)
+    context: str = Field(min_length=1)
+    solution: str = Field(min_length=1)
+    result: str = Field(min_length=1)
+
+    @field_validator("title", "problem", "symptoms", "context", "solution", "result")
+    @classmethod
+    def strip_card_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Case-card fields must not be blank")
+        return value
+
+
+class CandidatePatch(ApiModel):
+    generated_card: CaseCard
+
+
+class CandidateApproveRequest(ApiModel):
+    section_id: uuid.UUID | None = None
+
+
+class KnowledgeCandidateDto(ApiModel):
+    id: uuid.UUID
+    dialog_id: uuid.UUID
+    source: CandidateSource
+    generated_card: CaseCard
+    status: CandidateStatus
+    default_section_id: uuid.UUID
+    resulting_document_id: uuid.UUID | None = None
+    resulting_document: KnowledgeDocumentDto | None = None
+    reviewed_by: UserRef | None = None
+    reviewed_at: datetime | None = None
+    created_at: datetime
+
+
+class AdminDialogListItem(DialogSummary):
+    resolved_by: Literal["ai", "operator"]
+    last_confidence: float | None = None
+
+
+class AdminDialogPage(ApiModel):
+    items: list[AdminDialogListItem]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
+
+
+class AdminDialogAudit(ApiModel):
+    resolved_by: Literal["ai", "operator"]
+    gigachat_model: str | None = None
+    system_prompt_version: int | None = None
+    rag_top_k: int | None = None
+    operator_escalation_threshold: float | None = None
+
+
+class AdminDialogDetail(ApiModel):
+    dialog: DialogDetail
+    messages: list[MessageDto]
+    drafts: list[OperatorDraftDto]
+    feedback: FeedbackDto | None = None
+    candidate: KnowledgeCandidateDto | None = None
+    audit: AdminDialogAudit
+
+
+class MonitoringResponse(ApiModel):
+    total_requests: int
+    ai_resolved: int
+    ai_resolved_rate: float
+    escalations: int
+    escalation_rate: float
+    average_response_time_ms: float
+    helpful: int
+    helpful_rate: float

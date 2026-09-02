@@ -1,9 +1,11 @@
 .env
 .env.*
 !.env.example
+!.env.production.example
 sber.creds
 *.pem
 *.crt
+!backend/certs/*.crt
 
 __pycache__/
 *.py[cod]

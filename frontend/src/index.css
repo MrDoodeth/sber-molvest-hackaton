@@ -1,0 +1,87 @@
+@import "tailwindcss";
+
+@theme {
+  --color-molvest-50: #f2f8f4;
+  --color-molvest-100: #dcece1;
+  --color-molvest-200: #bad8c4;
+  --color-molvest-300: #8bbb9b;
+  --color-molvest-400: #57966d;
+  --color-molvest-500: #37794f;
+  --color-molvest-600: #285f3d;
+  --color-molvest-700: #214c33;
+  --color-molvest-800: #1c3d2b;
+  --color-molvest-900: #173326;
+  --color-molvest-950: #0c1d15;
+  --color-cream: #f6f3eb;
+  --color-ink: #16241d;
+  --color-giga: #5b5ce2;
+  --font-sans: "Manrope", "Segoe UI", Arial, sans-serif;
+}
+
+:root {
+  color: #16241d;
+  background: #f6f3eb;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  min-width: 320px;
+  background:
+    radial-gradient(circle at 8% -10%, rgb(55 121 79 / 9%), transparent 31rem),
+    #f6f3eb;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button,
+a,
+input,
+textarea,
+select {
+  outline-offset: 3px;
+}
+
+::selection {
+  color: white;
+  background: #285f3d;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: rgb(33 76 51 / 34%);
+  background-clip: padding-box;
+}
+
+.paper-grid {
+  background-image:
+    linear-gradient(rgb(23 51 38 / 4%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(23 51 38 / 4%) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+.safe-bottom {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}

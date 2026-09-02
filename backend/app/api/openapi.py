@@ -1,0 +1,164 @@
+from __future__ import annotations
+
+from typing import Any
+
+from app.contracts.schemas import ErrorResponse
+
+OPENAPI_TAGS: list[dict[str, str]] = [
+    {
+        "name": "Auth",
+        "description": "HttpOnly cookie session, demo login and current user.",
+    },
+    {
+        "name": "Dialogs",
+        "description": (
+            "User tickets, messages, attachments, feedback and user-safe SSE."
+        ),
+    },
+    {
+        "name": "Operator",
+        "description": "Escalation queue, atomic claim and operator-only draft SSE.",
+    },
+    {
+        "name": "Admin Dialogs",
+        "description": (
+            "Closed-ticket journal, audit, moderation and guarded hard delete."
+        ),
+    },
+    {
+        "name": "Knowledge",
+        "description": (
+            "Knowledge sections and permanent Docling/BGE-M3/Qdrant ingestion."
+        ),
+    },
+    {
+        "name": "Prompts",
+        "description": "Versioned runtime system prompts.",
+    },
+    {
+        "name": "Settings",
+        "description": "Atomic runtime GigaChat and retrieval settings.",
+    },
+    {
+        "name": "Monitoring",
+        "description": "Aggregated product and latency metrics.",
+    },
+]
+
+
+def _error(description: str, code: str, message: str) -> dict[str, Any]:
+    return {
+        "model": ErrorResponse,
+        "description": description,
+        "content": {
+            "application/json": {"example": {"code": code, "message": message}}
+        },
+    }
+
+
+PROTECTED_RESPONSES: dict[int | str, dict[str, Any]] = {
+    401: _error(
+        "Authentication cookie is missing or expired.",
+        "unauthorized",
+        "Требуется авторизация",
+    ),
+    403: _error(
+        "The role or resource guard denied access.", "forbidden", "Недостаточно прав"
+    ),
+    404: _error(
+        "The requested resource does not exist.", "not_found", "Ресурс не найден"
+    ),
+    409: _error(
+        "The command conflicts with current lifecycle state.",
+        "conflict",
+        "Операция конфликтует с текущим состоянием",
+    ),
+    422: _error(
+        "Request validation or file validation failed.",
+        "validation_error",
+        "Некорректные данные запроса",
+    ),
+    503: _error(
+        "GigaChat, storage or search provider is unavailable.",
+        "service_unavailable",
+        "Внешний сервис временно недоступен",
+    ),
+    500: _error(
+        "Unexpected server failure.", "internal_error", "Внутренняя ошибка сервера"
+    ),
+}
+
+USER_SSE_RESPONSE: dict[str, Any] = {
+    "description": (
+        "Infinite user-safe stream. Events: confidence, operator_connected, "
+        "assistant_token, assistant_done, operator_message, dialog_closed, error. "
+        "Operator drafts are never emitted here. Reconnect and refetch REST state."
+    ),
+    "content": {
+        "text/event-stream": {
+            "schema": {"type": "string"},
+            "examples": {
+                "assistant_token": {
+                    "summary": "Streaming answer token",
+                    "value": (
+                        "id: 42\nevent: assistant_token\n"
+                        'data: {"type":"assistant_token","token":"Проверьте"}\n\n'
+                    ),
+                },
+                "operator_connected": {
+                    "summary": "Persisted escalation event",
+                    "value": (
+                        "id: 43\nevent: operator_connected\n"
+                        'data: {"type":"operator_connected","message":{"id":"..."}}\n\n'
+                    ),
+                },
+            },
+        }
+    },
+}
+
+OPERATOR_QUEUE_SSE_RESPONSE: dict[str, Any] = {
+    "description": (
+        "Infinite operator queue stream. Events: ticket_available, ticket_claimed, "
+        "ticket_closed. Reconnect and refetch both queue scopes."
+    ),
+    "content": {
+        "text/event-stream": {
+            "schema": {"type": "string"},
+            "example": (
+                "id: 51\nevent: ticket_available\n"
+                'data: {"type":"ticket_available","dialog":{"id":"..."}}\n\n'
+            ),
+        }
+    },
+}
+
+OPERATOR_DIALOG_SSE_RESPONSE: dict[str, Any] = {
+    "description": (
+        "Infinite operator-only stream. Events: user_message, confidence, "
+        "draft_token, draft_done, dialog_closed, error. Draft events are never "
+        "published to a user stream."
+    ),
+    "content": {
+        "text/event-stream": {
+            "schema": {"type": "string"},
+            "examples": {
+                "draft_token": {
+                    "summary": "Streaming private draft token",
+                    "value": (
+                        "id: 61\nevent: draft_token\n"
+                        'data: {"type":"draft_token","token":"Проверьте",'
+                        '"triggerMessageId":"..."}\n\n'
+                    ),
+                },
+                "draft_done": {
+                    "summary": "Persisted operator draft",
+                    "value": (
+                        "id: 62\nevent: draft_done\n"
+                        'data: {"type":"draft_done","draft":{"id":"..."}}\n\n'
+                    ),
+                },
+            },
+        }
+    },
+}

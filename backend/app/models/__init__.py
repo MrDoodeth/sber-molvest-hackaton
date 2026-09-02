@@ -1,0 +1,33 @@
+from app.models.entities import (
+    Attachment,
+    Base,
+    Chunk,
+    Dialog,
+    DialogFeedback,
+    KnowledgeCandidate,
+    KnowledgeDocument,
+    KnowledgeSection,
+    Message,
+    MetricEvent,
+    OperatorDraft,
+    SystemPrompt,
+    SystemSetting,
+    User,
+)
+
+__all__ = [
+    "Attachment",
+    "Base",
+    "Chunk",
+    "Dialog",
+    "DialogFeedback",
+    "KnowledgeCandidate",
+    "KnowledgeDocument",
+    "KnowledgeSection",
+    "Message",
+    "MetricEvent",
+    "OperatorDraft",
+    "SystemPrompt",
+    "SystemSetting",
+    "User",
+]
