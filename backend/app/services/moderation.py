@@ -19,7 +19,6 @@ from app.core.constants import DEFAULT_CASE_SECTION_ID
 from app.core.enums import (
     CandidateSource,
     CandidateStatus,
-    DialogMode,
     DialogStatus,
     DocumentSourceType,
     FeedbackVerdict,
@@ -123,28 +122,6 @@ class ModerationService:
                 if candidate
                 else None
             )
-
-    async def propose_by_operator(
-        self, operator: User, dialog_id: uuid.UUID
-    ) -> KnowledgeCandidateDto:
-        if operator.role != UserRole.OPERATOR:
-            raise ForbiddenError()
-        async with self._session_factory() as session:
-            dialog = await session.get(Dialog, dialog_id)
-            if dialog is None:
-                raise NotFoundError("Диалог не найден")
-            if dialog.status != DialogStatus.CLOSED:
-                raise ConflictError("Предложить кейс можно только после закрытия")
-            if (
-                dialog.mode != DialogMode.OPERATOR_SUPPORT
-                or dialog.assigned_operator_id != operator.id
-            ):
-                raise ForbiddenError("Кейс предлагает назначенный оператор")
-            candidate = await self._create_or_get_candidate(
-                session, dialog_id, CandidateSource.OPERATOR
-            )
-            await session.commit()
-            return await self._candidate_with_reviewer(session, candidate)
 
     async def create_by_admin(
         self, admin: User, dialog_id: uuid.UUID

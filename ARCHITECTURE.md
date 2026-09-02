@@ -693,9 +693,7 @@ AI предлагает:
 Dialog.status = closed
 ```
 
-После закрытия есть два способа передать кейс на пополнение БЗ.
-
-**Вариант A — пользовательская оценка**
+После закрытия тикет ожидает итоговую оценку пользователя.
 
 Пользователь отмечает:
 
@@ -705,36 +703,7 @@ Dialog.status = closed
 
 После чего завершённый тикет можно отправить в очередь административной модерации.
 
-**Вариант B — оператор сам считает кейс полезным**
-
-Оператор нажимает:
-
-```text
-[ Предложить в БЗ ]
-```
-
-Эта кнопка доступна только для завершённого тикета.
-
-Backend выполняет тот же idempotent get-or-create:
-
-```text
-create_or_get_candidate(
-    dialog_id = dialog.id,
-    source = operator,
-)
-```
-
-Если candidate уже был создан пользовательским `helpful`, возвращается существующая запись; новый дубль не создаётся.
-
-Это **не добавляет данные в БЗ автоматически**.
-
-Дальше администратор всё равно выполняет:
-
-```text
-Approve / Reject
-```
-
-Таким образом ни пользователь, ни оператор не могут напрямую записать новый материал в production RAG.
+Оператор не создаёт кандидата вручную: закрытый тикет остаётся в административном журнале до оценки пользователя, а администратор может создать кандидата из любого закрытого тикета.
 
 ---
 
@@ -813,7 +782,7 @@ AI SUPPORT
               ↓
             closed
               ↓
-     user helpful / operator proposes
+      user helpful
               ↓
        KnowledgeCandidate
               ↓
@@ -3941,7 +3910,6 @@ polling-запросами.
 | GET | `/api/operator/dialogs/{dialogId}/events` | operator-only user/confidence/draft SSE |
 | POST | `/api/dialogs/{dialogId}/messages` | отправить сообщение как operator |
 | POST | `/api/dialogs/{dialogId}/close` | закрыть тикет |
-| POST | `/api/dialogs/{dialogId}/knowledge-candidate` | «Предложить в БЗ» после close |
 
 Claim выполняется backend атомарно:
 
@@ -4390,7 +4358,7 @@ Backend определяет `author_type=operator` по authenticated role.
 - user stream получает `operator_message`;
 - operator detail cache обновляется.
 
-### 22.9 Close / KB proposal
+### 22.9 Close
 
 Operator:
 
@@ -4400,30 +4368,7 @@ Operator:
 
 → confirm → POST close.
 
-Только после close:
-
-```text
-[ Предложить в БЗ ]
-```
-
-Backend вызывает общий idempotent service:
-
-```python
-candidate = create_or_get_candidate(
-    dialog_id=dialog.id,
-    source="operator",
-)
-```
-
-Из-за `UNIQUE(KnowledgeCandidate.dialog_id)` повторное нажатие или ранее созданный `user_feedback/admin` candidate не создают дубль.
-
-Если candidate уже существует, endpoint возвращает существующую запись (`200 OK`); frontend меняет действие на:
-
-```text
-[ Открыть кандидата ]
-```
-
-После close тикет исчезает из active queue и остаётся доступен в admin journal.
+После close тикет исчезает из active queue, ожидает итоговую оценку пользователя и остаётся доступен в admin journal.
 
 ---
 
@@ -4558,7 +4503,7 @@ ai_error
 unrated
 ```
 
-и не позволяет admin-пути создать второй candidate поверх `user_feedback` или `operator`.
+и не позволяет admin-пути создать второй candidate поверх `user_feedback`.
 
 ### 23.4 Useful / Candidate moderation
 
@@ -4995,7 +4940,7 @@ React Router layouts, `/api/me`, role guards, API client, QueryClient, shared UI
 Dialogs, messages, SSE answer stream, attachment, sources, escalation state, close + feedback.
 
 ### Frontend F3 — operator panel
-Realtime queue, claim, dialog, operator-only SSE, persisted AI GigaChat draft, send/close/propose-to-KB.
+Realtime queue, claim, dialog, operator-only SSE, persisted AI GigaChat draft, send/close.
 
 ### Frontend F4 — admin journal
 Helpful / ai_error / unrated groups, Dialog detail, candidate create/edit/approve/reject, hard delete error chat.

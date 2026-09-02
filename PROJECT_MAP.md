@@ -562,7 +562,7 @@ DialogService → EventBroker.publish(channel, payload)
 ### Knowledge Candidate Lifecycle
 
 ```
-User feedback "helpful" / Operator propose / Admin create
+User feedback "helpful" / Admin create
   → KnowledgeCandidate (PENDING)
   → Admin review (Case Card edit)
   → Admin approve → Markdown document → KB ingestion (chunk + embed + upsert)

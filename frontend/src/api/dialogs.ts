@@ -4,7 +4,6 @@ import type {
   DialogFeedbackDto,
   DialogSummary,
   FeedbackVerdict,
-  KnowledgeCandidateDto,
   MessageDto,
   MessagePageDto,
 } from "./types";
@@ -46,11 +45,6 @@ export const dialogsApi = {
     apiRequest<DialogFeedbackDto>(`/api/dialogs/${dialogId}/feedback`, {
       method: "POST",
       json: { verdict },
-      signal,
-    }),
-  proposeCandidate: (dialogId: string, signal?: AbortSignal) =>
-    apiRequest<KnowledgeCandidateDto>(`/api/dialogs/${dialogId}/knowledge-candidate`, {
-      method: "POST",
       signal,
     }),
   eventsUrl: (dialogId: string) => `/api/dialogs/${dialogId}/events`,

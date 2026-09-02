@@ -4,8 +4,7 @@ import { authApi } from "../../api/auth";
 import { dialogsApi } from "../../api/dialogs";
 import { operatorApi } from "../../api/operator";
 import { queryKeys } from "../../api/queryKeys";
-import type { CandidateRef } from "../../api/types";
-import { Bot, CheckCircle2, Clipboard, Headphones, Inbox, MessagesSquare, PanelRight, RotateCcw, Sparkles, UserCheck } from "lucide-react";
+import { Bot, CheckCircle2, Clipboard, Headphones, Inbox, MessagesSquare, PanelRight, RotateCcw, UserCheck } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ChatComposer, DialogStatusBadge, MarkdownContent, MessageList, MessageSources, StreamingMessage } from "../../shared/chat";
@@ -104,17 +103,6 @@ export default function OperatorWorkspace() {
     },
     onError: (error) => toast(error.message, "error"),
   });
-  const propose = useMutation({
-    mutationFn: () => dialogsApi.proposeCandidate(dialogId!),
-    onSuccess: (candidate) => {
-      queryClient.setQueryData(queryKeys.dialog.detail(dialogId!), (current: typeof detail.data) =>
-        current ? { ...current, candidate: { id: candidate.id, status: candidate.status, source: candidate.source } satisfies CandidateRef } : current,
-      );
-      toast("Кандидат в базу знаний создан", "success");
-    },
-    onError: (error) => toast(error.message, "error"),
-  });
-
   const submitAttempt = (attempt: SendAttempt) => {
     if (!isAssignedToMe || send.isPending) return;
     send.mutate(attempt);
@@ -189,9 +177,9 @@ export default function OperatorWorkspace() {
               )}
               {detail.data.status === "active" && !isAssignedToMe && !detail.data.assignedOperator && <div className="border-t border-stone-200 bg-white p-4 text-center text-sm text-stone-500"><Headphones className="mr-2 inline size-4" />Возьмите тикет в работу, чтобы ответить пользователю.</div>}
               {detail.data.status === "closed" && (
-                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-stone-200 bg-white p-4">
-                  <div><p className="text-sm font-bold text-stone-900">Тикет завершён</p><p className="text-xs text-stone-500">Полная история доступна администратору для модерации.</p></div>
-                  {detail.data.candidate ? <Badge tone={detail.data.candidate.status === "approved" ? "success" : detail.data.candidate.status === "rejected" ? "danger" : "warning"}>Кандидат уже создан · {detail.data.candidate.status}</Badge> : <Button pending={propose.isPending} onClick={() => propose.mutate()}><Sparkles className="size-4" /> Предложить в БЗ</Button>}
+                <div className="border-t border-stone-200 bg-white p-4">
+                  <p className="text-sm font-bold text-stone-900">Тикет завершён</p>
+                  <p className="text-xs text-stone-500">Тикет ожидает итоговой оценки пользователя. Полная история доступна администратору для модерации.</p>
                 </div>
               )}
             </>

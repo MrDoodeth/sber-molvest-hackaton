@@ -24,7 +24,6 @@ from app.contracts.schemas import (
     DialogSummary,
     FeedbackDto,
     FeedbackRequest,
-    KnowledgeCandidateDto,
     MessageDto,
     MessagePage,
 )
@@ -213,18 +212,6 @@ async def add_feedback(
         user, dialog_id, payload.verdict
     )
     return feedback
-
-
-@router.post(
-    "/dialogs/{dialog_id}/knowledge-candidate",
-    response_model=KnowledgeCandidateDto,
-)
-async def propose_candidate(
-    dialog_id: uuid.UUID,
-    user: User = Depends(get_current_user),
-    container: ApplicationContainer = Depends(get_container),
-) -> KnowledgeCandidateDto:
-    return await container.moderation.propose_by_operator(user, dialog_id)
 
 
 @router.get(
