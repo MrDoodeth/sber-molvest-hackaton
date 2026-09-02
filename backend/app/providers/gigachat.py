@@ -8,6 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.contracts.schemas import CaseCard
 from app.core.config import Settings
 from app.providers.interfaces import (
     ConfidenceAssessment,
@@ -363,6 +364,28 @@ class GigaChatProvider:
         parsed = _ConfidenceSchema.model_validate(result)
         return ConfidenceAssessment(confidence=parsed.confidence)
 
+    async def generate_case_card(
+        self,
+        request: GenerationRequest,
+        model: str,
+        max_output_tokens: int,
+        session_id: uuid.UUID,
+    ) -> CaseCard:
+        messages = self._messages(request)
+        messages[0].content += (
+            "\n\nKNOWLEDGE CARD\nВерни только структурированную карточку с полями "
+            "title, problem, symptoms, context, solution и result. Каждый field "
+            "должен содержать конкретный текст на русском языке. Не добавляй "
+            "Markdown-обёртку, комментарии или поля вне схемы."
+        )
+        result = await self._structured(
+            client=self._client(model, max_output_tokens),
+            schema=CaseCard,
+            messages=messages,
+            session_id=session_id,
+        )
+        return CaseCard.model_validate(result)
+
     async def stream_text(
         self,
         request: GenerationRequest,
@@ -373,8 +396,9 @@ class GigaChatProvider:
         client = self._client(model, max_output_tokens)
         messages = self._messages(request)
         messages[0].content += (
-            "\n\nANSWER OR DRAFT\nВерни только обычный текст ответа или "
-            "черновика. Не возвращай JSON и отдельное поле confidence. "
+            "\n\nANSWER OR TEMPLATE\nВерни только обычный текст ответа "
+            "пользователю или шаблона для оператора. Не возвращай JSON и "
+            "отдельное поле confidence. "
             "Используй Markdown для заголовков, списков и выделения; код "
             "оформляй fenced-блоком с языком, если это уместно. "
             "Если пользователь просит показать или проверить виды Markdown, "

@@ -12,7 +12,11 @@ from app.api.openapi import (
     PROTECTED_RESPONSES,
 )
 from app.api.sse import SSE_HEADERS, event_stream
-from app.contracts.schemas import DialogDetail, DialogSummary, OperatorDraftDto
+from app.contracts.schemas import (
+    DialogDetail,
+    DialogSummary,
+    OperatorTemplateDto,
+)
 from app.core.enums import UserRole
 from app.core.errors import ForbiddenError
 from app.models import User
@@ -49,13 +53,19 @@ async def claim_dialog(
     return await container.dialogs.claim(user, dialog_id)
 
 
-@router.get("/dialogs/{dialog_id}/draft", response_model=OperatorDraftDto | None)
-async def latest_draft(
+@router.post(
+    "/dialogs/{dialog_id}/template",
+    response_model=OperatorTemplateDto,
+    summary=(
+        "Generate an editable operator response template from the latest dialog history"
+    ),
+)
+async def generate_template(
     dialog_id: uuid.UUID,
     user: User = Depends(get_current_user),
     container: ApplicationContainer = Depends(get_container),
-) -> OperatorDraftDto | None:
-    return await container.dialogs.latest_operator_draft(user, dialog_id)
+) -> OperatorTemplateDto:
+    return await container.dialogs.generate_operator_template(user, dialog_id)
 
 
 @router.get(
@@ -86,7 +96,7 @@ async def operator_events(
 @router.get(
     "/dialogs/{dialog_id}/events",
     response_class=StreamingResponse,
-    summary="Stream private operator draft events",
+    summary="Stream private operator dialog events",
     responses={200: OPERATOR_DIALOG_SSE_RESPONSE},
 )
 async def operator_dialog_events(

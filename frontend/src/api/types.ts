@@ -7,7 +7,7 @@ export type CandidateStatus = "pending" | "approved" | "rejected";
 export type CandidateSource = "user_feedback" | "operator" | "admin";
 export type SourceType = "official_1c_docs" | "internal_kb" | "resolved_case";
 export type IndexStatus = "uploaded" | "processing" | "indexed" | "failed";
-export type PromptType = "user_support" | "operator_gigachat";
+export type PromptType = "user_support" | "operator_gigachat" | "knowledge_card";
 export type MonitoringPeriod = "today" | "7d" | "30d" | "all";
 
 export interface UserRef {
@@ -79,12 +79,10 @@ export interface DialogSummary {
   candidate?: CandidateRef;
 }
 
-export interface OperatorDraftDto {
-  id: string;
+export interface OperatorTemplateDto {
   dialogId: string;
-  triggerMessageId: string;
+  dialogUpdatedAt: string;
   text: string;
-  confidence: number;
   sources: SourceRef[];
   createdAt: string;
 }
@@ -93,9 +91,7 @@ export interface DialogDetailDto extends DialogSummary {
   channel: "web" | "bitrix24" | "redmine";
 }
 
-export interface OperatorDialogDetailDto extends DialogDetailDto {
-  latestDraft?: OperatorDraftDto;
-}
+export type OperatorDialogDetailDto = DialogDetailDto;
 
 export interface CursorPage<T> {
   items: T[];
@@ -242,8 +238,5 @@ export type OperatorQueueEvent =
 
 export type OperatorDialogEvent =
   | { type: "user_message"; message: MessageDto }
-  | { type: "confidence"; value: number; triggerMessageId: string }
-  | { type: "draft_token"; token: string; triggerMessageId: string }
-  | { type: "draft_done"; draft: OperatorDraftDto }
   | { type: "dialog_closed" }
   | { type: "error"; message: string };

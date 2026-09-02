@@ -59,6 +59,11 @@ def create_app(
     )
     app.state.container = actual_container
     install_error_handlers(app)
+
+    @app.get("/health", include_in_schema=False)
+    async def health() -> dict[str, str]:
+        return {"status": "ok"}
+
     if actual_settings.cors_origins:
         app.add_middleware(
             CORSMiddleware,

@@ -17,7 +17,9 @@ OPENAPI_TAGS: list[dict[str, str]] = [
     },
     {
         "name": "Operator",
-        "description": "Escalation queue, atomic claim and operator-only draft SSE.",
+        "description": (
+            "Escalation queue, atomic claim, manual templates and operator-only SSE."
+        ),
     },
     {
         "name": "Admin Dialogs",
@@ -92,7 +94,7 @@ USER_SSE_RESPONSE: dict[str, Any] = {
     "description": (
         "Infinite user-safe stream. Events: confidence, operator_connected, "
         "assistant_token, assistant_done, operator_message, dialog_closed, error. "
-        "Operator drafts are never emitted here. Reconnect and refetch REST state."
+        "Reconnect and refetch REST state."
     ),
     "content": {
         "text/event-stream": {
@@ -135,27 +137,18 @@ OPERATOR_QUEUE_SSE_RESPONSE: dict[str, Any] = {
 
 OPERATOR_DIALOG_SSE_RESPONSE: dict[str, Any] = {
     "description": (
-        "Infinite operator-only stream. Events: user_message, confidence, "
-        "draft_token, draft_done, dialog_closed, error. Draft events are never "
-        "published to a user stream."
+        "Infinite operator-only stream. Events: user_message, dialog_closed and "
+        "error. Manual templates are returned by the template endpoint."
     ),
     "content": {
         "text/event-stream": {
             "schema": {"type": "string"},
             "examples": {
-                "draft_token": {
-                    "summary": "Streaming private draft token",
+                "user_message": {
+                    "summary": "New user message for the assigned operator",
                     "value": (
-                        "id: 61\nevent: draft_token\n"
-                        'data: {"type":"draft_token","token":"Проверьте",'
-                        '"triggerMessageId":"..."}\n\n'
-                    ),
-                },
-                "draft_done": {
-                    "summary": "Persisted operator draft",
-                    "value": (
-                        "id: 62\nevent: draft_done\n"
-                        'data: {"type":"draft_done","draft":{"id":"..."}}\n\n'
+                        "id: 61\nevent: user_message\n"
+                        'data: {"type":"user_message","message":{"id":"..."}}\n\n'
                     ),
                 },
             },

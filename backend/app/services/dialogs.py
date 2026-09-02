@@ -14,7 +14,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.contracts.mappers import (
     dialog_detail,
     dialog_summary,
-    draft_dto,
     message_dto,
 )
 from app.contracts.schemas import (
@@ -22,7 +21,7 @@ from app.contracts.schemas import (
     DialogSummary,
     MessageDto,
     MessagePage,
-    OperatorDraftDto,
+    OperatorTemplateDto,
 )
 from app.core.constants import (
     CLOSED_SYSTEM_MESSAGE,
@@ -51,12 +50,9 @@ from app.models import (
     KnowledgeCandidate,
     Message,
     MetricEvent,
-    OperatorDraft,
     User,
 )
 from app.providers.interfaces import (
-    ChatTurn,
-    HybridEmbedding,
     LLMProvider,
     ProviderError,
     ProviderPolicyError,
@@ -65,7 +61,6 @@ from app.providers.interfaces import (
     StorageError,
 )
 from app.services.attachments import (
-    RUNTIME_IMAGE_MIME_TYPES,
     AttachmentService,
     ValidatedUpload,
 )
@@ -75,9 +70,8 @@ from app.services.broker import (
     operator_dialog_channel,
     user_dialog_channel,
 )
-from app.services.context import ContextBuilder
+from app.services.generation_context import GenerationContextService
 from app.services.model_output import ModelOutputStreamFilter
-from app.services.rag import RAGService
 from app.services.settings import PromptService, RuntimeSettings, SettingsService
 from app.services.tasks import TaskSupervisor
 
@@ -92,8 +86,7 @@ class DialogService:
         attachment_service: AttachmentService,
         settings_service: SettingsService,
         prompt_service: PromptService,
-        context_builder: ContextBuilder,
-        rag_service: RAGService,
+        generation_context: GenerationContextService,
         llm_provider: LLMProvider,
         broker: EventBroker,
         tasks: TaskSupervisor,
@@ -102,8 +95,7 @@ class DialogService:
         self._attachment_service = attachment_service
         self._settings_service = settings_service
         self._prompt_service = prompt_service
-        self._context_builder = context_builder
-        self._rag_service = rag_service
+        self._generation_context = generation_context
         self._llm_provider = llm_provider
         self._broker = broker
         self._tasks = tasks
@@ -121,19 +113,19 @@ class DialogService:
         dialog_id: uuid.UUID,
         mode: DialogMode,
     ) -> None:
+        if mode != DialogMode.AI_SUPPORT:
+            return
         if message_id in self._processing_message_ids:
             return
         self._processing_message_ids.add(message_id)
-        if mode == DialogMode.AI_SUPPORT:
-            self._pending_ai_dialogs.add(dialog_id)
+        self._pending_ai_dialogs.add(dialog_id)
 
         async def run() -> None:
             try:
                 await self.process_user_message(message_id)
             finally:
                 self._processing_message_ids.discard(message_id)
-                if mode == DialogMode.AI_SUPPORT:
-                    self._pending_ai_dialogs.discard(dialog_id)
+                self._pending_ai_dialogs.discard(dialog_id)
 
         self._tasks.spawn(run())
 
@@ -141,7 +133,10 @@ class DialogService:
         async with self._session_factory() as session:
             dialogs = list(
                 await session.scalars(
-                    select(Dialog).where(Dialog.status == DialogStatus.ACTIVE)
+                    select(Dialog).where(
+                        Dialog.status == DialogStatus.ACTIVE,
+                        Dialog.mode == DialogMode.AI_SUPPORT,
+                    )
                 )
             )
             pending: list[tuple[uuid.UUID, uuid.UUID, DialogMode]] = []
@@ -157,7 +152,7 @@ class DialogService:
                     )
                 )
                 for trigger in triggers:
-                    if not await self._turn_completed(session, trigger, dialog):
+                    if not await self._turn_completed(session, trigger):
                         pending.append((trigger.id, dialog.id, dialog.mode))
         for message_id, dialog_id, mode in pending:
             self._schedule_processing(message_id, dialog_id, mode)
@@ -321,6 +316,7 @@ class DialogService:
                 if (
                     dialog.status == DialogStatus.ACTIVE
                     and existing.author_type == MessageAuthor.USER
+                    and dialog.mode == DialogMode.AI_SUPPORT
                 ):
                     if existing.processing_status == MessageProcessingStatus.FAILED:
                         existing.processing_status = MessageProcessingStatus.PENDING
@@ -354,7 +350,10 @@ class DialogService:
                 sources=[],
                 processing_status=(
                     MessageProcessingStatus.PENDING
-                    if requester.role == UserRole.USER
+                    if (
+                        requester.role == UserRole.USER
+                        and dialog.mode == DialogMode.AI_SUPPORT
+                    )
                     else None
                 ),
             )
@@ -425,7 +424,7 @@ class DialogService:
                     operator_dialog_channel(dialog_id),
                     {"type": "user_message", "message": payload},
                 )
-            if not defer_processing:
+            if not defer_processing and mode == DialogMode.AI_SUPPORT:
                 self._schedule_processing(message.id, dialog_id, mode)
         else:
             await self._broker.publish(
@@ -443,7 +442,9 @@ class DialogService:
             dialog = await session.get(Dialog, message.dialog_id)
             if dialog is None or dialog.status != DialogStatus.ACTIVE:
                 return
-            if await self._turn_completed(session, message, dialog):
+            if dialog.mode != DialogMode.AI_SUPPORT:
+                return
+            if await self._turn_completed(session, message):
                 return
             mode = dialog.mode
         self._schedule_processing(message_id, message.dialog_id, mode)
@@ -467,23 +468,54 @@ class DialogService:
             )
             return [await self._summary(session, dialog) for dialog in dialogs]
 
-    async def latest_operator_draft(
+    async def generate_operator_template(
         self, operator: User, dialog_id: uuid.UUID
-    ) -> OperatorDraftDto | None:
+    ) -> OperatorTemplateDto:
         if operator.role != UserRole.OPERATOR:
             raise ForbiddenError("Endpoint доступен только оператору")
-        async with self._session_factory() as session:
-            dialog = await session.get(Dialog, dialog_id)
-            if dialog is None:
-                raise NotFoundError("Диалог не найден")
-            self._assert_read_access(operator, dialog)
-            draft = await session.scalar(
-                select(OperatorDraft)
-                .where(OperatorDraft.dialog_id == dialog_id)
-                .order_by(OperatorDraft.created_at.desc(), OperatorDraft.id.desc())
-                .limit(1)
+
+        async with self.dialog_lock(dialog_id):
+            async with self._session_factory() as session:
+                dialog = await session.get(Dialog, dialog_id)
+                if dialog is None:
+                    raise NotFoundError("Диалог не найден")
+                self._assert_send_access(operator, dialog)
+                dialog_updated_at = dialog.updated_at
+                runtime_settings = await self._settings_service.get_runtime(session)
+                prompt = await self._prompt_service.get_active(
+                    session, PromptType.OPERATOR_GIGACHAT
+                )
+            try:
+                async with self._gigachat_semaphore:
+                    context = (
+                        await self._generation_context.build_for_operator_template(
+                            dialog_id=dialog_id,
+                            system_prompt=prompt.content,
+                            settings=runtime_settings,
+                        )
+                    )
+                    output_filter = ModelOutputStreamFilter()
+                    async for chunk in self._llm_provider.stream_text(
+                        context.request,
+                        runtime_settings.active_model,
+                        runtime_settings.gigachat_max_output_tokens,
+                        dialog_id,
+                    ):
+                        if chunk.text:
+                            output_filter.push(chunk.text)
+                    generated_text = output_filter.final()
+                    if not generated_text:
+                        raise ProviderServerError("GigaChat вернул пустой шаблон")
+            except ProviderError as exc:
+                raise ServiceUnavailableError(str(exc)) from exc
+
+            return OperatorTemplateDto(
+                dialog_id=dialog_id,
+                dialog_updated_at=dialog_updated_at,
+                text=generated_text,
+                sources=[item.source for item in context.request.evidence],
+                created_at=datetime.now(UTC),
             )
-            return draft_dto(draft) if draft is not None else None
 
     async def claim(self, operator: User, dialog_id: uuid.UUID) -> DialogDetail:
         if operator.role != UserRole.OPERATOR:
@@ -643,12 +675,10 @@ class DialogService:
     async def process_user_message(self, message_id: uuid.UUID) -> None:
         started = time.monotonic()
         dialog_id: uuid.UUID | None = None
-        mode = DialogMode.AI_SUPPORT
         confidence: float | None = None
         source_snapshot: list[dict[str, object]] = []
         runtime_settings: RuntimeSettings | None = None
         prompt_version: int | None = None
-        prompt_embedding_task: asyncio.Task[HybridEmbedding] | None = None
         try:
             async with self._session_factory() as session:
                 trigger = await session.get(Message, message_id)
@@ -666,163 +696,33 @@ class DialogService:
                         or dialog.status != DialogStatus.ACTIVE
                     ):
                         return
-                    mode = dialog.mode
-                    if await self._turn_completed(session, trigger, dialog):
+                    if dialog.mode != DialogMode.AI_SUPPORT:
+                        return
+                    if await self._turn_completed(session, trigger):
                         return
                     trigger.processing_status = MessageProcessingStatus.PROCESSING
                     trigger.processing_error = None
                     dialog.updated_at = datetime.now(UTC)
                     await session.commit()
                     runtime_settings = await self._settings_service.get_runtime(session)
-                    prompt_type = (
-                        PromptType.USER_SUPPORT
-                        if mode == DialogMode.AI_SUPPORT
-                        else PromptType.OPERATOR_GIGACHAT
+                    prompt = await self._prompt_service.get_active(
+                        session, PromptType.USER_SUPPORT
                     )
-                    prompt = await self._prompt_service.get_active(session, prompt_type)
                     prompt_version = prompt.version
-                    messages = list(
-                        await session.scalars(
-                            select(Message)
-                            .where(Message.dialog_id == dialog_id)
-                            .order_by(Message.created_at, Message.id)
-                        )
-                    )
-                    trigger_index = next(
-                        index
-                        for index, item in enumerate(messages)
-                        if item.id == message_id
-                    )
-                    previous = messages[:trigger_index]
-                    all_attachments = await self._attachments_by_message(
-                        session, [item.id for item in previous] + [message_id]
-                    )
-                    trigger_attachments = all_attachments.get(message_id, [])
-                    history = self._history(previous, all_attachments)
-
-                prompt_search_context = (
-                    self._context_builder.build_prompt_embedding_context(
-                        current_text=trigger.text,
-                        history=history,
-                        settings=runtime_settings,
-                    )
-                )
-                prompt_embedding_task = asyncio.create_task(
-                    self._rag_service.embed_query(prompt_search_context)
-                )
 
                 async with self._gigachat_semaphore:
-                    attachment_file_ids: list[str] = []
-                    attachment_mime_types: list[str] = []
-                    for attachment in trigger_attachments:
-                        if attachment.gigachat_file_id is None:
-                            content = await self._attachment_service.storage.get(
-                                attachment.storage_key
-                            )
-                            file_id = await self._llm_provider.upload_file(
-                                PurePosixPath(attachment.storage_key).name,
-                                content,
-                                runtime_settings.active_model,
-                                dialog_id,
-                            )
-                            async with self._session_factory() as session:
-                                persisted = await session.get(Attachment, attachment.id)
-                                if persisted is None:
-                                    await self._llm_provider.delete_file(
-                                        file_id,
-                                        runtime_settings.active_model,
-                                        dialog_id,
-                                    )
-                                    return
-                                persisted.gigachat_file_id = file_id
-                                await session.commit()
-                            attachment.gigachat_file_id = file_id
-                        if attachment.gigachat_file_id is not None:
-                            attachment_file_ids.append(attachment.gigachat_file_id)
-                            attachment_mime_types.append(attachment.mime_type)
-
-                    vision_attachment = next(
-                        (
-                            item
-                            for item in trigger_attachments
-                            if item.mime_type in RUNTIME_IMAGE_MIME_TYPES
-                        ),
-                        None,
+                    context = await self._generation_context.build_for_user_message(
+                        dialog_id=dialog_id,
+                        message_id=message_id,
+                        system_prompt=prompt.content,
+                        settings=runtime_settings,
                     )
-                    if vision_attachment is not None and (
-                        vision_attachment.extracted_text is None
-                        or vision_attachment.visual_summary is None
-                    ):
-                        if vision_attachment.gigachat_file_id is None:
-                            raise ProviderServerError("GigaChat file_id не сохранён")
-                        analysis = await self._llm_provider.analyze_screenshot(
-                            vision_attachment.gigachat_file_id,
-                            trigger.text,
-                            runtime_settings.active_model,
-                            dialog_id,
-                        )
-                        async with self._session_factory() as session:
-                            persisted = await session.get(
-                                Attachment, vision_attachment.id
-                            )
-                            if persisted is not None:
-                                persisted.extracted_text = analysis.extracted_text
-                                persisted.visual_summary = analysis.visual_summary
-                                await session.commit()
-                        vision_attachment.extracted_text = analysis.extracted_text
-                        vision_attachment.visual_summary = analysis.visual_summary
-
-                    if prompt_embedding_task is None:
-                        raise ProviderServerError(
-                            "Не удалось подготовить embedding запроса"
-                        )
-                    query_embeddings = [await prompt_embedding_task]
-                    if vision_attachment is not None:
-                        screenshot_search_context = (
-                            self._context_builder.build_screenshot_embedding_context(
-                                extracted_text=vision_attachment.extracted_text,
-                                visual_summary=vision_attachment.visual_summary,
-                                settings=runtime_settings,
-                            )
-                        )
-                        query_embeddings.append(
-                            await self._rag_service.embed_query(
-                                screenshot_search_context
-                            )
-                        )
-                    async with self._session_factory() as session:
-                        retrieval = await self._rag_service.retrieve_embeddings(
-                            session,
-                            query_embeddings,
-                            runtime_settings.rag_top_k,
-                            weights=[1.0] * len(query_embeddings),
-                        )
-                    evidence = retrieval.evidence
+                    generation_request = context.request
                     logger.info(
                         "RAG retrieval status=%s evidence_count=%d dialog=%s",
-                        retrieval.status,
-                        len(evidence),
+                        generation_request.rag_status,
+                        len(generation_request.evidence),
                         dialog_id,
-                    )
-                    generation_request = self._context_builder.build_generation_request(
-                        system_prompt=prompt.content,
-                        current_text=trigger.text,
-                        history=history,
-                        evidence=evidence,
-                        attachment_file_ids=attachment_file_ids,
-                        attachment_mime_types=attachment_mime_types,
-                        screenshot_extracted_text=(
-                            vision_attachment.extracted_text
-                            if vision_attachment
-                            else None
-                        ),
-                        screenshot_visual_summary=(
-                            vision_attachment.visual_summary
-                            if vision_attachment
-                            else None
-                        ),
-                        settings=runtime_settings,
-                        rag_status=retrieval.status,
                     )
                     source_snapshot = [
                         item.source.model_dump(mode="json")
@@ -837,31 +737,21 @@ class DialogService:
                     await self._persist_confidence(
                         dialog_id, message_id, confidence, source_snapshot
                     )
-                    if mode == DialogMode.AI_SUPPORT:
-                        await self._broker.publish(
-                            user_dialog_channel(dialog_id),
-                            {"type": "confidence", "value": confidence},
+                    await self._broker.publish(
+                        user_dialog_channel(dialog_id),
+                        {"type": "confidence", "value": confidence},
+                    )
+                    if confidence < runtime_settings.operator_escalation_threshold:
+                        await self._escalate(
+                            dialog_id,
+                            confidence,
+                            source_snapshot,
+                            started,
+                            runtime_settings,
+                            prompt_version,
+                            message_id,
                         )
-                        if confidence < runtime_settings.operator_escalation_threshold:
-                            await self._escalate(
-                                dialog_id,
-                                confidence,
-                                source_snapshot,
-                                started,
-                                runtime_settings,
-                                prompt_version,
-                                message_id,
-                            )
-                            return
-                    else:
-                        await self._broker.publish(
-                            operator_dialog_channel(dialog_id),
-                            {
-                                "type": "confidence",
-                                "value": confidence,
-                                "triggerMessageId": str(message_id),
-                            },
-                        )
+                        return
 
                     output_filter = ModelOutputStreamFilter()
                     usage: ProviderUsage | None = None
@@ -876,56 +766,29 @@ class DialogService:
                         if not chunk.text:
                             continue
                         visible_text = output_filter.push(chunk.text)
-                        if not visible_text:
-                            continue
-                        if mode == DialogMode.AI_SUPPORT:
+                        if visible_text:
                             await self._broker.publish(
                                 user_dialog_channel(dialog_id),
                                 {"type": "assistant_token", "token": visible_text},
-                            )
-                        else:
-                            await self._broker.publish(
-                                operator_dialog_channel(dialog_id),
-                                {
-                                    "type": "draft_token",
-                                    "token": visible_text,
-                                    "triggerMessageId": str(message_id),
-                                },
                             )
                     generated_text = output_filter.final()
                     if not generated_text:
                         raise ProviderServerError("GigaChat вернул пустой ответ")
 
-                if mode == DialogMode.AI_SUPPORT:
-                    dto = await self._persist_assistant(
-                        dialog_id,
-                        generated_text,
-                        confidence,
-                        source_snapshot,
-                        trigger_message_id=message_id,
-                    )
-                    await self._broker.publish(
-                        user_dialog_channel(dialog_id),
-                        {
-                            "type": "assistant_done",
-                            "message": dto.model_dump(mode="json"),
-                        },
-                    )
-                else:
-                    draft = await self._persist_draft(
-                        dialog_id,
-                        message_id,
-                        generated_text,
-                        confidence,
-                        source_snapshot,
-                    )
-                    await self._broker.publish(
-                        operator_dialog_channel(dialog_id),
-                        {
-                            "type": "draft_done",
-                            "draft": draft.model_dump(mode="json"),
-                        },
-                    )
+                dto = await self._persist_assistant(
+                    dialog_id,
+                    generated_text,
+                    confidence,
+                    source_snapshot,
+                    trigger_message_id=message_id,
+                )
+                await self._broker.publish(
+                    user_dialog_channel(dialog_id),
+                    {
+                        "type": "assistant_done",
+                        "message": dto.model_dump(mode="json"),
+                    },
+                )
                 await self._record_metric(
                     dialog_id,
                     started,
@@ -936,7 +799,7 @@ class DialogService:
                     prompt_version,
                 )
         except ProviderPolicyError:
-            if dialog_id is not None and mode == DialogMode.AI_SUPPORT:
+            if dialog_id is not None:
                 try:
                     dto = await self._persist_assistant(
                         dialog_id,
@@ -980,51 +843,21 @@ class DialogService:
                             "message": "Не удалось обработать сообщение",
                         },
                     )
-            elif dialog_id is not None:
-                await self._mark_turn_failed(
-                    message_id,
-                    "GigaChat не может обработать запрос из-за "
-                    "тематических ограничений",
-                )
-                await self._broker.publish(
-                    operator_dialog_channel(dialog_id),
-                    {
-                        "type": "error",
-                        "message": (
-                            "GigaChat не может обработать запрос из-за "
-                            "тематических ограничений"
-                        ),
-                    },
-                )
         except ProviderError as exc:
             await self._mark_turn_failed(message_id, str(exc))
             if dialog_id is not None:
-                channel = (
-                    user_dialog_channel(dialog_id)
-                    if mode == DialogMode.AI_SUPPORT
-                    else operator_dialog_channel(dialog_id)
-                )
                 await self._broker.publish(
-                    channel, {"type": "error", "message": str(exc)}
+                    user_dialog_channel(dialog_id),
+                    {"type": "error", "message": str(exc)},
                 )
         except Exception:
             logger.exception("Dialog turn processing failed for message %s", message_id)
             await self._mark_turn_failed(message_id, "Не удалось обработать сообщение")
             if dialog_id is not None:
-                channel = (
-                    user_dialog_channel(dialog_id)
-                    if mode == DialogMode.AI_SUPPORT
-                    else operator_dialog_channel(dialog_id)
-                )
                 await self._broker.publish(
-                    channel,
+                    user_dialog_channel(dialog_id),
                     {"type": "error", "message": "Не удалось обработать сообщение"},
                 )
-        finally:
-            if prompt_embedding_task is not None:
-                if not prompt_embedding_task.done():
-                    prompt_embedding_task.cancel()
-                await asyncio.gather(prompt_embedding_task, return_exceptions=True)
 
     async def read_attachment(
         self, requester: User, attachment_id: uuid.UUID
@@ -1190,67 +1023,6 @@ class DialogService:
             await session.commit()
             return message_dto(message)
 
-    async def _persist_draft(
-        self,
-        dialog_id: uuid.UUID,
-        trigger_message_id: uuid.UUID,
-        text: str,
-        confidence: float,
-        sources: list[dict[str, object]],
-    ) -> OperatorDraftDto:
-        async with self._session_factory() as session:
-            existing = await session.scalar(
-                select(OperatorDraft).where(
-                    OperatorDraft.trigger_message_id == trigger_message_id
-                )
-            )
-            if existing is not None:
-                await self._set_trigger_status(
-                    session,
-                    trigger_message_id,
-                    MessageProcessingStatus.COMPLETED,
-                )
-                await session.commit()
-                return draft_dto(existing)
-            draft = OperatorDraft(
-                dialog_id=dialog_id,
-                trigger_message_id=trigger_message_id,
-                text=text,
-                confidence=confidence,
-                sources=sources,
-            )
-            session.add(draft)
-            await self._set_trigger_status(
-                session,
-                trigger_message_id,
-                MessageProcessingStatus.COMPLETED,
-            )
-            dialog = await session.get(Dialog, dialog_id)
-            if dialog is not None:
-                dialog.updated_at = datetime.now(UTC)
-            try:
-                await session.commit()
-            except IntegrityError:
-                await session.rollback()
-                existing = await session.scalar(
-                    select(OperatorDraft).where(
-                        OperatorDraft.trigger_message_id == trigger_message_id
-                    )
-                )
-                if existing is None:
-                    raise
-                await self._set_trigger_status(
-                    session,
-                    trigger_message_id,
-                    MessageProcessingStatus.COMPLETED,
-                )
-                dialog = await session.get(Dialog, dialog_id)
-                if dialog is not None:
-                    dialog.updated_at = datetime.now(UTC)
-                await session.commit()
-                return draft_dto(existing)
-            return draft_dto(draft)
-
     @staticmethod
     async def _set_trigger_status(
         session: AsyncSession,
@@ -1325,19 +1097,11 @@ class DialogService:
     async def _turn_completed(
         session: AsyncSession,
         trigger: Message,
-        dialog: Dialog,
     ) -> bool:
         if trigger.processing_status in {
             MessageProcessingStatus.COMPLETED,
             MessageProcessingStatus.FAILED,
         }:
-            return True
-        draft_id = await session.scalar(
-            select(OperatorDraft.id)
-            .where(OperatorDraft.trigger_message_id == trigger.id)
-            .limit(1)
-        )
-        if draft_id is not None:
             return True
         assistant_id = await session.scalar(
             select(Message.id)
@@ -1348,37 +1112,14 @@ class DialogService:
             )
             .limit(1)
         )
-        if assistant_id is not None:
-            return True
-        if dialog.mode == DialogMode.OPERATOR_SUPPORT:
-            operator_message_id = await session.scalar(
-                select(Message.id)
-                .where(
-                    Message.dialog_id == trigger.dialog_id,
-                    Message.author_type == MessageAuthor.OPERATOR,
-                    Message.created_at > trigger.created_at,
-                )
-                .limit(1)
-            )
-            if operator_message_id is not None:
-                return True
-            escalation_id = await session.scalar(
-                select(Message.id)
-                .where(
-                    Message.dialog_id == trigger.dialog_id,
-                    Message.author_type == MessageAuthor.SYSTEM,
-                    Message.text == ESCALATION_SYSTEM_MESSAGE,
-                    Message.created_at > trigger.created_at,
-                )
-                .limit(1)
-            )
-            return escalation_id is not None
-        return False
+        return assistant_id is not None
 
     async def _processing_state(
         self, session: AsyncSession, dialog: Dialog
     ) -> tuple[bool, str | None]:
         if dialog.status != DialogStatus.ACTIVE:
+            return False, None
+        if dialog.mode == DialogMode.OPERATOR_SUPPORT:
             return False, None
         trigger = await session.scalar(
             select(Message)
@@ -1393,7 +1134,7 @@ class DialogService:
             return False, None
         if trigger.processing_status == MessageProcessingStatus.FAILED:
             return False, trigger.processing_error
-        if await self._turn_completed(session, trigger, dialog):
+        if await self._turn_completed(session, trigger):
             return False, None
         if trigger.processing_status in {
             MessageProcessingStatus.PENDING,
@@ -1446,14 +1187,6 @@ class DialogService:
             )
             is not None
         )
-        latest_draft = None
-        if requester.role == UserRole.OPERATOR:
-            latest_draft = await session.scalar(
-                select(OperatorDraft)
-                .where(OperatorDraft.dialog_id == dialog.id)
-                .order_by(OperatorDraft.created_at.desc(), OperatorDraft.id.desc())
-                .limit(1)
-            )
         is_processing, processing_error = await self._processing_state(session, dialog)
         return dialog_detail(
             dialog,
@@ -1466,7 +1199,6 @@ class DialogService:
             processing_error=processing_error,
             feedback=feedback,
             candidate=candidate,
-            latest_draft=latest_draft,
         )
 
     async def _summary(
@@ -1541,22 +1273,6 @@ class DialogService:
         for attachment in attachments:
             result.setdefault(attachment.message_id, []).append(attachment)
         return result
-
-    @staticmethod
-    def _history(
-        messages: list[Message],
-        attachments: dict[uuid.UUID, list[Attachment]],
-    ) -> list[ChatTurn]:
-        history: list[ChatTurn] = []
-        for message in messages:
-            text = message.text
-            for attachment in attachments.get(message.id, []):
-                if attachment.extracted_text:
-                    text += f"\n[Текст вложения] {attachment.extracted_text}"
-                if attachment.visual_summary:
-                    text += f"\n[Описание вложения] {attachment.visual_summary}"
-            history.append(ChatTurn(role=message.author_type.value, text=text))
-        return history
 
     @staticmethod
     def _assert_read_access(requester: User, dialog: Dialog) -> None:

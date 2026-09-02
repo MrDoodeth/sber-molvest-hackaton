@@ -202,32 +202,6 @@ class Attachment(UUIDPrimaryKey, Base):
     )
 
 
-class OperatorDraft(UUIDPrimaryKey, Base):
-    __tablename__ = "operator_drafts"
-    __table_args__ = (
-        UniqueConstraint("trigger_message_id", name="uq_draft_trigger_message"),
-        CheckConstraint(
-            "confidence >= 0 AND confidence <= 1",
-            name="ck_draft_confidence_range",
-        ),
-    )
-
-    dialog_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("dialogs.id", ondelete="CASCADE"), index=True
-    )
-    trigger_message_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("messages.id", ondelete="CASCADE"), index=True
-    )
-    text: Mapped[str] = mapped_column(Text)
-    confidence: Mapped[float] = mapped_column(Float)
-    sources: Mapped[list[dict[str, Any]]] = mapped_column(
-        JSON_TYPE, default=list, server_default=sql_text("'[]'")
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utc_now, server_default=func.now()
-    )
-
-
 class KnowledgeSection(UUIDPrimaryKey, Base):
     __tablename__ = "knowledge_sections"
 

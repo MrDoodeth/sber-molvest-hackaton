@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
-from app.contracts.schemas import SourceRef
+from app.contracts.schemas import CaseCard, SourceRef
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,6 +152,14 @@ class LLMProvider(Protocol):
         model: str,
         session_id: uuid.UUID,
     ) -> ConfidenceAssessment: ...
+
+    async def generate_case_card(
+        self,
+        request: GenerationRequest,
+        model: str,
+        max_output_tokens: int,
+        session_id: uuid.UUID,
+    ) -> CaseCard: ...
 
     def stream_text(
         self,

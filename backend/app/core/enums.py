@@ -75,6 +75,7 @@ class IndexStatus(StrEnum):
 class PromptType(StrEnum):
     USER_SUPPORT = "user_support"
     OPERATOR_GIGACHAT = "operator_gigachat"
+    KNOWLEDGE_CARD = "knowledge_card"
 
 
 class MonitoringPeriod(StrEnum):

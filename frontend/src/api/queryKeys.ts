@@ -14,7 +14,6 @@ export const queryKeys = {
   operator: {
     queues: () => ["operator", "queue"] as const,
     queue: (scope: "unassigned" | "mine") => ["operator", "queue", scope] as const,
-    draft: (dialogId: string) => ["operator", "draft", dialogId] as const,
   },
   kb: {
     sections: () => ["kb", "sections"] as const,

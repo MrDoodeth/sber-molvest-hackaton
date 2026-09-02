@@ -22,7 +22,7 @@ from app.core.enums import (
     DialogStatus,
     DocumentSourceType,
     FeedbackVerdict,
-    MessageAuthor,
+    PromptType,
     UserRole,
 )
 from app.core.errors import (
@@ -41,10 +41,15 @@ from app.models import (
     Message,
     User,
 )
-from app.providers.interfaces import ProviderError, StorageError
+from app.providers.interfaces import (
+    LLMProvider,
+    ProviderError,
+    StorageError,
+)
 from app.services.attachments import AttachmentService, ValidatedUpload
+from app.services.generation_context import GenerationContextService
 from app.services.kb import IngestionFailedError, KnowledgeBaseService
-from app.services.settings import SettingsService
+from app.services.settings import PromptService, SettingsService
 
 logger = logging.getLogger(__name__)
 
@@ -57,12 +62,19 @@ class ModerationService:
         knowledge_base: KnowledgeBaseService,
         attachment_service: AttachmentService,
         settings_service: SettingsService,
+        prompt_service: PromptService,
+        generation_context: GenerationContextService,
+        llm_provider: LLMProvider,
     ) -> None:
         self._session_factory = session_factory
         self._knowledge_base = knowledge_base
         self._attachment_service = attachment_service
         self._settings_service = settings_service
+        self._prompt_service = prompt_service
+        self._generation_context = generation_context
+        self._llm_provider = llm_provider
         self._candidate_locks: dict[uuid.UUID, asyncio.Lock] = {}
+        self._gigachat_semaphore = asyncio.Semaphore(1)
 
     def _lock_for(self, candidate_id: uuid.UUID) -> asyncio.Lock:
         return self._candidate_locks.setdefault(candidate_id, asyncio.Lock())
@@ -367,64 +379,42 @@ class ModerationService:
     async def _build_case_card(
         self, session: AsyncSession, dialog_id: uuid.UUID
     ) -> CaseCard:
-        messages = list(
-            await session.scalars(
-                select(Message)
-                .where(Message.dialog_id == dialog_id)
-                .order_by(Message.created_at, Message.id)
-            )
-        )
-        user_messages = [
-            message.text
-            for message in messages
-            if message.author_type == MessageAuthor.USER and message.text
-        ]
-        solutions = [
-            message.text
-            for message in messages
-            if message.author_type in {MessageAuthor.ASSISTANT, MessageAuthor.OPERATOR}
-            and message.text
-        ]
-        problem = user_messages[0] if user_messages else "Проблема описана во вложении"
-        attachments = list(
-            await session.scalars(
-                select(Attachment)
-                .join(Message, Attachment.message_id == Message.id)
-                .where(Message.dialog_id == dialog_id)
-            )
-        )
-        attachment_symptoms = [
-            value
-            for attachment in attachments
-            for value in (attachment.extracted_text, attachment.visual_summary)
-            if value
-        ]
         feedback = await session.scalar(
             select(DialogFeedback).where(DialogFeedback.dialog_id == dialog_id)
         )
-        if feedback is None:
-            result = "Обращение закрыто без итоговой оценки пользователя."
-        elif feedback.verdict == FeedbackVerdict.HELPFUL:
-            result = "Пользователь подтвердил, что решение помогло."
-        else:
-            result = "Пользователь отметил ошибку AI; карточка требует проверки."
-        context_lines = [
-            f"{message.author_type.value}: {message.text}"
-            for message in messages
-            if message.text
-        ]
-        return CaseCard(
-            title=problem[:120],
-            problem=problem,
-            symptoms="\n".join(attachment_symptoms or user_messages[:3]) or problem,
-            context="\n".join(context_lines) or problem,
-            solution="\n".join(solutions)
-            or (
-                "Решение в диалоге не зафиксировано; "
-                "требуется редактура администратора."
-            ),
-            result=result,
+        runtime = await self._settings_service.get_runtime(session)
+        prompt = await self._prompt_service.get_active(
+            session, PromptType.KNOWLEDGE_CARD
         )
+        feedback_context = (
+            "Итоговая оценка пользователя: оценка ещё не сохранена."
+            if feedback is None
+            else (
+                "Итоговая оценка пользователя: решение помогло."
+                if feedback.verdict == FeedbackVerdict.HELPFUL
+                else "Итоговая оценка пользователя: AI допустил ошибку."
+            )
+        )
+        async with self._gigachat_semaphore:
+            try:
+                context = await self._generation_context.build_for_knowledge_card(
+                    dialog_id=dialog_id,
+                    system_prompt=prompt.content,
+                    settings=runtime,
+                    instruction=(
+                        "Сформируй поля карточки решённого случая для последующей "
+                        "проверки администратором. "
+                        f"{feedback_context}"
+                    ),
+                )
+                return await self._llm_provider.generate_case_card(
+                    context.request,
+                    runtime.active_model,
+                    runtime.gigachat_max_output_tokens,
+                    dialog_id,
+                )
+            except ProviderError as exc:
+                raise ServiceUnavailableError(str(exc)) from exc
 
     async def _candidate_with_reviewer(
         self,

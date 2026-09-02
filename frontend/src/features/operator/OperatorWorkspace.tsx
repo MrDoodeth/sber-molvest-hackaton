@@ -4,18 +4,28 @@ import { authApi } from "../../api/auth";
 import { dialogsApi } from "../../api/dialogs";
 import { operatorApi } from "../../api/operator";
 import { queryKeys } from "../../api/queryKeys";
-import { Bot, CheckCircle2, Clipboard, Headphones, Inbox, MessagesSquare, PanelRight, RotateCcw, UserCheck } from "lucide-react";
+import type { SourceRef } from "../../api/types";
+import { Bot, CheckCircle2, Clipboard, Headphones, Inbox, MessagesSquare, PanelRight, RotateCcw, Sparkles, UserCheck } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ChatComposer, DialogStatusBadge, MarkdownContent, MessageList, MessageSources, StreamingMessage } from "../../shared/chat";
+import { ChatComposer, DialogStatusBadge, MessageList, MessageSources } from "../../shared/chat";
 import { appendPersistedMessage } from "../../shared/hooks/messageCache";
 import { useOperatorDialogEvents } from "../../shared/hooks/useOperatorDialogEvents";
-import { Badge, Button, ConfirmDialog, EmptyState, ErrorState, PageLoader, Tabs, useToast } from "../../shared/ui";
-import { formatDateTime, formatPercent, getErrorMessage, mergePersistedMessages, retryOrCreateSendAttempt, truncateTitle, type SendAttempt } from "../../shared/utils";
-import { DraftInsertAction } from "./DraftInsertAction";
+import { Badge, Button, ConfirmDialog, EmptyState, ErrorState, PageLoader, Tabs, Textarea, useToast } from "../../shared/ui";
+import { formatDateTime, getErrorMessage, mergePersistedMessages, retryOrCreateSendAttempt, truncateTitle, type SendAttempt } from "../../shared/utils";
+import { TemplateInsertAction } from "./TemplateInsertAction";
 import OperatorQueue from "./OperatorQueue";
 
-type MobilePane = "queue" | "chat" | "draft";
+type MobilePane = "queue" | "chat" | "template";
+
+interface TemplateState {
+  status: "generating" | "ready" | "error";
+  text: string;
+  sources: SourceRef[];
+  dialogUpdatedAt?: string;
+  updatedAt?: string;
+  error?: string;
+}
 
 export default function OperatorWorkspace() {
   const { dialogId } = useParams();
@@ -29,6 +39,7 @@ export default function OperatorWorkspace() {
   const [attachmentError, setAttachmentError] = useState<string>();
   const [failedAttempt, setFailedAttempt] = useState<SendAttempt>();
   const [closeOpen, setCloseOpen] = useState(false);
+  const [templates, setTemplates] = useState<Record<string, TemplateState>>({});
   const me = useQuery({ queryKey: queryKeys.me(), queryFn: ({ signal }) => authApi.me(signal) });
   const detail = useQuery({
     queryKey: queryKeys.dialog.detail(dialogId ?? ""),
@@ -48,16 +59,28 @@ export default function OperatorWorkspace() {
   });
   const events = useOperatorDialogEvents(dialogId);
   const allMessages = messages.data ? mergePersistedMessages(...messages.data.pages.map((page) => page.items)) : [];
-  const currentDraft = events.draft ?? detail.data?.latestDraft;
-  const draftText = events.draftText ?? currentDraft?.text ?? "";
-  const draftConfidence = events.confidence ?? currentDraft?.confidence;
-  const triggerMessageId = events.triggerMessageId ?? currentDraft?.triggerMessageId;
-  const triggerMessage = allMessages.find((message) => message.id === triggerMessageId);
-  const isGeneratingDraft = detail.data?.mode === "operator_support" && detail.data.isProcessing;
   const processingError = events.eventError ?? detail.data?.processingError ?? undefined;
   const isAssignedToMe = Boolean(detail.data?.assignedOperator?.id && detail.data.assignedOperator.id === me.data?.id);
+  const template = dialogId ? templates[dialogId] : undefined;
+  const templateText = template?.text ?? "";
+  const isGeneratingTemplate = template?.status === "generating";
+  const templateStale = Boolean(
+    template?.status === "ready"
+    && template.dialogUpdatedAt
+    && detail.data?.updatedAt
+    && template.dialogUpdatedAt !== detail.data.updatedAt,
+  );
+  const templateReady = template?.status === "ready" && !templateStale && Boolean(templateText.trim());
+  const hasUserMessage = allMessages.some((message) => message.authorType === "user");
 
-  useEffect(() => setMobilePane(dialogId ? "chat" : "queue"), [dialogId]);
+  useEffect(() => {
+    setMobilePane(dialogId ? "chat" : "queue");
+    setText("");
+    setAttachments([]);
+    setAttachmentError(undefined);
+    setFailedAttempt(undefined);
+    setCloseOpen(false);
+  }, [dialogId]);
 
   const claim = useMutation({
     mutationFn: () => operatorApi.claim(dialogId!),
@@ -77,6 +100,40 @@ export default function OperatorWorkspace() {
       toast(getErrorMessage(error), "error");
     },
   });
+  const generateTemplate = useMutation({
+    mutationFn: (targetDialogId: string) => operatorApi.generateTemplate(targetDialogId),
+    onMutate: (targetDialogId) => {
+      setTemplates((current) => ({
+        ...current,
+        [targetDialogId]: { status: "generating", text: "", sources: [] },
+      }));
+    },
+    onSuccess: (generated, targetDialogId) => {
+      setTemplates((current) => ({
+        ...current,
+        [targetDialogId]: {
+          status: "ready",
+          text: generated.text,
+          sources: generated.sources,
+          dialogUpdatedAt: generated.dialogUpdatedAt,
+          updatedAt: generated.createdAt,
+        },
+      }));
+    },
+    onError: (error, targetDialogId) => {
+      setTemplates((current) => ({
+        ...current,
+        [targetDialogId]: {
+          status: "error",
+          text: "",
+          sources: [],
+          error: getErrorMessage(error),
+        },
+      }));
+    },
+  });
+  const canGenerateTemplate = Boolean(dialogId && detail.data?.status === "active" && isAssignedToMe && hasUserMessage && !isGeneratingTemplate);
+  const canInsertTemplate = templateReady && isAssignedToMe && detail.data?.status === "active";
   const send = useMutation({
     mutationFn: (attempt: SendAttempt) => dialogsApi.sendMessage(dialogId!, attempt),
     onSuccess: (message) => {
@@ -117,16 +174,16 @@ export default function OperatorWorkspace() {
     setAttachments(files);
     setFailedAttempt(undefined);
   };
-  const insertDraft = (value: string) => {
+  const insertTemplate = (value: string) => {
     setText(value);
     setFailedAttempt(undefined);
     setMobilePane("chat");
     requestAnimationFrame(() => textareaRef.current?.focus());
   };
-  const copyDraft = async () => {
+  const copyTemplate = async () => {
     try {
-      await navigator.clipboard.writeText(draftText);
-      toast("Черновик скопирован", "success");
+      await navigator.clipboard.writeText(templateText);
+      toast("Шаблон скопирован", "success");
     } catch {
       toast("Не удалось скопировать текст", "error");
     }
@@ -139,7 +196,7 @@ export default function OperatorWorkspace() {
   return (
     <div className="flex h-[calc(100vh-65px)] min-h-[34rem] flex-col">
       <div className="border-b border-stone-200 bg-white p-2 lg:hidden">
-        <Tabs value={mobilePane} onChange={setMobilePane} ariaLabel="Панели рабочего места" items={[{ value: "queue", label: "Очередь" }, { value: "chat", label: "Диалог" }, { value: "draft", label: "AI черновик" }]} />
+        <Tabs value={mobilePane} onChange={setMobilePane} ariaLabel="Панели рабочего места" items={[{ value: "queue", label: "Очередь" }, { value: "chat", label: "Диалог" }, { value: "template", label: "Шаблон" }]} />
       </div>
       <div className="flex min-h-0 flex-1">
         <OperatorQueue selectedId={dialogId} onSelect={selectDialog} className={mobilePane === "queue" ? "flex w-full lg:w-[19rem]" : "hidden lg:flex lg:w-[19rem]"} />
@@ -173,7 +230,7 @@ export default function OperatorWorkspace() {
               {processingError && <div className="border-t border-red-100 bg-red-50 px-4 py-2 text-xs font-semibold text-red-800">{processingError}</div>}
               {failedAttempt && <div className="flex items-center justify-between gap-3 border-t border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-900"><span>Ответ не подтверждён. Retry сохранит тот же UUID.</span><Button size="sm" variant="secondary" pending={send.isPending} onClick={() => submitAttempt(failedAttempt)}>Повторить</Button></div>}
               {detail.data.status === "active" && isAssignedToMe && (
-                <ChatComposer ref={textareaRef} value={text} onChange={(value) => { setText(value); if (failedAttempt?.text !== value.trim()) setFailedAttempt(undefined); }} onSend={submit} pending={send.isPending} placeholder="Ответ пользователю…" attachments={attachments} attachmentError={attachmentError} onAttachmentChange={updateAttachments} onAttachmentError={setAttachmentError} footer={<button type="button" className="font-semibold text-indigo-600 lg:hidden" onClick={() => setMobilePane("draft")}>Открыть AI черновик</button>} />
+                <ChatComposer ref={textareaRef} value={text} onChange={(value) => { setText(value); if (failedAttempt?.text !== value.trim()) setFailedAttempt(undefined); }} onSend={submit} pending={send.isPending} placeholder="Ответ пользователю…" attachments={attachments} attachmentError={attachmentError} onAttachmentChange={updateAttachments} onAttachmentError={setAttachmentError} footer={<button type="button" className="font-semibold text-indigo-600 lg:hidden" onClick={() => setMobilePane("template")}>Открыть шаблон</button>} />
               )}
               {detail.data.status === "active" && !isAssignedToMe && !detail.data.assignedOperator && <div className="border-t border-stone-200 bg-white p-4 text-center text-sm text-stone-500"><Headphones className="mr-2 inline size-4" />Возьмите тикет в работу, чтобы ответить пользователю.</div>}
               {detail.data.status === "closed" && (
@@ -185,30 +242,54 @@ export default function OperatorWorkspace() {
             </>
           )}
         </section>
-        <aside className={mobilePane === "draft" ? "flex min-h-0 w-full flex-col bg-[#f7f6ff] lg:w-[22rem] lg:border-l" : "hidden min-h-0 w-[22rem] flex-col border-l border-indigo-100 bg-[#f7f6ff] lg:flex"}>
+        <aside className={mobilePane === "template" ? "flex min-h-0 w-full flex-col bg-[#f7f6ff] lg:w-[22rem] lg:border-l" : "hidden min-h-0 w-[22rem] flex-col border-l border-indigo-100 bg-[#f7f6ff] lg:flex"}>
           <div className="border-b border-indigo-100 bg-white/70 p-4">
             <p className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-indigo-600">Operator copilot</p>
-            <h2 className="mt-1 flex items-center gap-2 text-lg font-bold text-stone-950"><Bot className="size-5 text-giga" /> AI GigaChat</h2>
+            <h2 className="mt-1 flex items-center gap-2 text-lg font-bold text-stone-950"><Bot className="size-5 text-giga" /> Шаблон ответа</h2>
+            <p className="mt-1.5 text-xs leading-5 text-stone-500">GigaChat соберёт ответ по актуальной истории тикета. Перед отправкой его можно изменить.</p>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-4">
-            {!dialogId && <EmptyState icon={<PanelRight className="size-8" />} title="Черновик не выбран" description="Откройте тикет, чтобы увидеть предложение GigaChat." />}
-            {dialogId && isGeneratingDraft && <StreamingMessage text={events.draftText ?? ""} label="GigaChat готовит черновик" />}
-            {dialogId && !isGeneratingDraft && !draftText && events.draftText === null && <EmptyState icon={<MessagesSquare className="size-8" />} title="Черновика пока нет" description="Он появится после нового сообщения пользователя и сохранится на backend." />}
-            {dialogId && !isGeneratingDraft && events.draftText !== null && <StreamingMessage text={events.draftText} label="GigaChat готовит черновик" />}
-            {dialogId && !isGeneratingDraft && draftText && events.draftText === null && (
-              <div className="rounded-2xl border border-indigo-100 bg-white p-4 shadow-sm">
-                {triggerMessage && <div className="mb-4 rounded-xl bg-stone-50 p-3 text-xs leading-5 text-stone-600"><strong className="block text-[10px] uppercase tracking-wider text-stone-400">К сообщению пользователя</strong><span className="mt-1 line-clamp-3 block">{triggerMessage.text || "Сообщение с вложением"}</span></div>}
-                <MarkdownContent text={draftText} className="text-stone-800" />
-                {draftConfidence !== undefined && <div className="mt-4"><Badge tone={draftConfidence < 0.5 ? "danger" : "giga"}>Confidence {formatPercent(draftConfidence)}</Badge></div>}
-                <MessageSources sources={currentDraft?.sources ?? []} />
-                <div className="mt-5 flex flex-wrap gap-2">
-                  <DraftInsertAction draftText={draftText} currentText={text} disabled={!isAssignedToMe || detail.data?.status !== "active"} onInsert={insertDraft} />
-                  <Button type="button" variant="secondary" size="sm" onClick={() => void copyDraft()}><Clipboard className="size-4" /> Скопировать</Button>
-                </div>
-                <p className="mt-4 text-[11px] leading-5 text-stone-400">GigaChat ничего не отправляет сам. Проверьте и при необходимости отредактируйте предложение.</p>
+            {!dialogId && <EmptyState icon={<PanelRight className="size-8" />} title="Шаблон не выбран" description="Откройте тикет, чтобы сгенерировать ответ для клиента." />}
+            {dialogId && (
+              <div className="space-y-4">
+                {isGeneratingTemplate && (
+                  <div className="rounded-2xl border border-indigo-100 bg-white p-4 shadow-sm" role="status" aria-live="polite">
+                    <div className="flex items-center gap-2 text-sm font-bold text-indigo-700"><Sparkles className="size-4 animate-pulse" /> GigaChat формирует шаблон</div>
+                    <p className="mt-2 text-xs leading-5 text-stone-500">Берём последние сообщения и готовим новую версию ответа.</p>
+                  </div>
+                )}
+                {!isGeneratingTemplate && !templateText && !template?.error && <EmptyState icon={<MessagesSquare className="size-8" />} title="Шаблон ещё не создан" description="Нажмите «Сгенерировать шаблон». Контекст будет собран из актуальной истории тикета." />}
+                {(templateText || isGeneratingTemplate) && (
+                  <div className="rounded-2xl border border-indigo-100 bg-white p-4 shadow-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <label htmlFor="operator-template" className="text-sm font-bold text-stone-950">Редактируемый текст</label>
+                        <p className="mt-1 text-[11px] leading-5 text-stone-500">Изменения применяются только к вашему ответу.</p>
+                      </div>
+                      {templateReady && <Badge tone="success" className="justify-center text-center">Готов к вставке</Badge>}
+                    </div>
+                    <Textarea id="operator-template" rows={14} className="mt-3 min-h-56 resize-y" value={templateText} disabled={isGeneratingTemplate} onChange={(event) => { if (!dialogId) return; setTemplates((current) => ({ ...current, [dialogId]: { status: "ready", text: event.target.value, sources: template?.sources ?? [], dialogUpdatedAt: template?.dialogUpdatedAt, updatedAt: template?.updatedAt } })); }} placeholder="Здесь появится шаблон ответа…" />
+                    {template?.updatedAt && !isGeneratingTemplate && <p className="mt-2 text-[11px] font-semibold text-emerald-700">Шаблон обновлён {formatDateTime(template.updatedAt)}</p>}
+                    <MessageSources sources={template?.sources ?? []} />
+                    <div className="mt-3 flex justify-end"><Button type="button" variant="ghost" size="sm" disabled={!templateText.trim()} onClick={() => void copyTemplate()}><Clipboard className="size-4" /> Скопировать</Button></div>
+                  </div>
+                )}
+                {template?.error && <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-xs font-semibold leading-5 text-red-800" role="alert">Не удалось обновить шаблон: {template.error}</div>}
+                {templateStale && <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs font-semibold leading-5 text-amber-900">В диалоге появились новые сообщения. Сгенерируйте шаблон заново перед вставкой.</div>}
+                {detail.data?.status === "active" && !isAssignedToMe && <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs font-semibold leading-5 text-amber-900">Сначала возьмите тикет в работу, чтобы генерировать и вставлять шаблон.</div>}
+                {detail.data?.status === "closed" && <div className="rounded-xl border border-stone-200 bg-stone-100 px-3 py-2.5 text-xs font-semibold leading-5 text-stone-600">Закрытый тикет доступен только для просмотра.</div>}
               </div>
             )}
           </div>
+          {dialogId && (
+            <div className="border-t border-indigo-100 bg-white/80 p-4">
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
+                <Button type="button" variant="giga" className="w-full" pending={isGeneratingTemplate} disabled={!canGenerateTemplate} onClick={() => { if (dialogId) generateTemplate.mutate(dialogId); }}><Sparkles className="size-4" /> {templateText ? "Сгенерировать заново" : "Сгенерировать шаблон"}</Button>
+                <TemplateInsertAction templateText={templateText} currentText={text} disabled={!canInsertTemplate} onInsert={insertTemplate} className="w-full" />
+              </div>
+              <p className="mt-3 text-center text-[11px] leading-5 text-stone-400" aria-live="polite">{isGeneratingTemplate ? "Шаблон загружается…" : !hasUserMessage ? "Ожидаем сообщение клиента для формирования шаблона." : templateStale ? "Шаблон устарел: обновите его по текущему диалогу." : templateReady ? "Шаблон обновлён. Проверьте текст и вставьте его в поле ответа." : "Вставка станет доступна после готовности шаблона."}</p>
+            </div>
+          )}
         </aside>
       </div>
       <ConfirmDialog open={closeOpen} title="Закрыть тикет?" description="Пользователь больше не сможет писать в обращение и увидит финальную оценку решения." confirmLabel="Закрыть тикет" pending={close.isPending} onConfirm={() => close.mutate()} onCancel={() => setCloseOpen(false)} />

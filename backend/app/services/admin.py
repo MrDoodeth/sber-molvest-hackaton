@@ -11,7 +11,6 @@ from app.contracts.mappers import (
     candidate_dto,
     dialog_detail,
     dialog_summary,
-    draft_dto,
     feedback_dto,
     message_dto,
 )
@@ -41,7 +40,6 @@ from app.models import (
     KnowledgeSection,
     Message,
     MetricEvent,
-    OperatorDraft,
     User,
 )
 from app.services.settings import PromptService, SettingsService
@@ -226,13 +224,6 @@ class AdminService:
                 attachments_by_message.setdefault(attachment.message_id, []).append(
                     attachment
                 )
-            drafts = list(
-                await session.scalars(
-                    select(OperatorDraft)
-                    .where(OperatorDraft.dialog_id == dialog_id)
-                    .order_by(OperatorDraft.created_at)
-                )
-            )
             feedback = await session.scalar(
                 select(DialogFeedback).where(DialogFeedback.dialog_id == dialog_id)
             )
@@ -293,7 +284,6 @@ class AdminService:
                     message_dto(message, attachments_by_message.get(message.id, []))
                     for message in messages
                 ],
-                drafts=[draft_dto(draft) for draft in drafts],
                 feedback=feedback_dto(feedback) if feedback else None,
                 candidate=(
                     candidate_dto(

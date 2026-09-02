@@ -53,7 +53,7 @@
 - **Backend — модульный монолит на FastAPI**, не микросервисы: меньше DevOps-расходов на хакатон, модули (RAG, Vision, Escalation, KB) изолированы и готовы к выносу в отдельные сервисы позже.
 - **GigaChat — центральная генеративная модель:** используем API для формирования финального ответа и анализа приложенных скриншотов. Для MVP основной кандидат — `GigaChat (активная модель)`.
 - **Embeddings делаем локально:** Freemium предоставляет бесплатные токены генерации, но векторное представление текста оплачивается отдельно. Поэтому retrieval не зависит от платного Embeddings API; основной локальный кандидат — `BAAI/bge-m3`.
-- **Критичное ограничение Freemium — 1 поток генерации.** Обычный пользовательский turn использует до **двух последовательных GigaChat generation-call** (`confidence → answer/draft`), а turn со screenshot — до **трёх** (`screenshot parse → confidence → answer/draft`).
+- **Критичное ограничение Freemium — 1 поток генерации.** Обычный пользовательский turn использует до **двух последовательных GigaChat generation-call** (`confidence → answer`), а turn со screenshot — до **трёх** (`screenshot parse → confidence → answer`). Ручной шаблон оператора выполняется отдельным generation-call.
 - **GigaChain используем точечно**, где он ускоряет интеграцию с GigaChat/LangChain, но не строим многошаговую agent-chain, которая последовательно занимает единственный поток.
 
 ## 2. Контекст, цели и требования
@@ -179,6 +179,20 @@ Message.sources = <snapshot RAG evidence>
 - **Payload каждого чанка:** `document_id`, `title`, `heading_path`, `page`, `is_enabled`, `updated_at` и технические metadata для отображения источника.
 - **Поиск:** hybrid retrieval — dense semantic search + sparse/lexical search, результаты объединяются через RRF.
 - **Неуспешные обращения:** остаются в истории/аналитике и не публикуются как документы основной БЗ без административного approve.
+
+### ADR-5 · Схема PostgreSQL создаётся из актуальных моделей
+
+- **Решение:** backend создаёт схему через `Base.metadata.create_all` во время
+  startup lifespan. Начальные пользователи, разделы БЗ, настройки и все три
+  системных prompt добавляются через seed.
+- **Миграции базы данных не используются:** в репозитории нет Alembic и других
+  migration-скриптов, а контейнеры запускают сразу Uvicorn.
+- **Почему:** для MVP нужен один воспроизводимый initial state при сборке и
+  запуске без отдельного шага миграций и рассинхронизации модели с базой.
+- **Правило изменения схемы:** изменения ORM-моделей сначала отражаются в
+  `backend/app/models`, после чего для среды с изменившимся контрактом
+  пересоздаётся PostgreSQL volume. Создание схемы идемпотентно для уже
+  существующего актуального volume.
 
 ## 4. Высокоуровневая архитектура
 
@@ -345,7 +359,7 @@ flowchart TB
 | Анализ скриншотов | Встроен в каждый диалог, GigaChat Vision → извлечённый контекст → RAG |
 | Админ-панель | Управление разделами/документами, ползунок confidence, мониторинг и логи |
 | Обновление знаний | Загрузка новых документов и переиндексация; закрытые кейсы как кандидаты в БЗ |
-| Документация | `ARCHITECTURE.md`, `README.md`, Swagger UI `/docs` и ReDoc `/redoc` |
+| Документация | `ARCHITECTURE.md`, Swagger UI `/docs` и ReDoc `/redoc` |
 | Метрики эффективности | % без эскалации, среднее время ответа, количество эскалаций, confidence |
 
 ## 9. Риски и митигации
@@ -593,95 +607,36 @@ sources
 
 ---
 
-#### Этап 3. Режим оператора + AI GigaChat
+#### Этап 3. Режим оператора + ручной шаблон GigaChat
 
-После подключения оператора GigaChat **не отправляет ответы пользователю напрямую**.
+После подключения оператора GigaChat **не отправляет ответы пользователю напрямую**
+и не запускается автоматически на новых сообщениях. Новое пользовательское
+сообщение сохраняется и передаётся оператору событием `user_message`.
 
-##### ADR-5 · Confidence-gate сохраняется в `operator_support`
-
-Перед генерацией каждого нового AI GigaChat draft выполняется тот же confidence-call.
-
-```text
-user message
-→ RAG
-→ confidence gate
-→ AI GigaChat draft stream
-```
-
-В `operator_support` confidence больше не меняет routing — оператор уже подключён. Он сохраняется как диагностический сигнал и используется в operator UI (`Confidence: NN%`).
-
-Цена решения — дополнительный последовательный GigaChat-call под тем же `Semaphore(1)`. Мы принимаем её осознанно, чтобы:
-
-- не смешивать confidence JSON с streaming draft;
-- сохранять единый confidence-индикатор для оператора;
-- не менять SSE-контракт `draft_token / draft_done`.
-
-
-
-Для этого режима используется отдельный редактируемый системный промпт:
+Для ручной подсказки используется отдельный редактируемый системный prompt:
 
 ```text
 SystemPrompt(type=operator_gigachat)
 ```
 
-Его задача:
-
-> На основании полного контекста тикета, новых сообщений пользователя, RAG evidence и вложений сформировать оператору готовый черновик ответа.
-
-При каждом новом сообщении пользователя:
+Назначенный оператор сам запускает генерацию:
 
 ```text
-новое сообщение
-+ тот же embedding context builder
-        ↓
-      BGE-M3
-        ↓
-      Qdrant
-        ↓
-      evidence
-
-operator system prompt
-+ sliding context
-+ evidence
-+ attachments
-        ↓
-      GigaChat
-        ↓
-draft_for_operator
+POST /api/operator/dialogs/{dialogId}/template
+→ GenerationContextService читает актуальную историю и последнее user message
+→ BGE-M3 + Qdrant находят evidence
+→ GigaChat возвращает OperatorTemplateDto
 ```
 
-В панели оператора:
+Контекст включает скользящую историю, RAG evidence и attachment/screenshot
+последнего пользовательского сообщения. Результат не сохраняется в БД: frontend
+держит template state отдельно для каждого `dialogId`. `dialog_updated_at` в
+ответе endpoint позволяет запретить вставку, если история изменилась во время
+генерации.
 
-```text
-Пользователь:
-"После проведения документа всё равно появляется ошибка..."
-
-AI предлагает:
-"Проверьте, пожалуйста, заполнение поля ..."
-
-[ Вставить в ответ ]
-```
-
-Кнопка:
-
-```text
-[ Вставить в ответ ]
-```
-
-копирует AI GigaChat draft в поле ввода оператора.
-
-Дальше оператор может:
-
-- отправить текст без изменений;
-- отредактировать;
-- полностью переписать;
-- проигнорировать подсказку.
-
-**Решение всегда принимает оператор.**
-
-После отправки ответ становится обычным сообщением текущего тикета и попадает в общую историю. Следующее сообщение пользователя снова вызывает генерацию нового draft с учётом уже обновлённого контекста.
-
-Так продолжается до завершения обращения.
+В панели оператора шаблон можно вставить в composer, отредактировать, скопировать
+или проигнорировать. Он никогда не отправляется автоматически. Каждое новое
+сообщение пользователя требует явного нажатия «Сгенерировать шаблон».
 
 ---
 
@@ -707,19 +662,22 @@ Dialog.status = closed
 
 ---
 
-#### Два системных промпта
+#### Три системных промпта
 
-В приложении храним два независимо редактируемых системных промпта:
+В приложении храним три независимо редактируемых системных промпта:
 
 ```text
 SystemPrompt(type=user_support)
 → AI самостоятельно отвечает конечному пользователю
 
 SystemPrompt(type=operator_gigachat)
-→ AI GigaChat генерирует черновик для оператора
+→ AI GigaChat генерирует шаблон ответа для оператора
+
+SystemPrompt(type=knowledge_card)
+→ AI GigaChat заполняет поля карточки из закрытого тикета
 ```
 
-Оба хранятся в PostgreSQL и редактируются через админку без перезапуска backend.
+Все три хранятся в PostgreSQL и редактируются через админку без перезапуска backend.
 
 При смене режима тикета:
 
@@ -729,12 +687,12 @@ ai_support
 operator_support
 ```
 
-backend просто меняет используемый system prompt.
+backend прекращает автоматическую AI-обработку новых сообщений.
 
 Остальная инфраструктура остаётся той же:
 
 ```text
-ContextBuilder
+GenerationContextService
 BGE-M3
 Qdrant
 rag_top_k
@@ -742,7 +700,9 @@ attachments
 GigaChatProvider
 ```
 
-То есть второй режим **не требует второго RAG pipeline или отдельного AI-агента**.
+`GenerationContextService` используется для user answer, ручного operator template
+и Knowledge Card, поэтому второй режим не требует отдельного RAG pipeline или
+AI-агента.
 
 ---
 
@@ -778,7 +738,7 @@ AI SUPPORT
               ↓
        OPERATOR SUPPORT
               ↓
-       AI GIGACHAT DRAFTS
+       MANUAL AI TEMPLATE
               ↓
             closed
               ↓
@@ -942,11 +902,9 @@ SSE
 
 #### Поведение после подключения оператора
 
-В `operator_support` confidence-call продолжает выполняться перед каждым новым пользовательским сообщением и сохраняется для диагностики/панели оператора.
-
-Но routing уже не меняется: оператор подключён.
-
-Второй вызов генерирует не прямой ответ пользователю, а **AI GigaChat draft для оператора**.
+В `operator_support` новые пользовательские сообщения не запускают confidence-call
+или generation. Они сохраняются в историю и передаются назначенному оператору через
+SSE. Шаблон генерируется только явным `POST /api/operator/dialogs/{dialogId}/template`.
 
 #### Порог эскалации
 
@@ -962,7 +920,7 @@ operator_escalation_threshold ∈ [0, 1]
 0.80
 ```
 
-Порог передаётся GigaChat в confidence-call и в answer/draft-call.
+Порог передаётся GigaChat в confidence-call и user answer-call.
 
 Если пользователь прямо просит оператора, confidence-system instruction требует:
 
@@ -1168,17 +1126,8 @@ DB-level cascade:
 Dialog
 ├── Message                    ON DELETE CASCADE
 │   └── Attachment             ON DELETE CASCADE
-├── OperatorDraft              ON DELETE CASCADE
-│   └── trigger_message_id     ON DELETE CASCADE через Message
 ├── DialogFeedback             ON DELETE CASCADE
 └── KnowledgeCandidate         ON DELETE CASCADE
-```
-
-Для `OperatorDraft` задаются оба FK:
-
-```text
-OperatorDraft.dialog_id          → Dialog.id   ON DELETE CASCADE
-OperatorDraft.trigger_message_id → Message.id  ON DELETE CASCADE
 ```
 
 Связанные локальные файлы/screenshots удаляются из storage, а существующие `gigachat_file_id` удаляются из GigaChat Files API.
@@ -1500,7 +1449,8 @@ DEFAULT_CASE_SECTION_ID
 → системный раздел «Журнал обращений»
 ```
 
-Этот раздел создаётся migration/seed-ом и защищён backend от удаления через admin API.
+Этот раздел создаётся при старте приложения из SQLAlchemy-моделей и seed-данных и
+защищён backend от удаления через admin API.
 
 Approve выполняется атомарно:
 
@@ -2017,8 +1967,9 @@ GigaChat — **основная интеллектуальная модель п
 
 В runtime GigaChat получает:
 
-- системный промпт выбранного режима (`SystemPrompt(type=user_support)` или `SystemPrompt(type=operator_gigachat)`);
-- текущий вопрос пользователя;
+- системный prompt выбранного режима: `SystemPrompt(type=user_support)` для AI-ответа или `SystemPrompt(type=operator_gigachat)` для ручного шаблона;
+- для создания карточки из закрытого тикета — `SystemPrompt(type=knowledge_card)` и structured output;
+- текущий вопрос пользователя или последнее user message тикета для шаблона;
 - хвост истории диалога, собранный `ContextBuilder`;
 - найденные RAG evidence chunks;
 - текущий `operator_escalation_threshold`;
@@ -2029,8 +1980,10 @@ GigaChat — **основная интеллектуальная модель п
 1. интерпретацию проблемы;
 2. анализ изображения/разового вложения, если оно есть;
 3. сопоставление вопроса с RAG evidence;
-4. формирование ответа пользователю или draft для оператора;
-5. оценку `confidence`.
+4. формирование ответа пользователю или шаблона для оператора.
+
+`confidence` оценивается отдельным structured-вызовом только в `ai_support` до
+формирования ответа пользователю.
 
 Локальные BGE-M3 embeddings не являются вызовом GigaChat API и работают независимо.
 
@@ -2147,7 +2100,7 @@ ca_bundle_file="/path/to/russian_trusted_root_ca_pem.crt"
 
 ```text
 CALL #1 → confidence gate
-CALL #2 → answer/draft, только если он нужен
+CALL #2 → answer, только если он нужен
 ```
 
 Они никогда не выполняются параллельно.
@@ -2176,7 +2129,7 @@ request C ─┘
 classify → rewrite → vision → rerank → answer
 ```
 
-Единственное осознанное разделение generation-логики — короткий `confidence gate`, после которого при достаточной уверенности выполняется один answer/draft-call.
+Единственное осознанное разделение user generation-логики — короткий `confidence gate`, после которого при достаточной уверенности выполняется один answer-call. Ручной operator template выполняется отдельным вызовом без confidence gate.
 
 #### Тематические ограничения
 
@@ -2619,7 +2572,7 @@ CALL #1 — confidence gate
           ↓
 threshold check
           ↓
-CALL #2 — answer / AI GigaChat draft
+CALL #2 — user answer
 ```
 
 Для screenshot parsing используем отдельный structured contract, например:
@@ -2690,12 +2643,12 @@ operator_escalation_threshold
 ```text
 обычный turn:
 CALL #1 confidence
-CALL #2 answer/draft
+CALL #2 user answer
 
 turn со screenshot:
 CALL #0 screenshot parse
 CALL #1 confidence
-CALL #2 answer/draft
+CALL #2 user answer
 ```
 
 Все GigaChat-вызовы выполняются последовательно под `Semaphore(1)`.
@@ -2731,19 +2684,23 @@ INSTRUCTIONS
 6. Если evidence недостаточно — снижай confidence.
 7. Если пользователь явно просит оператора — верни confidence = 0.
 8. В confidence-call верни только structured `confidence`.
-9. В answer/draft-call верни обычный текст ответа.
+9. В answer-call верни обычный текст ответа.
 ```
 
 Системная часть не захардкожена в коде.
 
-Для двух режимов:
+Для трёх независимых задач:
 
 ```text
 SystemPrompt(type=user_support)
 SystemPrompt(type=operator_gigachat)
+SystemPrompt(type=knowledge_card)
 ```
 
-промпты хранятся в PostgreSQL, редактируются администратором и применяются без рестарта.
+Промпты хранятся в PostgreSQL, редактируются администратором и применяются без
+рестарта. `operator_gigachat` используется для ручного шаблона ответа, а
+`knowledge_card` — для структурированного заполнения полей карточки из закрытого
+тикета.
 
 System Prompt:
 
@@ -2994,7 +2951,7 @@ delete_file / adelete_file
 
 #### Streaming
 
-Streaming используется только для **Call #2 — answer/draft**:
+Streaming используется для user answer и ручного operator template:
 
 ```python
 async for chunk in llm.astream(answer_messages):
@@ -3009,7 +2966,8 @@ FastAPI транслирует обычные текстовые chunks чере
 
 ```text
 Call #1 → JSON confidence → backend decision
-Call #2 → plain text SSE → frontend
+user answer → plain text SSE → frontend
+manual template → plain text HTTP response → frontend
 ```
 
 #### Retry: только в одном слое
@@ -3269,12 +3227,11 @@ MVP-модель оставляем минимальной: каждая сущ�
 | `DialogFeedback` | `id`, `dialog_id`, `verdict`, `created_at` | Финальная оценка закрытого Dialog: `helpful / ai_error`; отсутствие записи = «ожидает оценки» |
 | `Message` | `id`, `dialog_id`, `author_type`, `text`, `confidence?`, `sources?`, `processing_status?`, `processing_error?`, `created_at` | Сообщения `user / assistant / operator / system`; состояние user trigger-turn сохраняется для восстановления генерации после reload |
 | `Attachment` | `id`, `message_id`, `storage_key`, `mime_type`, `gigachat_file_id?`, `extracted_text?`, `visual_summary?`, `remote_deleted_at?` | Runtime screenshot/document + результат screenshot parse |
-| `OperatorDraft` | `id`, `dialog_id`, `trigger_message_id`, `text`, `confidence`, `sources?`, `created_at` | AI GigaChat draft для оператора; хранится, чтобы не теряться после refresh |
 | `KnowledgeSection` | `id`, `name`, `is_enabled`, `created_at` | Раздел БЗ и master switch |
 | `KnowledgeDocument` | `id`, `section_id`, `source_type`, `title`, `storage_key`, `one_c_version?`, `tags`, `is_enabled`, `index_status`, `index_error?`, `indexed_at?` | `one_c_version` — версия конфигурации 1С, не история правок документа; версионирование файла остаётся Roadmap |
 | `Chunk` | `id`, `doc_id`, `text`, `vector_id`, `metadata` | Внутренний RAG-фрагмент, напрямую frontend не редактирует |
 | `KnowledgeCandidate` | `id`, `dialog_id`, `source`, `generated_card`, `status`, `resulting_document_id?`, `reviewed_by?`, `reviewed_at?` | `UNIQUE(dialog_id)`; после Approve `resulting_document_id → KnowledgeDocument.id` |
-| `SystemPrompt` | `id`, `type`, `content`, `is_active`, `version`, `updated_at`, `updated_by` | Одна сущность для двух prompt: `user_support / operator_gigachat` |
+| `SystemPrompt` | `id`, `type`, `content`, `is_active`, `version`, `updated_at`, `updated_by` | Одна сущность для трёх prompt: `user_support / operator_gigachat / knowledge_card` |
 | `SystemSetting` | `key`, `value`, `updated_at` | Runtime AI/RAG settings без restart |
 | `MetricEvent` | `id`, `dialog_id?`, `latency_ms`, `confidence?`, `escalated`, `prompt_tokens?`, `completion_tokens?`, `precached_prompt_tokens?`, `created_at` | Агрегаты мониторинга и технические usage-метрики |
 
@@ -3294,12 +3251,6 @@ Message.dialog_id
 → FK Dialog.id ON DELETE CASCADE
 
 Attachment.message_id
-→ FK Message.id ON DELETE CASCADE
-
-OperatorDraft.dialog_id
-→ FK Dialog.id ON DELETE CASCADE
-
-OperatorDraft.trigger_message_id
 → FK Message.id ON DELETE CASCADE
 
 DialogFeedback.dialog_id
@@ -3410,6 +3361,7 @@ failed
 SystemPrompt.type:
 user_support
 operator_gigachat
+knowledge_card
 ```
 
 ## 17. Что сознательно не усложняем
@@ -3567,8 +3519,6 @@ queryKeys.dialog.detail(dialogId)
 queryKeys.dialog.messages(dialogId)
 
 queryKeys.operator.queue(scope)
-queryKeys.operator.draft(dialogId)
-
 queryKeys.kb.sections()
 queryKeys.kb.documents(filters)
 queryKeys.kb.document(documentId)
@@ -3644,7 +3594,7 @@ Dialog
 DialogFeedback
 Message
 Attachment
-OperatorDraft
+OperatorTemplateDto
 KnowledgeSection
 KnowledgeDocument
 KnowledgeCandidate
@@ -3764,7 +3714,8 @@ Shift+Enter → newline
 
 ### 19.1 Почему streams разделены по ролям
 
-**Operator draft нельзя отправлять в user SSE-stream.**
+Операторский stream изолирован от пользовательского: пользователь не получает
+события рабочего места оператора.
 
 Поэтому streams разделены:
 
@@ -3814,14 +3765,12 @@ Queue обновляется сразу, без постоянного polling.
 ```ts
 type OperatorDialogEvent =
   | { type: "user_message"; message: MessageDto }
-  | { type: "confidence"; value: number; triggerMessageId: string }
-  | { type: "draft_token"; token: string; triggerMessageId: string }
-  | { type: "draft_done"; draft: OperatorDraftDto }
   | { type: "dialog_closed" }
   | { type: "error"; message: string }
 ```
 
-`draft_token` никогда не попадает в user stream.
+Шаблон не передаётся через SSE: endpoint генерации возвращает готовый
+`OperatorTemplateDto` в обычном HTTP-ответе.
 
 ### 19.5 Streaming cache strategy
 
@@ -3829,12 +3778,11 @@ type OperatorDialogEvent =
 
 ```text
 streamingAssistantText
-streamingDraftText
 ```
 
 Не вызываем React Query `setQueryData()` на каждый token.
 
-Текст assistant/draft рендерится через `react-markdown` с `remark-gfm`. Блоки
+Текст AI-ответа рендерится через `react-markdown` с `remark-gfm`. Блоки
 кода передаются в `PrismLight` из `react-syntax-highlighter` с явным набором
 зарегистрированных языков. Raw HTML от модели не включается (`skipHtml`), так
 как ответ модели является недоверенным пользовательским контентом.
@@ -3843,7 +3791,6 @@ streamingDraftText
 
 ```text
 assistant_done
-draft_done
 operator_message
 ```
 
@@ -3892,8 +3839,9 @@ attachments   # repeated, максимум 10
 
 `client_message_id = UUID` нужен для idempotency/retry.
 
-Backend возвращает persisted user `Message` сразу, а GigaChat processing запускается
-через FastAPI `BackgroundTasks` после отправки HTTP-ответа и идёт дальше через SSE.
+Backend возвращает persisted user `Message` сразу. В `ai_support` GigaChat processing
+запускается через FastAPI `BackgroundTasks` после отправки HTTP-ответа и идёт дальше
+через SSE; в `operator_support` сообщение ожидает действий оператора.
 Так новый route успевает подключить `EventSource` до первого token event. Состояние
 trigger-message (`pending / processing / completed / failed`) хранится в БД, поэтому
 после reload frontend восстанавливает placeholder или показывает сохранённую ошибку
@@ -3907,7 +3855,8 @@ polling-запросами.
 | GET | `/api/operator/dialogs?scope=unassigned|mine` | активная operator queue |
 | POST | `/api/operator/dialogs/{dialogId}/claim` | атомарно назначить тикет текущему operator |
 | GET | `/api/operator/events` | realtime queue SSE |
-| GET | `/api/operator/dialogs/{dialogId}/events` | operator-only user/confidence/draft SSE |
+| GET | `/api/operator/dialogs/{dialogId}/events` | operator-only user/dialog state SSE |
+| POST | `/api/operator/dialogs/{dialogId}/template` | сгенерировать шаблон ответа по актуальной истории |
 | POST | `/api/dialogs/{dialogId}/messages` | отправить сообщение как operator |
 | POST | `/api/dialogs/{dialogId}/close` | закрыть тикет |
 
@@ -4211,15 +4160,15 @@ Desktop:
 
 ```text
 ┌────────────────┬───────────────────────────┬──────────────────┐
-│ Queue          │ Dialog                    │ AI GigaChat      │
+│ Queue          │ Dialog                    │ Template panel   │
 │                │                           │                  │
-│ Не назначены   │ full conversation         │ draft            │
-│ Мои            │                           │ sources          │
-│                │ operator composer         │ confidence       │
+│ Не назначены   │ full conversation         │ editable template│
+│ Мои            │                           │ status           │
+│                │ operator composer         │ actions          │
 └────────────────┴───────────────────────────┴──────────────────┘
 ```
 
-На узком экране AI GigaChat panel становится drawer/tab.
+На узком экране template panel становится drawer/tab.
 
 ### 22.2 Queue
 
@@ -4283,50 +4232,53 @@ Dialog.assigned_operator_id = current user
 - sources;
 - confidence history.
 
-### 22.5 AI GigaChat draft
+### 22.5 AI GigaChat template
 
-`OperatorDraft` всегда привязан к:
+Сценарий запускается оператором вручную:
 
 ```text
-trigger_message_id
+POST /api/operator/dialogs/{dialogId}/template
+→ актуальная история и вложения читаются backend в момент запроса
+→ GigaChat получает историю через SystemPrompt(operator_gigachat)
+→ frontend получает OperatorTemplateDto
 ```
-
-Это исключает ситуацию, когда оператор не понимает, на какое сообщение был сгенерирован draft.
 
 UI:
 
 ```text
 AI GigaChat предлагает
 ─────────────────────
-draft text
+editable template text
 
-Confidence: 74%
-Источники (3)
+status: loading / ready / updated / error
 
-[ Вставить в ответ ]
+[ Сгенерировать шаблон ]
+[ Вставить шаблон ]
 [ Скопировать ]
 ```
 
-Draft сохраняется backend, поэтому refresh страницы не приводит к повторному generation-call.
+Кнопка `Вставить шаблон` disabled, пока generation не завершён или текст пуст.
+Редактирование шаблона происходит в локальном textarea; шаблон не отправляется
+пользователю автоматически.
 
-### 22.6 Вставка draft
+### 22.6 Вставка template
 
 Если operator textarea пустой:
 
 ```text
-Вставить
+Вставить шаблон
 → заполнить textarea
 ```
 
 Если textarea уже содержит текст:
 
 ```text
-Вставить
+Вставить шаблон
 → ConfirmDialog:
-  "Заменить текущий текст предложением GigaChat?"
+  "Заменить текущий текст шаблоном?"
 ```
 
-Никогда не отправлять draft автоматически.
+Никогда не отправлять template автоматически.
 
 ### 22.7 New user message
 
@@ -4334,14 +4286,10 @@ Operator dialog SSE:
 
 ```text
 user_message
-confidence
-draft_token...
-draft_done
 ```
 
-`draft_token` рендерится локально.
-
-`draft_done` заменяет temporary stream persisted `OperatorDraft`.
+Новое сообщение обновляет историю и делает ранее полученный шаблон устаревшим.
+Оператор вручную запускает новую генерацию, когда она нужна.
 
 ### 22.8 Send
 
@@ -4684,11 +4632,12 @@ Route:
 /admin/prompts
 ```
 
-Две вкладки одной сущности `SystemPrompt`:
+Три вкладки одной сущности `SystemPrompt`:
 
 ```text
 User Support
-Operator AI GigaChat
+Operator Template
+Knowledge Card
 ```
 
 Mapping:
@@ -4696,6 +4645,7 @@ Mapping:
 ```text
 user_support
 operator_gigachat
+knowledge_card
 ```
 
 UI:
@@ -4717,7 +4667,10 @@ Monaco/IDE editor не нужен.
 - mutation pending;
 - success/error toast.
 
-Новая версия применяется только к следующим GigaChat calls.
+Новая версия применяется только к следующим GigaChat calls. `knowledge_card`
+используется при создании кандидата из закрытого промодерированного тикета и
+возвращает структурированные поля `title`, `problem`, `symptoms`, `context`,
+`solution`, `result`.
 
 ---
 
@@ -4903,7 +4856,7 @@ Backend остаётся источником истины по порядку M
 - Role guard не заменяет backend RBAC.
 - GigaChat credentials отсутствуют в frontend.
 - Не хранить auth secrets в `localStorage`.
-- Operator draft доступен только operator/admin endpoints.
+- Operator template доступен только назначенному operator endpoint.
 - Admin destructive endpoints недоступны user/operator.
 - Attachment URL выдаётся backend только авторизованному пользователю с доступом к Dialog.
 - Markdown/LLM answer рендерится без небезопасного raw HTML.
@@ -4913,7 +4866,7 @@ Backend остаётся источником истины по порядку M
 ## 31. Вертикальные срезы разработки
 
 ### Backend B1 — данные и конфигурация
-PostgreSQL models/migrations, settings, system prompts, базовые CRUD.
+PostgreSQL models, schema creation on startup, settings, system prompts, базовые CRUD.
 
 ### Backend B2 — RAG
 Docling, chunking, BGE-M3, Qdrant, hybrid retrieval, `rag_top_k`, enable/disable документов и разделов, golden retrieval test.
@@ -4928,7 +4881,8 @@ DialogService, ContextBuilder, sliding windows, RAG evidence, confidence и thre
 Upload, Files API lifecycle, screenshot/document, cleanup.
 
 ### Backend B6 — operator escalation + AI GigaChat
-Переключение того же Dialog в operator-mode, operator queue, отдельный system prompt, draft на каждое новое сообщение.
+Переключение того же Dialog в operator-mode, operator queue, отдельный prompt
+шаблона и ручная генерация шаблона по актуальной истории.
 
 ### Backend B7 — feedback и модерация
 `helpful | ai_error`, KnowledgeCandidate, Approve/Reject, очередь ошибок AI, hard delete.
@@ -4940,7 +4894,7 @@ React Router layouts, `/api/me`, role guards, API client, QueryClient, shared UI
 Dialogs, messages, SSE answer stream, attachment, sources, escalation state, close + feedback.
 
 ### Frontend F3 — operator panel
-Realtime queue, claim, dialog, operator-only SSE, persisted AI GigaChat draft, send/close.
+Realtime queue, claim, dialog, operator-only SSE, manual AI GigaChat template, send/close.
 
 ### Frontend F4 — admin journal
 Helpful / ai_error / unrated groups, Dialog detail, candidate create/edit/approve/reject, hard delete error chat.
@@ -4980,7 +4934,7 @@ System Prompts, AI Settings, Monitoring.
 ├── docker-compose.yml            # production
 ├── docker-compose.dev.yml        # hot reload development
 ├── ARCHITECTURE.md
-└── README.md
+└── ARCHITECTURE.md
 ```
 
 ## 33. Источники

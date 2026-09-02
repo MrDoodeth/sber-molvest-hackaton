@@ -1,5 +1,5 @@
 import { apiRequest, queryString } from "./client";
-import type { DialogSummary, OperatorDialogDetailDto } from "./types";
+import type { DialogSummary, OperatorDialogDetailDto, OperatorTemplateDto } from "./types";
 
 export const operatorApi = {
   queue: (scope: "unassigned" | "mine", signal?: AbortSignal) =>
@@ -8,6 +8,11 @@ export const operatorApi = {
     apiRequest<OperatorDialogDetailDto>(`/api/dialogs/${dialogId}`, { signal }),
   claim: (dialogId: string, signal?: AbortSignal) =>
     apiRequest<OperatorDialogDetailDto>(`/api/operator/dialogs/${dialogId}/claim`, {
+      method: "POST",
+      signal,
+    }),
+  generateTemplate: (dialogId: string, signal?: AbortSignal) =>
+    apiRequest<OperatorTemplateDto>(`/api/operator/dialogs/${dialogId}/template`, {
       method: "POST",
       signal,
     }),

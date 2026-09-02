@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     app_name: str = "Molvest 1C Support"
     environment: Literal["development", "test", "production"] = "development"
     database_url: str = "postgresql+asyncpg://molvest:molvest@localhost:5432/molvest"
-    create_schema_on_startup: bool = False
+    create_schema_on_startup: bool = True
     seed_on_startup: bool = True
 
     jwt_secret: SecretStr = SecretStr("local-development-secret-change-in-production")

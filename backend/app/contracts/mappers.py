@@ -13,7 +13,6 @@ from app.contracts.schemas import (
     KnowledgeDocumentDto,
     KnowledgeSectionDto,
     MessageDto,
-    OperatorDraftDto,
     PromptDto,
     SourceRef,
     UserRef,
@@ -27,7 +26,6 @@ from app.models import (
     KnowledgeDocument,
     KnowledgeSection,
     Message,
-    OperatorDraft,
     SystemPrompt,
     User,
 )
@@ -125,7 +123,6 @@ def dialog_detail(
     processing_error: str | None = None,
     feedback: DialogFeedback | None = None,
     candidate: KnowledgeCandidate | None = None,
-    latest_draft: OperatorDraft | None = None,
 ) -> DialogDetail:
     summary = dialog_summary(
         dialog,
@@ -142,24 +139,11 @@ def dialog_detail(
     return DialogDetail(
         **summary.model_dump(),
         channel=dialog.channel,
-        latest_draft=draft_dto(latest_draft) if latest_draft else None,
     )
 
 
 def feedback_dto(feedback: DialogFeedback) -> FeedbackDto:
     return FeedbackDto.model_validate(feedback)
-
-
-def draft_dto(draft: OperatorDraft) -> OperatorDraftDto:
-    return OperatorDraftDto(
-        id=draft.id,
-        dialog_id=draft.dialog_id,
-        trigger_message_id=draft.trigger_message_id,
-        text=draft.text,
-        confidence=draft.confidence,
-        sources=source_refs(draft.sources),
-        created_at=draft.created_at,
-    )
 
 
 def section_dto(

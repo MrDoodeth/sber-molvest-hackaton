@@ -27,8 +27,7 @@ COPY certs/russian_trusted_root_ca_pem.crt \
 RUN update-ca-certificates
 
 WORKDIR /app
-COPY pyproject.toml alembic.ini ./
-COPY alembic ./alembic
+COPY pyproject.toml ./
 COPY app ./app
 COPY --from=bge-model /opt/models/bge-m3 /opt/models/bge-m3
 RUN pip install --upgrade pip==25.2 \
@@ -42,4 +41,4 @@ RUN useradd --create-home --uid 10001 appuser \
 USER appuser
 
 EXPOSE 8000
-CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

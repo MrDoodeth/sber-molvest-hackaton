@@ -9,7 +9,6 @@ description = "AI support backend for 1C users"
 requires-python = ">=3.11,<3.12"
 dependencies = [
   "aioboto3==15.1.0",
-  "alembic==1.16.5",
   "asyncpg==0.30.0",
   "docling==2.48.0",
   "fastapi==0.116.1",

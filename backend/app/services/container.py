@@ -23,6 +23,7 @@ from app.services.attachments import AttachmentService
 from app.services.broker import EventBroker
 from app.services.context import ContextBuilder
 from app.services.dialogs import DialogService
+from app.services.generation_context import GenerationContextService
 from app.services.kb import KnowledgeBaseService
 from app.services.moderation import ModerationService
 from app.services.rag import RAGService
@@ -95,6 +96,14 @@ def build_container(
     prompt_service = PromptService()
     attachment_service = AttachmentService(actual_storage, actual_llm, settings)
     rag_service = RAGService(actual_embedding, actual_vector)
+    context_builder = ContextBuilder()
+    generation_context = GenerationContextService(
+        session_factory=session_factory,
+        attachment_service=attachment_service,
+        context_builder=context_builder,
+        rag_service=rag_service,
+        llm_provider=actual_llm,
+    )
     knowledge_base = KnowledgeBaseService(
         session_factory=session_factory,
         storage=actual_storage,
@@ -108,8 +117,7 @@ def build_container(
         attachment_service=attachment_service,
         settings_service=settings_service,
         prompt_service=prompt_service,
-        context_builder=ContextBuilder(),
-        rag_service=rag_service,
+        generation_context=generation_context,
         llm_provider=actual_llm,
         broker=broker,
         tasks=tasks,
@@ -119,6 +127,9 @@ def build_container(
         knowledge_base=knowledge_base,
         attachment_service=attachment_service,
         settings_service=settings_service,
+        prompt_service=prompt_service,
+        generation_context=generation_context,
+        llm_provider=actual_llm,
     )
     return ApplicationContainer(
         settings=settings,

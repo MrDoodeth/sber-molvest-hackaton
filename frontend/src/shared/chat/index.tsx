@@ -300,7 +300,7 @@ export function MessageBubble({ message, showConfidence = false }: { message: Me
           {meta.label}
           {showConfidence && message.confidence !== undefined && <span>· {formatPercent(message.confidence)}</span>}
         </div>
-        {message.authorType === "assistant" || message.authorType === "operator" ? <MarkdownContent text={message.text} /> : <p className="whitespace-pre-wrap break-words text-sm leading-6">{message.text}</p>}
+        {message.authorType === "assistant" || message.authorType === "operator" ? <MarkdownContent text={message.text} className={message.authorType === "operator" ? "!bg-transparent" : undefined} /> : <p className="whitespace-pre-wrap break-words text-sm leading-6">{message.text}</p>}
         {message.attachments.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-2.5">
             {message.attachments.map((attachment) => (

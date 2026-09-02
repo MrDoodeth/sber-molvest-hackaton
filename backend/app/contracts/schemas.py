@@ -96,13 +96,11 @@ class CandidateRef(ApiModel):
     source: CandidateSource
 
 
-class OperatorDraftDto(ApiModel):
-    id: uuid.UUID
+class OperatorTemplateDto(ApiModel):
     dialog_id: uuid.UUID
-    trigger_message_id: uuid.UUID
+    dialog_updated_at: datetime
     text: str
-    confidence: float
-    sources: list[SourceRef]
+    sources: list[SourceRef] = Field(default_factory=list)
     created_at: datetime
 
 
@@ -130,7 +128,6 @@ class DialogDetail(DialogSummary):
     user: UserRef
     channel: DialogChannel
     created_at: datetime
-    latest_draft: OperatorDraftDto | None = None
 
 
 class KnowledgeSectionCreate(ApiModel):
@@ -306,7 +303,6 @@ class AdminDialogAudit(ApiModel):
 class AdminDialogDetail(ApiModel):
     dialog: DialogDetail
     messages: list[MessageDto]
-    drafts: list[OperatorDraftDto]
     feedback: FeedbackDto | None = None
     candidate: KnowledgeCandidateDto | None = None
     audit: AdminDialogAudit
