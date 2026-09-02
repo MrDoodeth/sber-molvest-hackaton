@@ -31,6 +31,9 @@ def create_app(
                 await connection.run_sync(Base.metadata.create_all)
         if actual_settings.seed_on_startup:
             await seed_defaults(actual_container.session_factory)
+        warmup = getattr(actual_container.embedding_provider, "warmup", None)
+        if callable(warmup):
+            await warmup()
         await actual_container.dialogs.recover_pending_turns()
         try:
             yield

@@ -14,6 +14,48 @@ def estimate_tokens(text: str) -> int:
 
 
 class ContextBuilder:
+    def build_prompt_embedding_context(
+        self,
+        *,
+        current_text: str,
+        history: list[ChatTurn],
+        settings: RuntimeSettings,
+    ) -> str:
+        """Build the semantic query for the user's text branch."""
+        current = current_text.strip() or "Вопрос содержится во вложении."
+        remaining = settings.embedding_input_budget - estimate_tokens(current)
+        selected: list[ChatTurn] = []
+        for turn in reversed(history):
+            cost = estimate_tokens(turn.text) + 2
+            if cost > remaining:
+                break
+            selected.append(turn)
+            remaining -= cost
+        selected.reverse()
+        history_text = "\n".join(f"{turn.role}: {turn.text}" for turn in selected)
+        if history_text:
+            return f"{current}\n\nСвежий контекст диалога:\n{history_text}"
+        return current
+
+    def build_screenshot_embedding_context(
+        self,
+        *,
+        extracted_text: str | None,
+        visual_summary: str | None,
+        settings: RuntimeSettings,
+    ) -> str:
+        """Build an independent semantic query from the parsed screenshot."""
+        parts = [
+            f"Текст на скриншоте:\n{extracted_text}" if extracted_text else "",
+            f"Визуальное описание:\n{visual_summary}" if visual_summary else "",
+        ]
+        context = "\n\n".join(part for part in parts if part).strip()
+        if not context:
+            return "Скриншот пользовательской проблемы в 1С."
+
+        budget = max(1, settings.embedding_input_budget * 3)
+        return context[:budget].rstrip()
+
     def build_embedding_context(
         self,
         *,
@@ -56,6 +98,7 @@ class ContextBuilder:
         screenshot_extracted_text: str | None,
         screenshot_visual_summary: str | None,
         settings: RuntimeSettings,
+        rag_status: str = "ready",
     ) -> GenerationRequest:
         mandatory_cost = (
             estimate_tokens(system_prompt)
@@ -89,4 +132,5 @@ class ContextBuilder:
             attachment_mime_types=tuple(attachment_mime_types),
             screenshot_extracted_text=screenshot_extracted_text,
             screenshot_visual_summary=screenshot_visual_summary,
+            rag_status=rag_status,
         )

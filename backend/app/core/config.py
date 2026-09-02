@@ -69,6 +69,7 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://localhost:6333"
     qdrant_api_key: SecretStr | None = None
     embedding_device: str = "cpu"
+    embedding_model_path: Path = Path("/opt/models/bge-m3")
 
     gigachat_credentials: SecretStr | None = None
     gigachat_scope: str = "GIGACHAT_API_PERS"

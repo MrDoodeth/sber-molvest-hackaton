@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import uuid
 from collections.abc import AsyncIterator, Iterator
+from dataclasses import replace
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -111,6 +112,21 @@ class GigaChatProvider:
             )
             or "Источники не найдены."
         )
+        rag_status = {
+            "empty": (
+                "В постоянной базе знаний нет индексированных материалов. "
+                "Попробуй решить вопрос по пользовательскому контексту, "
+                "но не выдавай непроверенные сведения за инструкцию из БЗ."
+            ),
+            "no_match": (
+                "В постоянной базе знаний не найдено релевантных источников. "
+                "Попробуй решить вопрос по пользовательскому контексту, "
+                "а при недостатке данных предложи подключить специалиста."
+            ),
+        }.get(
+            request.rag_status,
+            "Для ответа доступны релевантные источники постоянной базы знаний.",
+        )
         screenshot = ""
         if request.screenshot_extracted_text or request.screenshot_visual_summary:
             screenshot = (
@@ -122,6 +138,7 @@ class GigaChatProvider:
             f"{request.system_prompt}\n\n"
             "CURRENT SETTINGS\n"
             f"operator_escalation_threshold = {request.threshold}\n\n"
+            f"RAG STATUS\n{rag_status}\n\n"
             f"KNOWLEDGE EVIDENCE\n{evidence}{screenshot}"
         )
         messages: list[Any] = [SystemMessage(content=system)]
@@ -318,7 +335,21 @@ class GigaChatProvider:
         model: str,
         session_id: uuid.UUID,
     ) -> ConfidenceAssessment:
-        messages = self._messages(request)
+        confidence_attachments = [
+            (file_id, mime_type)
+            for file_id, mime_type in zip(
+                request.attachment_file_ids,
+                request.attachment_mime_types,
+                strict=False,
+            )
+            if mime_type.startswith("image/")
+        ]
+        confidence_request = replace(
+            request,
+            attachment_file_ids=tuple(item[0] for item in confidence_attachments),
+            attachment_mime_types=tuple(item[1] for item in confidence_attachments),
+        )
+        messages = self._messages(confidence_request)
         messages[0].content += (
             "\n\nCONFIDENCE GATE\nВерни только confidence от 0 до 1. "
             "Если пользователь явно просит оператора, верни 0."
@@ -376,6 +407,8 @@ class GigaChatProvider:
                     metadata = getattr(chunk, "response_metadata", None) or {}
                     if metadata.get("finish_reason") == "blacklist":
                         raise ProviderPolicyError()
+                    if self._is_function_progress(chunk, metadata):
+                        continue
                     raw_usage = getattr(chunk, "usage_metadata", None)
                     if raw_usage:
                         input_details = raw_usage.get("input_token_details") or {}
@@ -385,7 +418,7 @@ class GigaChatProvider:
                             precached_prompt_tokens=input_details.get("cache_read"),
                         )
                     text = self._extract_text(getattr(chunk, "content", ""))
-                    if text:
+                    if text and not self._is_timer_status(text):
                         yield StreamChunk(text=text)
             if usage is not None:
                 yield StreamChunk(text="", usage=usage)
@@ -407,6 +440,26 @@ class GigaChatProvider:
                     parts.append(str(block.get("text", "")))
             return "".join(parts)
         return str(content) if content else ""
+
+    @staticmethod
+    def _is_function_progress(chunk: Any, metadata: dict[str, Any]) -> bool:
+        role = getattr(chunk, "role", None)
+        if role == "function_in_progress":
+            return True
+        additional_kwargs = getattr(chunk, "additional_kwargs", None) or {}
+        return (
+            additional_kwargs.get("role") == "function_in_progress"
+            or metadata.get("role") == "function_in_progress"
+        )
+
+    @staticmethod
+    def _is_timer_status(text: str) -> bool:
+        normalized = " ".join(text.casefold().split())
+        if not normalized.startswith("осталось "):
+            return False
+        value = normalized.removeprefix("осталось ")
+        parts = value.split(":")
+        return len(parts) == 2 and all(part.isdigit() for part in parts)
 
     @staticmethod
     def _map_error(exc: Exception) -> ProviderError:

@@ -14,11 +14,12 @@ After the first image build, use `make dev`. Backend changes under `backend/app`
 restart Uvicorn, while frontend changes under `frontend/src` are applied through
 Vite HMR.
 
-The development stack creates the database schema directly from the current
-SQLAlchemy models and does not run Alembic migrations. When model changes make
-the existing development database incompatible, reset it with
-`docker compose -f docker-compose.dev.yml down -v` and run `make dev` again.
-Production keeps the persistent database and runs Alembic from the backend image.
+The development stack runs Alembic before Uvicorn, so existing development
+volumes receive schema changes automatically. The backend image contains a
+pinned local BGE-M3 snapshot and starts only after the model has been loaded and
+warmed up. If the knowledge base has no indexed chunks, the normal GigaChat
+confidence and answer flow still runs; escalation depends on confidence rather
+than on the absence of RAG evidence.
 
 - Frontend: <http://localhost:5173>
 - Swagger UI: <http://localhost:8000/docs>

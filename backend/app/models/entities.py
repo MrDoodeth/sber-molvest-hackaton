@@ -193,6 +193,7 @@ class Attachment(UUIDPrimaryKey, Base):
     )
     storage_key: Mapped[str] = mapped_column(String(1024), unique=True)
     mime_type: Mapped[str] = mapped_column(String(255))
+    size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     gigachat_file_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     extracted_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     visual_summary: Mapped[str | None] = mapped_column(Text, nullable=True)

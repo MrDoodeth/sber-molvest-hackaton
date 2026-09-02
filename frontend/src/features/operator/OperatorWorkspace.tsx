@@ -180,7 +180,7 @@ export default function OperatorWorkspace() {
               <div className="min-h-0 flex-1 overflow-y-auto">
                 {messages.isPending && <PageLoader label="Загружаем историю" />}
                 {messages.isError && <ErrorState description={messages.error.message} onRetry={() => void messages.refetch()} />}
-                {messages.data && <MessageList messages={allMessages} showConfidence showAttachmentAnalysis topAction={messages.hasNextPage ? <Button className="mx-auto" size="sm" variant="ghost" pending={messages.isFetchingNextPage} onClick={() => void messages.fetchNextPage()}><RotateCcw className="size-3.5" /> Ранние сообщения</Button> : undefined} empty={<EmptyState title="История пуста" description="Сообщения появятся после синхронизации с backend." />} />}
+                {messages.data && <MessageList messages={allMessages} showConfidence topAction={messages.hasNextPage ? <Button className="mx-auto" size="sm" variant="ghost" pending={messages.isFetchingNextPage} onClick={() => void messages.fetchNextPage()}><RotateCcw className="size-3.5" /> Ранние сообщения</Button> : undefined} empty={<EmptyState title="История пуста" description="Сообщения появятся после синхронизации с backend." />} />}
               </div>
               {processingError && <div className="border-t border-red-100 bg-red-50 px-4 py-2 text-xs font-semibold text-red-800">{processingError}</div>}
               {failedAttempt && <div className="flex items-center justify-between gap-3 border-t border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-900"><span>Ответ не подтверждён. Retry сохранит тот же UUID.</span><Button size="sm" variant="secondary" pending={send.isPending} onClick={() => submitAttempt(failedAttempt)}>Повторить</Button></div>}

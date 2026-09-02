@@ -33,7 +33,8 @@ from app.core.errors import UnprocessableError
 from app.models import User
 from app.services.attachments import (
     MAX_RUNTIME_ATTACHMENTS,
-    MAX_RUNTIME_IMAGE_REQUEST_BYTES,
+    MAX_RUNTIME_IMAGES,
+    MAX_RUNTIME_REQUEST_BYTES,
     ValidatedUpload,
     validate_upload,
 )
@@ -95,7 +96,8 @@ async def list_messages(
     summary="Persist a message and schedule AI processing",
     description=(
         "Multipart command. `text` may be empty only when attachments are "
-        "present. Up to 10 attachments can be sent in one message. A repeated "
+        "present. Up to 10 attachments and one image can be sent in one "
+        "message. A repeated "
         "`(dialog_id, client_message_id)` returns the same "
         "persisted message with `200` and does not duplicate generation."
     ),
@@ -120,7 +122,8 @@ async def send_message(
     attachments: list[UploadFile] | None = File(
         default=None,
         description=(
-            "Up to 10 runtime attachments. Images are limited to 15 MB each; "
+            "Up to 10 runtime attachments and one image. Images are limited "
+            "to 15 MB each; "
             "supported documents to 40 MB each."
         ),
     ),
@@ -136,27 +139,42 @@ async def send_message(
 
     validated: list[ValidatedUpload] = []
     if uploaded_files:
-        read_limit = max(
-            container.settings.runtime_image_max_bytes,
-            container.settings.runtime_document_max_bytes,
-        )
+        total_bytes = 0
+        image_count = 0
         for attachment in uploaded_files:
-            data = await attachment.read(read_limit + 1)
-            validated.append(
-                validate_upload(
-                    file_name=attachment.filename,
-                    content_type=attachment.content_type,
-                    data=data,
-                    permanent=False,
-                    settings=container.settings,
+            if total_bytes >= MAX_RUNTIME_REQUEST_BYTES:
+                raise UnprocessableError(
+                    "Суммарный размер вложений должен быть менее 80 МБ",
+                    {"max_bytes": MAX_RUNTIME_REQUEST_BYTES},
                 )
+            individual_limit = (
+                container.settings.runtime_image_max_bytes
+                if (attachment.content_type or "").startswith("image/")
+                else container.settings.runtime_document_max_bytes
             )
-        image_bytes = sum(len(item.data) for item in validated if item.is_image)
-        if image_bytes >= MAX_RUNTIME_IMAGE_REQUEST_BYTES:
-            raise UnprocessableError(
-                "Суммарный размер изображений не должен превышать 80 МБ",
-                {"max_bytes": MAX_RUNTIME_IMAGE_REQUEST_BYTES},
+            remaining = MAX_RUNTIME_REQUEST_BYTES - total_bytes
+            data = await attachment.read(min(individual_limit, remaining) + 1)
+            if len(data) >= remaining:
+                raise UnprocessableError(
+                    "Суммарный размер вложений должен быть менее 80 МБ",
+                    {"max_bytes": MAX_RUNTIME_REQUEST_BYTES},
+                )
+            upload = validate_upload(
+                file_name=attachment.filename,
+                content_type=attachment.content_type,
+                data=data,
+                permanent=False,
+                settings=container.settings,
             )
+            if upload.is_image:
+                image_count += 1
+                if image_count > MAX_RUNTIME_IMAGES:
+                    raise UnprocessableError(
+                        "Можно прикрепить только одно изображение за сообщение",
+                        {"max_images": MAX_RUNTIME_IMAGES},
+                    )
+            total_bytes += len(upload.data)
+            validated.append(upload)
     message, created = await container.dialogs.persist_message(
         requester=user,
         dialog_id=dialog_id,

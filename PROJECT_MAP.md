@@ -270,7 +270,7 @@ Seeds: demo users, default prompts, default settings, KB sections. `DEFAULT_SETT
 `TaskSupervisor`: async фоновые задачи (cleanup, ingestion). Graceful shutdown (grace_seconds=10).
 
 #### `backend/app/services/attachments.py`
-`AttachmentService`: upload, extract, cleanup. Поддерживаемые runtime-вложения: до 10 файлов на сообщение, изображения до 15 MB каждое, документы до 40 MB каждый; общий размер изображений в запросе — менее 80 MB.
+`AttachmentService`: upload, extract, cleanup. Поддерживаемые runtime-вложения: до 10 файлов на сообщение, не более одного изображения за turn, изображения до 15 MB, документы до 40 MB; общий размер вложений — менее 80 MB.
 
 #### `backend/app/services/embeddings.py`
 `BgeM3EmbeddingProvider`: FlagEmbedding, hybrid dense+sparse embedding.

@@ -79,7 +79,7 @@ export default function AdminDialogDetailPage() {
         <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(22rem,0.65fr)]">
           <Card className="overflow-hidden">
             <div className="flex items-center justify-between border-b border-stone-100 px-5 py-4"><div><p className="text-[10px] font-extrabold uppercase tracking-[0.15em] text-molvest-600">Full conversation</p><h2 className="mt-1 text-lg font-bold text-molvest-950">История диалога</h2></div><div className="flex gap-2"><Badge tone="neutral"><UserRound className="mr-1 size-3" /> {messages.length} сообщений</Badge>{messages.some((message) => message.attachments.length) && <Badge tone="giga"><Paperclip className="mr-1 size-3" /> Вложения</Badge>}</div></div>
-            <div className="max-h-[68rem] overflow-y-auto bg-stone-50"><MessageList messages={messages} showConfidence showAttachmentAnalysis empty={<div className="p-6 text-center text-sm text-stone-500">В сохранённом аудите нет сообщений.</div>} /></div>
+            <div className="max-h-[68rem] overflow-y-auto bg-stone-50"><MessageList messages={messages} showConfidence empty={<div className="p-6 text-center text-sm text-stone-500">В сохранённом аудите нет сообщений.</div>} /></div>
           </Card>
           <div id="candidate" className="min-w-0">{activeCandidateId ? <CandidateModeration candidateId={activeCandidateId} dialogId={dialogId} /> : <Card className="p-6"><h2 className="text-lg font-bold text-molvest-950">Кандидат в БЗ не создан</h2><p className="mt-2 text-sm leading-6 text-stone-500">Администратор может подготовить карточку из любого закрытого диалога. Публикация произойдёт только после Approve.</p></Card>}</div>
         </div>

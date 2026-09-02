@@ -24,7 +24,10 @@ from app.contracts.schemas import (
     MessagePage,
     OperatorDraftDto,
 )
-from app.core.constants import CLOSED_SYSTEM_MESSAGE, ESCALATION_SYSTEM_MESSAGE
+from app.core.constants import (
+    CLOSED_SYSTEM_MESSAGE,
+    ESCALATION_SYSTEM_MESSAGE,
+)
 from app.core.enums import (
     DialogChannel,
     DialogMode,
@@ -53,6 +56,7 @@ from app.models import (
 )
 from app.providers.interfaces import (
     ChatTurn,
+    HybridEmbedding,
     LLMProvider,
     ProviderError,
     ProviderPolicyError,
@@ -60,7 +64,11 @@ from app.providers.interfaces import (
     ProviderUsage,
     StorageError,
 )
-from app.services.attachments import AttachmentService, ValidatedUpload
+from app.services.attachments import (
+    RUNTIME_IMAGE_MIME_TYPES,
+    AttachmentService,
+    ValidatedUpload,
+)
 from app.services.broker import (
     OPERATOR_QUEUE_CHANNEL,
     EventBroker,
@@ -391,6 +399,7 @@ class DialogService:
                             message_id=message.id,
                             storage_key=storage_key,
                             mime_type=upload.mime_type,
+                            size_bytes=len(upload.data),
                         )
                     )
                     stored_keys.append(storage_key)
@@ -639,6 +648,7 @@ class DialogService:
         source_snapshot: list[dict[str, object]] = []
         runtime_settings: RuntimeSettings | None = None
         prompt_version: int | None = None
+        prompt_embedding_task: asyncio.Task[HybridEmbedding] | None = None
         try:
             async with self._session_factory() as session:
                 trigger = await session.get(Message, message_id)
@@ -690,6 +700,17 @@ class DialogService:
                     trigger_attachments = all_attachments.get(message_id, [])
                     history = self._history(previous, all_attachments)
 
+                prompt_search_context = (
+                    self._context_builder.build_prompt_embedding_context(
+                        current_text=trigger.text,
+                        history=history,
+                        settings=runtime_settings,
+                    )
+                )
+                prompt_embedding_task = asyncio.create_task(
+                    self._rag_service.embed_query(prompt_search_context)
+                )
+
                 async with self._gigachat_semaphore:
                     attachment_file_ids: list[str] = []
                     attachment_mime_types: list[str] = []
@@ -724,7 +745,7 @@ class DialogService:
                         (
                             item
                             for item in trigger_attachments
-                            if item.mime_type in {"image/png", "image/jpeg"}
+                            if item.mime_type in RUNTIME_IMAGE_MIME_TYPES
                         ),
                         None,
                     )
@@ -751,25 +772,38 @@ class DialogService:
                         vision_attachment.extracted_text = analysis.extracted_text
                         vision_attachment.visual_summary = analysis.visual_summary
 
-                    search_context = self._context_builder.build_embedding_context(
-                        current_text=trigger.text,
-                        history=history,
-                        screenshot_extracted_text=(
-                            vision_attachment.extracted_text
-                            if vision_attachment
-                            else None
-                        ),
-                        screenshot_visual_summary=(
-                            vision_attachment.visual_summary
-                            if vision_attachment
-                            else None
-                        ),
-                        settings=runtime_settings,
-                    )
-                    async with self._session_factory() as session:
-                        evidence = await self._rag_service.retrieve(
-                            session, search_context, runtime_settings.rag_top_k
+                    if prompt_embedding_task is None:
+                        raise ProviderServerError(
+                            "Не удалось подготовить embedding запроса"
                         )
+                    query_embeddings = [await prompt_embedding_task]
+                    if vision_attachment is not None:
+                        screenshot_search_context = (
+                            self._context_builder.build_screenshot_embedding_context(
+                                extracted_text=vision_attachment.extracted_text,
+                                visual_summary=vision_attachment.visual_summary,
+                                settings=runtime_settings,
+                            )
+                        )
+                        query_embeddings.append(
+                            await self._rag_service.embed_query(
+                                screenshot_search_context
+                            )
+                        )
+                    async with self._session_factory() as session:
+                        retrieval = await self._rag_service.retrieve_embeddings(
+                            session,
+                            query_embeddings,
+                            runtime_settings.rag_top_k,
+                            weights=[1.0] * len(query_embeddings),
+                        )
+                    evidence = retrieval.evidence
+                    logger.info(
+                        "RAG retrieval status=%s evidence_count=%d dialog=%s",
+                        retrieval.status,
+                        len(evidence),
+                        dialog_id,
+                    )
                     generation_request = self._context_builder.build_generation_request(
                         system_prompt=prompt.content,
                         current_text=trigger.text,
@@ -788,6 +822,7 @@ class DialogService:
                             else None
                         ),
                         settings=runtime_settings,
+                        rag_status=retrieval.status,
                     )
                     source_snapshot = [
                         item.source.model_dump(mode="json")
@@ -985,6 +1020,11 @@ class DialogService:
                     channel,
                     {"type": "error", "message": "Не удалось обработать сообщение"},
                 )
+        finally:
+            if prompt_embedding_task is not None:
+                if not prompt_embedding_task.done():
+                    prompt_embedding_task.cancel()
+                await asyncio.gather(prompt_embedding_task, return_exceptions=True)
 
     async def read_attachment(
         self, requester: User, attachment_id: uuid.UUID

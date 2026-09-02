@@ -50,12 +50,31 @@ import {
 
 const IMAGE_LIMIT = 15 * 1024 * 1024;
 const DOCUMENT_LIMIT = 40 * 1024 * 1024;
-const IMAGE_REQUEST_LIMIT = 80 * 1024 * 1024;
+const ATTACHMENT_REQUEST_LIMIT = 80 * 1024 * 1024;
 export const MAX_RUNTIME_ATTACHMENTS = 10;
+export const MAX_RUNTIME_IMAGES = 1;
 const IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"];
 const DOCUMENT_EXTENSIONS = [".txt", ".doc", ".docx", ".pdf", ".epub", ".ppt", ".pptx", ".xlsx"];
+const MIME_TYPES_BY_EXTENSION: Record<string, string[]> = {
+  ".png": ["image/png"],
+  ".jpg": ["image/jpeg"],
+  ".jpeg": ["image/jpeg"],
+  ".tif": ["image/tiff"],
+  ".tiff": ["image/tiff"],
+  ".bmp": ["image/bmp"],
+  ".txt": ["text/plain"],
+  ".doc": ["application/msword"],
+  ".docx": ["application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+  ".pdf": ["application/pdf"],
+  ".epub": ["application/epub", "application/epub+zip"],
+  ".ppt": ["application/ppt", "application/vnd.ms-powerpoint"],
+  ".pptx": ["application/pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"],
+  ".xlsx": ["application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+};
 const EMPTY_ATTACHMENTS: File[] = [];
-export const RUNTIME_ATTACHMENT_ACCEPT = [...IMAGE_EXTENSIONS, ...DOCUMENT_EXTENSIONS].join(",");
+export const RUNTIME_ATTACHMENT_ACCEPT = Object.entries(MIME_TYPES_BY_EXTENSION)
+  .flatMap(([extension, mimeTypes]) => [extension, ...mimeTypes])
+  .join(",");
 
 SyntaxHighlighter.registerLanguage("bash", bash);
 SyntaxHighlighter.registerLanguage("css", css);
@@ -152,7 +171,7 @@ export function MarkdownContent({ text, className }: { text: string; className?:
 
 export function isRuntimeImage(file: File): boolean {
   const extension = `.${file.name.split(".").pop()?.toLowerCase() ?? ""}`;
-  return file.type.startsWith("image/") || IMAGE_EXTENSIONS.includes(extension);
+  return IMAGE_EXTENSIONS.includes(extension);
 }
 
 export function validateRuntimeAttachment(file: File): string | null {
@@ -161,6 +180,10 @@ export function validateRuntimeAttachment(file: File): string | null {
   const isDocument = DOCUMENT_EXTENSIONS.includes(extension);
   if (!isImage && !isDocument) {
     return "Поддерживаются изображения PNG/JPEG/TIFF/BMP и документы TXT/DOC/DOCX/PDF/EPUB/PPT/PPTX/XLSX.";
+  }
+  const expectedMimeTypes = MIME_TYPES_BY_EXTENSION[extension] ?? [];
+  if (file.type && !expectedMimeTypes.includes(file.type)) {
+    return `Тип файла ${file.name} не соответствует его расширению.`;
   }
   const limit = isImage ? IMAGE_LIMIT : DOCUMENT_LIMIT;
   if (file.size > limit) {
@@ -177,9 +200,13 @@ export function validateRuntimeAttachments(files: File[]): string | null {
     const error = validateRuntimeAttachment(file);
     if (error) return error;
   }
-  const imageBytes = files.reduce((total, file) => total + (isRuntimeImage(file) ? file.size : 0), 0);
-  if (imageBytes >= IMAGE_REQUEST_LIMIT) {
-    return "Суммарный размер изображений не должен превышать 80 МБ.";
+  const imageCount = files.filter(isRuntimeImage).length;
+  if (imageCount > MAX_RUNTIME_IMAGES) {
+    return "Можно прикрепить только одно изображение за сообщение.";
+  }
+  const totalBytes = files.reduce((total, file) => total + file.size, 0);
+  if (totalBytes >= ATTACHMENT_REQUEST_LIMIT) {
+    return "Суммарный размер вложений должен быть менее 80 МБ.";
   }
   return null;
 }
@@ -210,7 +237,7 @@ export function MessageSources({ sources }: { sources: SourceRef[] }) {
   );
 }
 
-export function AttachmentCard({ attachment, showAnalysis = false }: { attachment: AttachmentDto; showAnalysis?: boolean }) {
+export function AttachmentCard({ attachment }: { attachment: AttachmentDto }) {
   const url = safeAttachmentUrl(attachment);
   const isImage = attachment.mimeType.startsWith("image/");
   return (
@@ -236,13 +263,6 @@ export function AttachmentCard({ attachment, showAnalysis = false }: { attachmen
         </div>
       )}
       {typeof attachment.sizeBytes === "number" && <span className="truncate px-1 text-[10px] opacity-65">{formatBytes(attachment.sizeBytes)}</span>}
-      {showAnalysis && (attachment.extractedText || attachment.visualSummary) && (
-        <details className="mt-1 w-72 max-w-[calc(100vw-3rem)] rounded-xl bg-black/5 px-3 py-2 text-xs">
-          <summary className="cursor-pointer font-bold">Анализ изображения</summary>
-          {attachment.extractedText && <p className="mt-2 whitespace-pre-wrap leading-5"><strong>Распознано:</strong> {attachment.extractedText}</p>}
-          {attachment.visualSummary && <p className="mt-2 whitespace-pre-wrap leading-5"><strong>Контекст:</strong> {attachment.visualSummary}</p>}
-        </details>
-      )}
     </div>
   );
 }
@@ -258,7 +278,7 @@ function authorMeta(message: MessageDto) {
   };
 }
 
-export function MessageBubble({ message, showConfidence = false, showAttachmentAnalysis = false }: { message: MessageDto; showConfidence?: boolean; showAttachmentAnalysis?: boolean }) {
+export function MessageBubble({ message, showConfidence = false }: { message: MessageDto; showConfidence?: boolean }) {
   if (message.authorType === "system") {
     return (
       <div className="message-enter my-3 flex justify-center">
@@ -283,7 +303,7 @@ export function MessageBubble({ message, showConfidence = false, showAttachmentA
         {message.attachments.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-2.5">
             {message.attachments.map((attachment) => (
-              <AttachmentCard key={attachment.id} attachment={attachment} showAnalysis={showAttachmentAnalysis} />
+              <AttachmentCard key={attachment.id} attachment={attachment} />
             ))}
           </div>
         )}
@@ -313,7 +333,6 @@ export function MessageList({
   streamingLabel,
   topAction,
   showConfidence = false,
-  showAttachmentAnalysis = false,
   empty,
 }: {
   messages: MessageDto[];
@@ -321,7 +340,6 @@ export function MessageList({
   streamingLabel?: string;
   topAction?: ReactNode;
   showConfidence?: boolean;
-  showAttachmentAnalysis?: boolean;
   empty?: ReactNode;
 }) {
   const endRef = useRef<HTMLDivElement>(null);
@@ -333,7 +351,7 @@ export function MessageList({
     <div className="grid gap-3 px-4 py-5 sm:px-6">
       {topAction}
       {messages.map((message) => (
-        <MessageBubble key={message.id} message={message} showConfidence={showConfidence} showAttachmentAnalysis={showAttachmentAnalysis} />
+        <MessageBubble key={message.id} message={message} showConfidence={showConfidence} />
       ))}
       {streamingText !== undefined && streamingText !== null && <StreamingMessage text={streamingText} label={streamingLabel} />}
       <div ref={endRef} />
@@ -430,8 +448,8 @@ export const ChatComposer = forwardRef<HTMLTextAreaElement, ChatComposerProps>(f
       <div className="flex items-end gap-2 rounded-2xl border border-stone-200 bg-stone-50 p-2 focus-within:border-molvest-400 focus-within:ring-3 focus-within:ring-molvest-100">
         {onAttachmentChange && (
           <>
-            <input ref={inputRef} name="attachments" type="file" className="sr-only" accept={RUNTIME_ATTACHMENT_ACCEPT} multiple onChange={onFile} disabled={disabled || pending || attachments.length >= MAX_RUNTIME_ATTACHMENTS} aria-label="Выбрать файлы" />
-            <IconButton type="button" aria-label="Прикрепить файлы" disabled={disabled || pending || attachments.length >= MAX_RUNTIME_ATTACHMENTS} onClick={() => inputRef.current?.click()}>
+            <input ref={inputRef} name="attachments" type="file" className="sr-only" accept={RUNTIME_ATTACHMENT_ACCEPT} multiple onChange={onFile} disabled={disabled || pending || attachments.length >= MAX_RUNTIME_ATTACHMENTS} aria-label="Выбрать файлы: одно изображение и документы" />
+            <IconButton type="button" aria-label="Прикрепить файлы: одно изображение и документы" disabled={disabled || pending || attachments.length >= MAX_RUNTIME_ATTACHMENTS} onClick={() => inputRef.current?.click()}>
               <Paperclip className="size-5" />
             </IconButton>
           </>

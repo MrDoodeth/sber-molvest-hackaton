@@ -6,13 +6,17 @@ _LEADING_TIMER = re.compile(
     r"^\s*осталось\s+\d{1,2}:\d{2}\s*",
     re.IGNORECASE,
 )
+_TIMER_ARTIFACT = re.compile(
+    r"(?<!\w)осталось\s+\d{1,2}:\d{2}(?!\d)",
+    re.IGNORECASE,
+)
 _TIMER_WORD = "осталось"
 _PARTIAL_TIMER = re.compile(r"\d{0,2}(?::\d{0,2})?")
 
 
 def strip_model_output_artifact(text: str) -> str:
-    """Remove a UI timer accidentally emitted before an answer."""
-    return _LEADING_TIMER.sub("", text, count=1)
+    """Remove UI timers accidentally emitted before or during an answer."""
+    return _TIMER_ARTIFACT.sub("", _LEADING_TIMER.sub("", text, count=1))
 
 
 def clean_model_output(text: str) -> str:

@@ -106,7 +106,7 @@ export default function NewUserDialogPage() {
           <MessageList
             messages={optimisticMessage ? [optimisticMessage] : []}
             streamingText={optimisticMessage ? "" : null}
-            empty={<EmptyState icon={<MessageCircleMore className="size-8" />} title="Начните разговор" description="Опишите проблему с 1С. Можно приложить до 10 файлов." />}
+             empty={<EmptyState icon={<MessageCircleMore className="size-8" />} title="Начните разговор" description="Опишите проблему с 1С. Можно приложить до 10 файлов и одно изображение." />}
           />
         </div>
         <ChatComposer

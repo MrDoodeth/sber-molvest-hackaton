@@ -32,8 +32,6 @@ export interface AttachmentDto {
   mimeType: string;
   sizeBytes?: number | null;
   url?: string;
-  extractedText?: string;
-  visualSummary?: string;
 }
 
 export interface MessageDto {

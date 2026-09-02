@@ -162,10 +162,11 @@ Message.sources = <snapshot RAG evidence>
 
 ### ADR-3 · GigaChat как основная интеллектуальная модель + локальные embeddings
 
-- **GigaChat используется в основном пользовательском сценарии:** формирует финальный ответ, работает с RAG-контекстом и анализирует приложенный скриншот в том же запросе. Конкретная модель GigaChat не зашита в код и выбирается администратором.
+- **GigaChat используется в основном пользовательском сценарии:** отдельным structured-вызовом анализирует приложенный screenshot до retrieval, затем формирует финальный ответ с RAG-контекстом и повторно использует загруженные file ID. Конкретная модель GigaChat не зашита в код и выбирается администратором.
 - **Embeddings API GigaChat в MVP не используем:** он оплачивается отдельно от Freemium-генерации, поэтому retrieval должен работать полностью локально и не зависеть от платной услуги.
 - **Единственная embedding-модель MVP:** `BAAI/bge-m3`.
 - **Почему `BGE-M3`:** мультиязычность (>100 языков), 1024-мерные dense-вектора, контекст до 8192 токенов, MIT-лицензия и возможность получать dense + sparse representations для hybrid retrieval.
+- **Runtime BGE-M3:** зафиксированный snapshot модели скачивается на этапе сборки backend-образа, загружается через `BGEM3FlagModel` в FastAPI lifespan и прогревается до readiness. Во время обработки запросов сеть для Hugging Face не используется.
 - **Интерфейсы разделяем:** `GigaChatProvider` отвечает за generation/multimodal input, `EmbeddingProvider` — за локальную векторизацию. Это не смешивает платёжные/сетевые ограничения GigaChat с индексом БЗ.
 - **Ограничение Freemium:** один поток generation-запросов. Generation-вызовы одного turn выполняются строго последовательно под `Semaphore(1)`: два для обычного turn и до трёх для screenshot-turn; embeddings/retrieval выполняются локально.
 - **Не делаем в MVP:** self-hosted генеративную LLM и альтернативные embedding-модели «на всякий случай». Если BGE-M3 не проходит наш golden dataset, модель меняется через `EmbeddingProvider`, но до измерений не усложняем архитектуру.
@@ -1264,10 +1265,17 @@ sequenceDiagram
 
     U->>API: message + optional attachment
 
-    API->>EMB: embed(search context)
-    EMB-->>API: dense/sparse query
-    API->>Q: hybrid retrieval
-    Q-->>API: rag_top_k evidence
+    par Prompt branch
+        API->>EMB: embed(user prompt + recent history)
+        EMB-->>API: prompt dense/sparse query
+    and Screenshot branch
+        API->>G: CALL #0 screenshot parse
+        G-->>API: extracted text + visual summary
+        API->>EMB: embed(parsed screenshot)
+        EMB-->>API: screenshot dense/sparse query
+    end
+    API->>Q: two hybrid retrievals + weighted RRF
+    Q-->>API: merged rag_top_k evidence
 
     API->>G: Call #1 confidence gate
     G-->>API: {"confidence": value}
@@ -1290,7 +1298,8 @@ sequenceDiagram
 документ → Docling → chunking → BGE-M3 → Qdrant
 
 Runtime:
-вопрос + свежая история → BGE-M3 → Qdrant → rag_top_k → GigaChat
+вопрос + свежая история → BGE-M3 ─┐
+скриншот → GigaChat parse → BGE-M3 ─┴→ Qdrant × 2 → weighted RRF → rag_top_k → GigaChat
 ```
 
 ### Два разных сценария работы с файлами
@@ -2661,7 +2670,7 @@ class ScreenshotAnalysis(BaseModel):
 }
 ```
 
-Если в одном сообщении несколько изображений, отдельный screenshot parse выполняется для первого изображения, а остальные передаются в общий generation-запрос отдельными message-блоками. Так соблюдается ограничение «одно изображение на message» без увеличения числа последовательных generation-вызовов.
+В MVP пользовательское сообщение может содержать до 10 вложений, но не более одного изображения. Поэтому единственный screenshot проходит отдельный parse, а документы передаются в финальный generation-запрос. Ограничение «одно изображение на message» дополнительно соблюдается адаптером GigaChat.
 
 Задача CALL #0:
 
@@ -2674,19 +2683,22 @@ class ScreenshotAnalysis(BaseModel):
 Retrieval-query:
 
 ```text
-embedding_search_context =
+prompt_query =
     current user message
-    + screenshot.extracted_text
-    + screenshot.visual_summary
     + recent dialog history
+
+screenshot_query =
+    screenshot.extracted_text
+    + screenshot.visual_summary
 ```
 
 После этого обычный RAG:
 
 ```text
-BGE-M3 dense + sparse
-→ Qdrant
-→ RRF
+BGE-M3(prompt_query) dense + sparse → Qdrant
+BGE-M3(screenshot_query) dense + sparse → Qdrant
+→ weighted RRF по rank/vector_id
+→ deduplication
 → rag_top_k
 ```
 
@@ -3224,7 +3236,7 @@ expected document in top-3
 
 Изображение не является отдельным режимом. Кнопка прикрепления screenshot доступна **в каждом обычном диалоге**.
 
-MVP: PNG/JPEG, один screenshot на пользовательский turn.
+MVP: PNG/JPEG/TIFF/BMP, один screenshot на пользовательский turn.
 
 ### Runtime
 
@@ -4114,7 +4126,7 @@ Composer:
 MVP:
 
 ```text
-1 attachment per message
+up to 10 attachments per message, no more than 1 image
 ```
 
 Frontend:

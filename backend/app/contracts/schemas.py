@@ -60,8 +60,6 @@ class AttachmentDto(ApiModel):
     mime_type: str
     url: str
     size_bytes: int | None = None
-    extracted_text: str | None = None
-    visual_summary: str | None = None
 
 
 class MessageDto(ApiModel):

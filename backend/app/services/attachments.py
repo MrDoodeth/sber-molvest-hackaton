@@ -10,7 +10,11 @@ from app.core.errors import UnprocessableError
 from app.providers.interfaces import LLMProvider, ObjectStorage
 
 MAX_RUNTIME_ATTACHMENTS = 10
-MAX_RUNTIME_IMAGE_REQUEST_BYTES = 80 * 1024 * 1024
+MAX_RUNTIME_IMAGES = 1
+MAX_RUNTIME_REQUEST_BYTES = 80 * 1024 * 1024
+RUNTIME_IMAGE_MIME_TYPES = frozenset(
+    {"image/png", "image/jpeg", "image/tiff", "image/bmp"}
+)
 
 RUNTIME_TYPES: dict[str, set[str]] = {
     ".png": {"image/png"},
@@ -25,12 +29,16 @@ RUNTIME_TYPES: dict[str, set[str]] = {
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     },
     ".pdf": {"application/pdf"},
-    ".epub": {"application/epub+zip"},
-    ".ppt": {"application/vnd.ms-powerpoint"},
+    ".epub": {"application/epub", "application/epub+zip"},
+    ".ppt": {"application/ppt", "application/vnd.ms-powerpoint"},
     ".pptx": {
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        "application/pptx",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     },
-    ".xlsx": {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
+    ".xlsx": {
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    },
 }
 
 PERMANENT_TYPES: dict[str, set[str]] = {
@@ -54,7 +62,7 @@ class ValidatedUpload:
 
     @property
     def is_screenshot(self) -> bool:
-        return self.mime_type in {"image/png", "image/jpeg"}
+        return self.mime_type in RUNTIME_IMAGE_MIME_TYPES
 
     @property
     def is_image(self) -> bool:
@@ -101,6 +109,12 @@ def validate_upload(
         raise UnprocessableError("Содержимое файла не является PNG")
     if mime_type == "image/jpeg" and not data.startswith(b"\xff\xd8\xff"):
         raise UnprocessableError("Содержимое файла не является JPEG")
+    if mime_type == "image/tiff" and not (
+        data.startswith(b"II*\x00") or data.startswith(b"MM\x00*")
+    ):
+        raise UnprocessableError("Содержимое файла не является TIFF")
+    if mime_type == "image/bmp" and not data.startswith(b"BM"):
+        raise UnprocessableError("Содержимое файла не является BMP")
     if mime_type == "application/pdf" and not data.startswith(b"%PDF"):
         raise UnprocessableError("Содержимое файла не является PDF")
     return ValidatedUpload(

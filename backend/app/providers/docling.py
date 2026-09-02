@@ -4,13 +4,17 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-from app.core.config import EMBEDDING_MODEL_ID
 from app.providers.interfaces import DocumentParsingError, ParsedChunk
 
 
 class DoclingHybridParser:
-    def __init__(self, max_tokens: int = 800) -> None:
+    def __init__(
+        self,
+        max_tokens: int = 800,
+        model_path: str | Path = "/opt/models/bge-m3",
+    ) -> None:
         self._max_tokens = max_tokens
+        self._model_path = Path(model_path)
         self._converter: Any | None = None
         self._chunker: Any | None = None
         self._load_lock = asyncio.Lock()
@@ -35,7 +39,9 @@ class DoclingHybridParser:
                         "Docling and transformers are required for permanent ingestion"
                     ) from exc
                 tokenizer = HuggingFaceTokenizer(
-                    tokenizer=AutoTokenizer.from_pretrained(EMBEDDING_MODEL_ID),
+                    tokenizer=AutoTokenizer.from_pretrained(
+                        str(self._model_path), local_files_only=True
+                    ),
                     max_tokens=self._max_tokens,
                 )
                 return DocumentConverter(), HybridChunker(

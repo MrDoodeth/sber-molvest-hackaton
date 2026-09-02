@@ -64,13 +64,16 @@ def build_container(
     engine, session_factory = create_database(settings.database_url)
     actual_llm = llm_provider or GigaChatProvider(settings)
     actual_embedding = embedding_provider or BgeM3EmbeddingProvider(
-        settings.embedding_device
+        settings.embedding_device,
+        model_path=settings.embedding_model_path,
     )
     actual_vector = vector_store or QdrantHybridVectorStore(
         settings.qdrant_url,
         settings.qdrant_api_key.get_secret_value() if settings.qdrant_api_key else None,
     )
-    actual_parser = document_parser or DoclingHybridParser()
+    actual_parser = document_parser or DoclingHybridParser(
+        model_path=settings.embedding_model_path
+    )
     if storage is not None:
         actual_storage = storage
     elif settings.storage_backend == "s3":

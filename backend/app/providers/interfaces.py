@@ -95,6 +95,7 @@ class GenerationRequest:
     attachment_mime_types: tuple[str, ...] = ()
     screenshot_extracted_text: str | None = None
     screenshot_visual_summary: str | None = None
+    rag_status: str = "ready"
 
 
 @dataclass(frozen=True, slots=True)

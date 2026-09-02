@@ -169,7 +169,7 @@ export default function UserDialogPage() {
                   messages={allMessages}
                   streamingText={visiblePhase === "streaming" || visiblePhase === "thinking" ? events.assistantText ?? "" : null}
                   topAction={messages.hasNextPage ? <Button variant="ghost" size="sm" className="mx-auto" pending={messages.isFetchingNextPage} onClick={() => void messages.fetchNextPage()}><RotateCcw className="size-3.5" /> Загрузить ранние сообщения</Button> : undefined}
-                  empty={<EmptyState title="Начните разговор" description="Опишите проблему с 1С. Можно приложить до 10 файлов." />}
+                   empty={<EmptyState title="Начните разговор" description="Опишите проблему с 1С. Можно приложить до 10 файлов и одно изображение." />}
                 />
               )}
             </div>

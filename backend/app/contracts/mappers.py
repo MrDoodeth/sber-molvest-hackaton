@@ -52,8 +52,7 @@ def attachment_dto(attachment: Attachment) -> AttachmentDto:
         file_name=PurePosixPath(attachment.storage_key).name,
         mime_type=attachment.mime_type,
         url=f"/api/attachments/{attachment.id}",
-        extracted_text=attachment.extracted_text,
-        visual_summary=attachment.visual_summary,
+        size_bytes=attachment.size_bytes,
     )
 
 

@@ -36,7 +36,7 @@ services:
     command:
       - sh
       - -c
-      - uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/app
+      - alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/app
     environment:
       ENVIRONMENT: development
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-molvest}:${POSTGRES_PASSWORD:-molvest}@postgres:5432/${POSTGRES_DB:-molvest}
@@ -50,9 +50,10 @@ services:
       CORS_ORIGINS: http://localhost:${FRONTEND_PORT:-5173}
       QDRANT_URL: http://qdrant:6333
       EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-cpu}
+      EMBEDDING_MODEL_PATH: /opt/models/bge-m3
       SSE_HEARTBEAT_SECONDS: ${SSE_HEARTBEAT_SECONDS:-15}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
-      CREATE_SCHEMA_ON_STARTUP: "true"
+      CREATE_SCHEMA_ON_STARTUP: "false"
       SEED_ON_STARTUP: ${SEED_ON_STARTUP:-true}
       WATCHFILES_FORCE_POLLING: "true"
     ports:
