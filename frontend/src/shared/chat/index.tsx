@@ -268,13 +268,13 @@ export function AttachmentCard({ attachment }: { attachment: AttachmentDto }) {
 }
 
 function authorMeta(message: MessageDto) {
-  if (message.authorType === "user") return { label: "Вы", icon: UserRound, bubble: "bg-molvest-800 text-white", align: "justify-end" };
   if (message.authorType === "assistant") return { label: "GigaChat", icon: Sparkles, bubble: "border border-indigo-100 bg-white text-stone-800 shadow-sm", align: "justify-start" };
+  if (message.authorType === "operator") return { label: `Оператор${message.author?.displayName ? ` · ${message.author.displayName}` : ""}`, icon: ShieldCheck, bubble: "border border-sky-100 bg-sky-50 text-slate-800", align: "justify-start" };
   return {
-    label: `Оператор${message.author?.displayName ? ` · ${message.author.displayName}` : ""}`,
-    icon: ShieldCheck,
-    bubble: "border border-sky-100 bg-sky-50 text-slate-800",
-    align: "justify-start",
+    label: "КЛИЕНТ",
+    icon: UserRound,
+    bubble: "bg-molvest-800 text-white",
+    align: "justify-end",
   };
 }
 
@@ -291,9 +291,10 @@ export function MessageBubble({ message, showConfidence = false }: { message: Me
   }
   const meta = authorMeta(message);
   const Icon = meta.icon;
+  const isRightAligned = meta.align === "justify-end";
   return (
     <article className={cn("message-enter flex", meta.align)} data-message-id={message.id}>
-      <div className={cn("max-w-[88%] rounded-2xl px-4 py-3 sm:max-w-[74%]", meta.bubble, message.authorType === "user" ? "rounded-br-md" : "rounded-bl-md")}>
+      <div className={cn("max-w-[88%] rounded-2xl px-4 py-3 sm:max-w-[74%]", meta.bubble, isRightAligned ? "rounded-br-md" : "rounded-bl-md")}>
         <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-[0.08em] opacity-70">
           <Icon className="size-3.5" aria-hidden="true" />
           {meta.label}
