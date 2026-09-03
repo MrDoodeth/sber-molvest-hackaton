@@ -211,6 +211,7 @@ class GigaChatProvider:
         schema: type[BaseModel],
         messages: list[Any],
         session_id: uuid.UUID,
+        auto_file_functions: bool = False,
     ) -> BaseModel:
         for method in ("json_schema", "function_calling"):
             try:
@@ -221,15 +222,17 @@ class GigaChatProvider:
                 )
                 request_id = uuid.uuid4()
                 with self._request_headers(session_id, request_id):
-                    result = await runnable.ainvoke(
-                        messages,
-                        config={
+                    invoke_kwargs: dict[str, Any] = {
+                        "config": {
                             "metadata": {
                                 "session_id": str(session_id),
                                 "request_id": str(request_id),
                             }
-                        },
-                    )
+                        }
+                    }
+                    if auto_file_functions:
+                        invoke_kwargs["function_call"] = "auto"
+                    result = await runnable.ainvoke(messages, **invoke_kwargs)
                 if isinstance(result, dict) and "raw" in result:
                     raw = result.get("raw")
                     metadata = getattr(raw, "response_metadata", None) or {}
@@ -367,6 +370,7 @@ class GigaChatProvider:
                 schema=_AnswerAssessmentSchema,
                 messages=messages,
                 session_id=session_id,
+                auto_file_functions=self._has_text_attachments(request),
             )
             parsed = _AnswerAssessmentSchema.model_validate(result)
             question = (
@@ -402,6 +406,7 @@ class GigaChatProvider:
                 schema=CaseCard,
                 messages=messages,
                 session_id=session_id,
+                auto_file_functions=self._has_text_attachments(request),
             )
             return CaseCard.model_validate(result)
 
