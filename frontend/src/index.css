@@ -116,6 +116,37 @@ select {
   animation: dialog-reorder 240ms ease-out;
 }
 
+.markdown-body ul,
+.markdown-body ol {
+  margin: 0.75rem 0;
+  padding-left: 1.5rem;
+}
+
+.markdown-body ul {
+  list-style-type: disc;
+}
+
+.markdown-body ol {
+  list-style-type: decimal;
+}
+
+.markdown-body ul ul {
+  list-style-type: circle;
+}
+
+.markdown-body ul ol,
+.markdown-body ol ol {
+  list-style-type: lower-alpha;
+}
+
+.markdown-body li {
+  padding-left: 0.25rem;
+}
+
+.markdown-body li + li {
+  margin-top: 0.3rem;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .message-enter,
   .dialog-reorder-item {

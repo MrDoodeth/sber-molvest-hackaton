@@ -8,6 +8,10 @@ import { DialogStatusBadge } from "../../shared/chat";
 import { Button, EmptyState, ErrorState, Skeleton } from "../../shared/ui";
 import { cn, formatRelativeDate, truncateTitle } from "../../shared/utils";
 
+function preloadNewDialog() {
+  void import("./NewUserDialogPage");
+}
+
 export default function UserDialogsNav({ mobile = false }: { mobile?: boolean }) {
   const navigate = useNavigate();
   const dialogs = useQuery({
@@ -21,6 +25,10 @@ export default function UserDialogsNav({ mobile = false }: { mobile?: boolean })
   const [orderRevision, setOrderRevision] = useState(0);
 
   useEffect(() => {
+    preloadNewDialog();
+  }, []);
+
+  useEffect(() => {
     if (previousOrder.current && previousOrder.current !== order) {
       setOrderRevision((current) => current + 1);
     }
@@ -30,7 +38,13 @@ export default function UserDialogsNav({ mobile = false }: { mobile?: boolean })
   return (
     <aside className={cn("flex min-h-0 flex-col border-stone-200 bg-white", mobile ? "h-full" : "hidden border-r md:flex md:w-80 md:shrink-0")}>
       <div className="border-b border-stone-100 p-4">
-        <Button className="w-full" onClick={() => navigate("/user/new")}>
+          <Button
+            className="w-full"
+            onClick={() => navigate("/user/new")}
+            onFocus={preloadNewDialog}
+            onPointerEnter={preloadNewDialog}
+            onTouchStart={preloadNewDialog}
+          >
           <Plus className="size-4" /> Новый чат
         </Button>
       </div>

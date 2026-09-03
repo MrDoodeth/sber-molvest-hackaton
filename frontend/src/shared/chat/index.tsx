@@ -3,6 +3,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
   forwardRef,
+  memo,
   useEffect,
   useRef,
   useState,
@@ -278,7 +279,7 @@ function authorMeta(message: MessageDto) {
   };
 }
 
-export function MessageBubble({ message, showConfidence = false }: { message: MessageDto; showConfidence?: boolean }) {
+export const MessageBubble = memo(function MessageBubble({ message, showConfidence = false }: { message: MessageDto; showConfidence?: boolean }) {
   if (message.authorType === "system") {
     return (
       <div className="message-enter my-3 flex justify-center">
@@ -313,9 +314,9 @@ export function MessageBubble({ message, showConfidence = false }: { message: Me
       </div>
     </article>
   );
-}
+});
 
-export function StreamingMessage({ text, label = "GigaChat формирует ответ" }: { text: string; label?: string }) {
+export const StreamingMessage = memo(function StreamingMessage({ text, label = "GigaChat формирует ответ" }: { text: string; label?: string }) {
   return (
     <div className="message-enter flex justify-start" aria-live="polite">
       <div className="max-w-[88%] rounded-2xl rounded-bl-md border border-indigo-100 bg-white px-4 py-3 text-stone-800 shadow-sm sm:max-w-[74%]">
@@ -326,7 +327,7 @@ export function StreamingMessage({ text, label = "GigaChat формирует о
       </div>
     </div>
   );
-}
+});
 
 export function MessageList({
   messages,
@@ -344,9 +345,10 @@ export function MessageList({
   empty?: ReactNode;
 }) {
   const endRef = useRef<HTMLDivElement>(null);
+  const hasStreamingMessage = streamingText !== undefined && streamingText !== null;
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
-  }, [messages.length, streamingText]);
+  }, [messages.length, hasStreamingMessage]);
   if (!messages.length && !streamingText && empty) return <>{empty}</>;
   return (
     <div className="grid gap-3 px-4 py-5 sm:px-6">
