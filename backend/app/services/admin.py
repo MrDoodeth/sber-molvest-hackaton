@@ -268,6 +268,15 @@ class AdminService:
                 .order_by(MetricEvent.created_at.desc(), MetricEvent.id.desc())
                 .limit(1)
             )
+            first_turn_metric = await session.scalar(
+                select(MetricEvent)
+                .where(
+                    MetricEvent.dialog_id == dialog_id,
+                    MetricEvent.event_type == "user_turn",
+                )
+                .order_by(MetricEvent.created_at, MetricEvent.id)
+                .limit(1)
+            )
             escalation_metric = await session.scalar(
                 select(MetricEvent)
                 .where(
@@ -321,7 +330,11 @@ class AdminService:
                         latest_metric.gigachat_model if latest_metric else None
                     ),
                     system_prompt=(
-                        latest_metric.system_prompt if latest_metric else None
+                        first_turn_metric.system_prompt
+                        if first_turn_metric
+                        else latest_metric.system_prompt
+                        if latest_metric
+                        else None
                     ),
                     escalation_threshold=(
                         escalation_metric.operator_escalation_threshold
