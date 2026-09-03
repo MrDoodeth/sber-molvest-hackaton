@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.contracts.mappers import candidate_dto, feedback_dto
+from app.contracts.mappers import candidate_dto, feedback_dto, normalize_case_card
 from app.contracts.schemas import (
     CaseCard,
     FeedbackDto,
@@ -319,7 +319,8 @@ class ModerationService:
                         raise NotFoundError("Целевой раздел базы знаний не найден")
                     if card is not None:
                         candidate.generated_card = card.model_dump(mode="json")
-                    card = CaseCard.model_validate(candidate.generated_card)
+                    card = normalize_case_card(candidate.generated_card)
+                    candidate.generated_card = card.model_dump(mode="json")
 
                     # Keep both row locks until publication is committed. A hard
                     # delete cannot remove the dialog while the document is built.

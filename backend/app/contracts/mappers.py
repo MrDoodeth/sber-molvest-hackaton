@@ -5,6 +5,7 @@ from pathlib import PurePosixPath
 from app.contracts.schemas import (
     AttachmentDto,
     CandidateRef,
+    CaseCard,
     CurrentUser,
     DialogDetail,
     DialogSummary,
@@ -46,6 +47,24 @@ def attachment_dto(attachment: Attachment) -> AttachmentDto:
         mime_type=attachment.mime_type,
         url=f"/api/attachments/{attachment.id}",
         size_bytes=attachment.size_bytes,
+    )
+
+
+def normalize_case_card(raw: object) -> CaseCard:
+    if not isinstance(raw, dict):
+        return CaseCard(title="Без названия")
+
+    def first_text(*keys: str) -> str:
+        for key in keys:
+            value = raw.get(key)
+            if isinstance(value, str) and value.strip():
+                return value
+        return ""
+
+    return CaseCard(
+        title=first_text("title", "name", "question") or "Без названия",
+        problem=first_text("problem", "symptoms", "context", "description"),
+        result=first_text("result", "solution", "resolution", "answer"),
     )
 
 
@@ -184,7 +203,7 @@ def candidate_dto(
         id=candidate.id,
         dialog_id=candidate.dialog_id,
         source=candidate.source,
-        generated_card=candidate.generated_card,
+        generated_card=normalize_case_card(candidate.generated_card),
         status=candidate.status,
         resulting_document_id=candidate.resulting_document_id,
         resulting_document=(
