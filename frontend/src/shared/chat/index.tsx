@@ -244,7 +244,7 @@ export function AttachmentCard({ attachment }: { attachment: AttachmentDto }) {
 
 function authorMeta(message: MessageDto) {
   if (message.authorType === "assistant") return { label: "GigaChat", icon: Sparkles, bubble: "border border-indigo-100 bg-white text-stone-800 shadow-sm", align: "justify-start" };
-  if (message.authorType === "operator") return { label: `Оператор${message.author?.displayName ? ` · ${message.author.displayName}` : ""}`, icon: ShieldCheck, bubble: "border border-sky-100 bg-sky-50 text-slate-800", align: "justify-start" };
+  if (message.authorType === "operator") return { label: "ОПЕРАТОР", icon: ShieldCheck, bubble: "border border-sky-100 bg-sky-50 text-slate-800", align: "justify-start" };
   return {
     label: "КЛИЕНТ",
     icon: UserRound,
@@ -273,7 +273,7 @@ export const MessageBubble = memo(function MessageBubble({ message, showConfiden
         <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-[0.08em] opacity-70">
           <Icon className="size-3.5" aria-hidden="true" />
           {meta.label}
-          {showConfidence && message.confidence !== undefined && <span>· {formatPercent(message.confidence)}</span>}
+          {showConfidence && message.authorType !== "operator" && message.confidence !== undefined && <span>· {formatPercent(message.confidence)}</span>}
         </div>
         {message.authorType === "assistant" || message.authorType === "operator" ? <MarkdownContent text={message.text} className={message.authorType === "operator" ? "!bg-transparent" : undefined} /> : <p className="whitespace-pre-wrap break-words text-sm leading-6">{message.text}</p>}
         {message.attachments.length > 0 && (
