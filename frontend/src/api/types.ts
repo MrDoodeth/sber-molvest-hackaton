@@ -166,7 +166,7 @@ export type AdminSettingsInput = Omit<AdminSettingsResponse, "capabilities" | "a
 
 export interface AdminDialogListItem extends DialogSummary {
   resolvedBy: "ai" | "operator";
-  lastConfidence?: number;
+  lastConfidence?: number | null;
 }
 
 export interface PageResponse<T> {

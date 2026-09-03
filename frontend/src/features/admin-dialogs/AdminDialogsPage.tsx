@@ -92,7 +92,7 @@ export default function AdminDialogsPage() {
                         <td className="min-w-0 px-5 py-4"><div className="flex min-w-0 items-start gap-3">{dialog.hasAttachment ? <ImageIcon className="mt-0.5 size-4 shrink-0 text-indigo-500" /> : <MessagesSquare className="mt-0.5 size-4 shrink-0 text-stone-300" />}<div className="min-w-0"><p className="line-clamp-2 break-words font-bold text-stone-900">{dialog.title || dialog.lastMessagePreview || "Завершённое обращение"}</p><p className="mt-1 truncate text-xs text-stone-400">{dialog.user?.displayName || `ID ${dialog.id.slice(0, 8)}`}</p></div></div></td>
                         <td className="whitespace-nowrap px-4 py-4 text-xs text-stone-500">{formatDateTime(dialog.closedAt)}</td>
                         <td className="px-4 py-4"><Badge tone={dialog.resolvedBy === "ai" ? "giga" : "info"}>{dialog.resolvedBy === "ai" ? <><Bot className="mr-1 size-3" /> AI</> : <><UserRound className="mr-1 size-3" /> Оператор</>}</Badge></td>
-                        <td className="whitespace-nowrap px-4 py-4 font-bold text-stone-700">{dialog.lastConfidence === undefined ? "—" : formatPercent(dialog.lastConfidence)}</td>
+                        <td className="whitespace-nowrap px-4 py-4 font-bold text-stone-700">{dialog.lastConfidence == null ? "—" : formatPercent(dialog.lastConfidence)}</td>
                         <td className="whitespace-nowrap px-5 py-4 text-right"><Link to={`/admin/dialogs/${dialog.id}`} className="text-sm font-bold text-molvest-700 hover:text-molvest-900">Открыть</Link></td>
                       </tr>
                     ))}
