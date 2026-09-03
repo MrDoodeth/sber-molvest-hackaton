@@ -97,6 +97,8 @@ class Settings(BaseSettings):
         if "*" in self.cors_origins:
             raise ValueError("CORS wildcard is incompatible with credentialed cookies")
         if self.environment == "production":
+            if self.demo_auth_enabled:
+                raise ValueError("DEMO_AUTH_ENABLED must be false in production")
             if not self.auth_cookie_secure:
                 raise ValueError("AUTH_COOKIE_SECURE must be true in production")
             if self.jwt_secret.get_secret_value().startswith("local-development"):
