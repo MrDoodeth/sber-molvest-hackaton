@@ -4,11 +4,10 @@ import { authApi } from "../../api/auth";
 import { dialogsApi } from "../../api/dialogs";
 import { operatorApi } from "../../api/operator";
 import { queryKeys } from "../../api/queryKeys";
-import type { SourceRef } from "../../api/types";
 import { Bot, CheckCircle2, Clipboard, Headphones, Inbox, MessagesSquare, PanelRight, RotateCcw, Sparkles, UserCheck } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ChatComposer, DialogStatusBadge, MessageList, MessageSources } from "../../shared/chat";
+import { ChatComposer, DialogStatusBadge, MessageList } from "../../shared/chat";
 import { appendPersistedMessage } from "../../shared/hooks/messageCache";
 import { useOperatorDialogEvents } from "../../shared/hooks/useOperatorDialogEvents";
 import { Badge, Button, ConfirmDialog, EmptyState, ErrorState, PageLoader, Tabs, Textarea, useToast } from "../../shared/ui";
@@ -21,7 +20,6 @@ type MobilePane = "queue" | "chat" | "template";
 interface TemplateState {
   status: "generating" | "ready" | "error";
   text: string;
-  sources: SourceRef[];
   dialogUpdatedAt?: string;
   updatedAt?: string;
   error?: string;
@@ -104,7 +102,7 @@ export default function OperatorWorkspace() {
     onMutate: (targetDialogId) => {
       setTemplates((current) => ({
         ...current,
-        [targetDialogId]: { status: "generating", text: "", sources: [] },
+         [targetDialogId]: { status: "generating", text: "" },
       }));
     },
     onSuccess: (generated, targetDialogId) => {
@@ -113,8 +111,7 @@ export default function OperatorWorkspace() {
         [targetDialogId]: {
           status: "ready",
           text: generated.text,
-          sources: generated.sources,
-          dialogUpdatedAt: generated.dialogUpdatedAt,
+           dialogUpdatedAt: generated.dialogUpdatedAt,
           updatedAt: generated.createdAt,
         },
       }));
@@ -125,8 +122,7 @@ export default function OperatorWorkspace() {
         [targetDialogId]: {
           status: "error",
           text: "",
-          sources: [],
-          error: getErrorMessage(error),
+           error: getErrorMessage(error),
         },
       }));
     },
@@ -281,9 +277,8 @@ export default function OperatorWorkspace() {
                       </div>
                       {templateReady && <Badge tone="success" className="justify-center text-center">Готов к вставке</Badge>}
                     </div>
-                    <Textarea id="operator-template" rows={14} className="mt-3 min-h-56 resize-y" value={templateText} disabled={isGeneratingTemplate} onChange={(event) => { if (!dialogId) return; setTemplates((current) => ({ ...current, [dialogId]: { status: "ready", text: event.target.value, sources: template?.sources ?? [], dialogUpdatedAt: template?.dialogUpdatedAt, updatedAt: template?.updatedAt } })); }} placeholder="Здесь появится шаблон ответа…" />
+                    <Textarea id="operator-template" rows={14} className="mt-3 min-h-56 resize-y" value={templateText} disabled={isGeneratingTemplate} onChange={(event) => { if (!dialogId) return; setTemplates((current) => ({ ...current, [dialogId]: { status: "ready", text: event.target.value, dialogUpdatedAt: template?.dialogUpdatedAt, updatedAt: template?.updatedAt } })); }} placeholder="Здесь появится шаблон ответа…" />
                     {template?.updatedAt && !isGeneratingTemplate && <p className="mt-2 text-[11px] font-semibold text-emerald-700">Шаблон обновлён {formatDateTime(template.updatedAt)}</p>}
-                    <MessageSources sources={template?.sources ?? []} />
                     <div className="mt-3 flex justify-end"><Button type="button" variant="ghost" size="sm" disabled={!templateText.trim()} onClick={() => void copyTemplate()}><Clipboard className="size-4" /> Скопировать</Button></div>
                   </div>
                 )}

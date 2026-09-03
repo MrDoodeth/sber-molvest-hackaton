@@ -14,7 +14,6 @@ from app.contracts.schemas import (
     KnowledgeSectionDto,
     MessageDto,
     PromptDto,
-    SourceRef,
     UserRef,
 )
 from app.core.constants import PROTECTED_SECTION_IDS
@@ -37,10 +36,6 @@ def user_ref(user: User) -> UserRef:
 
 def current_user(user: User) -> CurrentUser:
     return CurrentUser(id=user.id, role=user.role, display_name=user.display_name)
-
-
-def source_refs(raw: list[dict[str, object]] | None) -> list[SourceRef]:
-    return [SourceRef.model_validate(item) for item in (raw or [])]
 
 
 def attachment_dto(attachment: Attachment) -> AttachmentDto:
@@ -67,7 +62,6 @@ def message_dto(
         text=message.text,
         confidence=message.confidence,
         attachments=[attachment_dto(item) for item in attachments or []],
-        sources=source_refs(message.sources),
         created_at=message.created_at,
     )
 

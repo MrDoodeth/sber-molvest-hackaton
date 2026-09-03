@@ -69,7 +69,6 @@ class MessageDto(ApiModel):
     text: str
     confidence: float | None = None
     attachments: list[AttachmentDto] = Field(default_factory=list)
-    sources: list[SourceRef] = Field(default_factory=list)
     created_at: datetime
 
 
@@ -99,7 +98,6 @@ class OperatorTemplateDto(ApiModel):
     dialog_id: uuid.UUID
     dialog_updated_at: datetime
     text: str
-    sources: list[SourceRef] = Field(default_factory=list)
     created_at: datetime
 
 

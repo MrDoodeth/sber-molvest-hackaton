@@ -579,7 +579,6 @@ class DialogService:
                     dialog_id=dialog_id,
                     dialog_updated_at=dialog_updated_at,
                     text=generated_text,
-                    sources=[item.source for item in context.request.evidence],
                     created_at=datetime.now(UTC),
                 )
         except ProviderError as exc:

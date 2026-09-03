@@ -27,7 +27,6 @@ import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import remarkGfm from "remark-gfm";
 import {
   Bot,
-  ChevronDown,
   Download,
   FileText,
   Image as ImageIcon,
@@ -38,7 +37,7 @@ import {
   UserRound,
   X,
 } from "lucide-react";
-import type { AttachmentDto, DialogSummary, MessageDto, SourceRef } from "../../api/types";
+import type { AttachmentDto, DialogSummary, MessageDto } from "../../api/types";
 import { Badge, Button, IconButton } from "../ui";
 import {
   cn,
@@ -218,26 +217,6 @@ export function DialogStatusBadge({ dialog }: { dialog: Pick<DialogSummary, "sta
   return <Badge tone={tone}>{label}</Badge>;
 }
 
-export function MessageSources({ sources }: { sources: SourceRef[] }) {
-  if (!sources.length) return null;
-  return (
-    <details className="group mt-3 border-t border-current/10 pt-2 text-xs">
-      <summary className="flex cursor-pointer list-none items-center gap-1.5 font-bold opacity-75 hover:opacity-100">
-        Источники ({sources.length})
-        <ChevronDown className="size-3.5 transition group-open:rotate-180" aria-hidden="true" />
-      </summary>
-      <ul className="mt-2 grid gap-1.5">
-        {sources.map((source) => (
-          <li key={`${source.documentId}-${source.label}`} className="rounded-lg bg-black/5 px-2.5 py-2 leading-5">
-            <span className="mr-1 font-extrabold">[{source.label}]</span>
-            {source.title}
-          </li>
-        ))}
-      </ul>
-    </details>
-  );
-}
-
 export function AttachmentCard({ attachment }: { attachment: AttachmentDto }) {
   const url = safeAttachmentUrl(attachment);
   const isImage = attachment.mimeType.startsWith("image/");
@@ -309,7 +288,6 @@ export const MessageBubble = memo(function MessageBubble({ message, showConfiden
             ))}
           </div>
         )}
-        <MessageSources sources={message.sources} />
         <time className="mt-2 block text-right text-[10px] opacity-55" dateTime={message.createdAt}>{formatDateTime(message.createdAt)}</time>
       </div>
     </article>

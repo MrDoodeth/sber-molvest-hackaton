@@ -18,12 +18,6 @@ export interface CurrentUser extends UserRef {
   role: Role;
 }
 
-export interface SourceRef {
-  documentId: string;
-  title: string;
-  label: string;
-}
-
 export interface AttachmentDto {
   id: string;
   messageId: string;
@@ -41,7 +35,6 @@ export interface MessageDto {
   text: string;
   confidence?: number;
   attachments: AttachmentDto[];
-  sources: SourceRef[];
   createdAt: string;
 }
 
@@ -83,7 +76,6 @@ export interface OperatorTemplateDto {
   dialogId: string;
   dialogUpdatedAt: string;
   text: string;
-  sources: SourceRef[];
   createdAt: string;
 }
 

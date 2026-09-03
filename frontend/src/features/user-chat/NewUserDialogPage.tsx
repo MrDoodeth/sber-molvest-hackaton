@@ -79,8 +79,7 @@ export default function NewUserDialogPage() {
         mimeType: file.type,
         sizeBytes: file.size,
       })),
-      sources: [],
-      createdAt: new Date().toISOString(),
+       createdAt: new Date().toISOString(),
     });
     setText("");
     setAttachments([]);
