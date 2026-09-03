@@ -25,6 +25,7 @@ from app.core.enums import (
     DialogStatus,
     DocumentSourceType,
     FeedbackVerdict,
+    IndexStatus,
     MessageAuthor,
     PromptType,
     UserRole,
@@ -324,39 +325,63 @@ class ModerationService:
 
                     # Keep both row locks until publication is committed. A hard
                     # delete cannot remove the dialog while the document is built.
-                    markdown = self._render_markdown(card)
-                    upload = ValidatedUpload(
-                        file_name=f"{candidate_id}.md",
-                        extension=".md",
-                        mime_type="text/markdown",
-                        data=markdown.encode("utf-8"),
+                    storage_key = f"case-cards/{candidate_id}.md"
+                    document = await session.scalar(
+                        select(KnowledgeDocument).where(
+                            KnowledgeDocument.storage_key == storage_key
+                        )
                     )
-                    document = await self._knowledge_base.create_document(
-                        upload=upload,
-                        section_id=target_section_id,
-                        source_type=DocumentSourceType.RESOLVED_CASE,
-                        title=card.title,
-                        one_c_version=None,
-                        tags=["resolved_case"],
-                        schedule_ingestion=False,
-                        storage_key=f"case-cards/{candidate_id}.md",
-                    )
-                    try:
-                        await self._knowledge_base.ingest(document.id)
-                    except IngestionFailedError as exc:
-                        try:
-                            await self._knowledge_base.delete_document(document.id)
-                        except Exception:
-                            logger.exception(
-                                "Failed to compensate candidate document %s",
-                                document.id,
+                    document_created = False
+                    if document is None:
+                        markdown = self._render_markdown(card)
+                        upload = ValidatedUpload(
+                            file_name=f"{candidate_id}.md",
+                            extension=".md",
+                            mime_type="text/markdown",
+                            data=markdown.encode("utf-8"),
+                        )
+                        created_document = await self._knowledge_base.create_document(
+                            upload=upload,
+                            section_id=target_section_id,
+                            source_type=DocumentSourceType.RESOLVED_CASE,
+                            title=card.title,
+                            one_c_version=None,
+                            tags=["resolved_case"],
+                            schedule_ingestion=False,
+                            storage_key=storage_key,
+                        )
+                        document_id = created_document.id
+                        document_created = True
+                    else:
+                        if (
+                            document.section_id != target_section_id
+                            or document.source_type != DocumentSourceType.RESOLVED_CASE
+                        ):
+                            raise ConflictError(
+                                "Ключ карточки уже занят другим документом"
                             )
+                        document_id = document.id
+                    try:
+                        if (
+                            document_created
+                            or document.index_status != IndexStatus.INDEXED
+                        ):
+                            await self._knowledge_base.ingest(document_id)
+                    except IngestionFailedError as exc:
+                        if document_created:
+                            try:
+                                await self._knowledge_base.delete_document(document_id)
+                            except Exception:
+                                logger.exception(
+                                    "Failed to compensate candidate document %s",
+                                    document_id,
+                                )
                         raise ConflictError(
                             "Кандидат не опубликован: индексация завершилась ошибкой"
                         ) from exc
 
                     candidate.status = CandidateStatus.APPROVED
-                    candidate.resulting_document_id = document.id
+                    candidate.resulting_document_id = document_id
                     candidate.reviewed_by = admin.id
                     candidate.reviewed_at = datetime.now(UTC)
                     try:
@@ -364,11 +389,11 @@ class ModerationService:
                     except Exception:
                         await session.rollback()
                         try:
-                            await self._knowledge_base.delete_document(document.id)
+                            await self._knowledge_base.delete_document(document_id)
                         except Exception:
                             logger.exception(
                                 "Failed to compensate published candidate document %s",
-                                document.id,
+                                document_id,
                             )
                         raise
                     return await self._candidate_with_reviewer(session, candidate)
