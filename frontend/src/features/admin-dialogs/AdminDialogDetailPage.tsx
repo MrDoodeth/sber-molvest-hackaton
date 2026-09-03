@@ -27,8 +27,8 @@ export default function AdminDialogDetailPage() {
     mutationFn: () => adminApi.deleteDialog(dialogId),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.admin.allDialogs() });
-      navigate("/admin/dialogs?feedback=ai_error", { replace: true });
-      toast("Ошибочный чат удалён", "success");
+      navigate(`/admin/dialogs?feedback=${detail.data?.feedback?.verdict ?? "unrated"}`, { replace: true });
+      toast("Чат удалён", "success");
     },
     onError: (error) => toast(error.message, "error"),
   });
@@ -37,7 +37,7 @@ export default function AdminDialogDetailPage() {
   if (detail.isError) return <ErrorState description={detail.error.message} onRetry={() => void detail.refetch()} />;
   if (!detail.data) return null;
   const { dialog, messages, feedback, audit } = detail.data;
-  const isAiError = dialog.status === "closed" && feedback?.verdict === "ai_error";
+  const canDeleteDialog = dialog.status === "closed" && detail.data.candidate?.status === "rejected";
 
   return (
     <div className="p-4 sm:p-6 lg:p-8">
@@ -53,7 +53,7 @@ export default function AdminDialogDetailPage() {
           </div>
           <div className="flex flex-wrap gap-2">
             {activeCandidateId && <a href="#candidate" className="inline-flex min-h-11 items-center rounded-xl border border-molvest-200 bg-white px-4 text-sm font-bold text-molvest-800 hover:bg-molvest-50"><Sparkles className="mr-2 size-4" /> Карточка решения</a>}
-            {isAiError && <Button variant="danger" onClick={() => setDeleteOpen(true)}><Trash2 className="size-4" /> Удалить чат</Button>}
+            {canDeleteDialog && <Button variant="danger" onClick={() => setDeleteOpen(true)}><Trash2 className="size-4" /> Удалить чат</Button>}
           </div>
         </header>
         <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -73,7 +73,7 @@ export default function AdminDialogDetailPage() {
       <ConfirmDialog
         open={deleteOpen}
         title="Удалить этот чат без возможности восстановления?"
-        description="Диалог, сообщения и вложения будут удалены без возможности восстановления."
+         description="Отклонённый тикет, сообщения и вложения будут удалены без возможности восстановления."
         confirmLabel="Удалить"
         danger
         pending={deleteDialog.isPending}
