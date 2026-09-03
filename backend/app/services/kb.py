@@ -430,6 +430,8 @@ class KnowledgeBaseService:
                     parsed_chunks = await self._parser.parse(temporary_path)
                 finally:
                     await asyncio.to_thread(temporary_path.unlink, missing_ok=True)
+                if not parsed_chunks:
+                    raise IngestionFailedError("Документ не содержит текстовых чанков")
                 contextualized_chunks = [
                     self._contextualize_chunk(document, chunk.text, chunk.heading_path)
                     for chunk in parsed_chunks

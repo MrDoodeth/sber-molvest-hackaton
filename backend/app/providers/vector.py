@@ -128,9 +128,6 @@ class QdrantHybridVectorStore:
                 query_filter=Filter(
                     must=[
                         FieldCondition(key="is_enabled", match=MatchValue(value=True)),
-                        FieldCondition(
-                            key="answer_eligible", match=MatchValue(value=True)
-                        ),
                     ]
                 ),
                 limit=limit,
