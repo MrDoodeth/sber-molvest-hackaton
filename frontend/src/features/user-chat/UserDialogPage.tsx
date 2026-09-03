@@ -9,6 +9,7 @@ import type { FeedbackVerdict } from "../../api/types";
 import { ChatComposer, DialogStatusBadge, MessageList, isRuntimeImage } from "../../shared/chat";
 import { appendPersistedMessage } from "../../shared/hooks/messageCache";
 import { useUserDialogEvents } from "../../shared/hooks/useUserDialogEvents";
+import { useUserProcessing } from "../../shared/hooks/useUserProcessing";
 import { Button, ConfirmDialog, EmptyState, ErrorState, PageLoader, useToast } from "../../shared/ui";
 import { getErrorMessage, mergePersistedMessages, retryOrCreateSendAttempt, truncateTitle, type SendAttempt } from "../../shared/utils";
 import { FeedbackPanel } from "./FeedbackPanel";
@@ -20,6 +21,7 @@ export default function UserDialogPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const toast = useToast();
+  const processing = useUserProcessing();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const initialTurn = useRef(location.state as { pendingTurn?: boolean; hasScreenshot?: boolean } | null);
   const [text, setText] = useState("");
@@ -47,6 +49,7 @@ export default function UserDialogPage() {
   const events = useUserDialogEvents(dialogId, () => {
     initialTurn.current = null;
     setAwaitingTerminal(false);
+    processing.end(dialogId);
   });
   const allMessages = messages.data ? mergePersistedMessages(...messages.data.pages.map((page) => page.items)) : [];
   const latestUserMessageIndex = allMessages.map((message) => message.authorType).lastIndexOf("user");
@@ -70,6 +73,7 @@ export default function UserDialogPage() {
     },
     onError: (error, attempt) => {
       setAwaitingTerminal(false);
+      processing.end(dialogId);
       setText(attempt.text);
       setAttachments(attempt.attachments);
       setFailedAttempt(attempt);
@@ -140,8 +144,9 @@ export default function UserDialogPage() {
   }, [detail.data?.mode, detail.data?.processingError, events, initialTurnCompleted]);
 
   const submitAttempt = (attempt: SendAttempt) => {
-    if (!detail.data || send.isPending) return;
+    if (!detail.data || send.isPending || processing.isBlocked(dialogId)) return;
     if (detail.data.mode === "ai_support") {
+      processing.begin(dialogId);
       setAwaitingTerminal(true);
       events.beginTurn(attempt.attachments.some(isRuntimeImage));
     }
@@ -161,6 +166,7 @@ export default function UserDialogPage() {
 
   if (!dialogId) return <ErrorState title="Диалог не найден" />;
   const processingError = events.eventError ?? detail.data?.processingError ?? undefined;
+  const blockedByOtherTurn = processing.isBlocked(dialogId);
   const pendingTurn = detail.data?.mode === "ai_support"
     && !processingError
     && (detail.data.isProcessing || (awaitingTerminal && !initialTurnCompleted));
@@ -205,6 +211,7 @@ export default function UserDialogPage() {
             {visiblePhase === "vision" && <div className="flex items-center gap-2 border-t border-indigo-100 bg-indigo-50 px-4 py-2 text-xs font-semibold text-indigo-800"><ImageIcon className="size-4 animate-pulse" /> Анализирую изображение…</div>}
             {visiblePhase === "thinking" && pendingTurn && <div className="flex items-center gap-3 border-t border-molvest-100 bg-molvest-50 px-4 py-2 text-xs font-semibold text-molvest-800"><span>Проверяю базу знаний и уверенность ответа…</span></div>}
             {processingError && <div className="flex items-center gap-2 border-t border-red-100 bg-red-50 px-4 py-2 text-xs font-semibold text-red-800"><XCircle className="size-4" /> {processingError}</div>}
+            {blockedByOtherTurn && <div className="flex items-center gap-2 border-t border-amber-100 bg-amber-50 px-4 py-2 text-xs font-semibold text-amber-900"><LockKeyhole className="size-4" /> Дождитесь завершения обработки другого обращения.</div>}
             {detail.data.status === "active" ? (
               <ChatComposer
                 ref={textareaRef}
@@ -212,7 +219,7 @@ export default function UserDialogPage() {
                  onChange={updateText}
                 onSend={submit}
                 pending={send.isPending}
-                disabled={detail.data.mode === "ai_support" && pendingTurn}
+                disabled={blockedByOtherTurn || (detail.data.mode === "ai_support" && pendingTurn)}
                 attachments={attachments}
                 attachmentError={attachmentError}
                  onAttachmentChange={updateAttachments}

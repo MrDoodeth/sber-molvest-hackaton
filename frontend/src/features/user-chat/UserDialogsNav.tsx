@@ -6,6 +6,7 @@ import { dialogsApi } from "../../api/dialogs";
 import { queryKeys } from "../../api/queryKeys";
 import { DialogStatusBadge } from "../../shared/chat/DialogStatusBadge";
 import { useListReorderAnimation } from "../../shared/hooks/useListReorderAnimation";
+import { useUserProcessing } from "../../shared/hooks/useUserProcessing";
 import { Button, EmptyState, ErrorState, Skeleton } from "../../shared/ui";
 import { cn, formatRelativeDate, truncateTitle } from "../../shared/utils";
 
@@ -15,6 +16,7 @@ function preloadNewDialog() {
 
 export default function UserDialogsNav({ mobile = false }: { mobile?: boolean }) {
   const navigate = useNavigate();
+  const processing = useUserProcessing();
   const dialogs = useQuery({
     queryKey: queryKeys.user.dialogs(),
     queryFn: ({ signal }) => dialogsApi.list(signal),
@@ -22,6 +24,9 @@ export default function UserDialogsNav({ mobile = false }: { mobile?: boolean })
     refetchOnMount: "always",
   });
   const listRef = useListReorderAnimation<HTMLElement>(dialogs.data?.map((dialog) => dialog.id) ?? []);
+  const serverBusyDialogId = dialogs.data?.find((dialog) => dialog.isProcessing)?.id;
+  const busyDialogId = processing.busyDialogId ?? serverBusyDialogId ?? null;
+  const isBusy = processing.isBusy || serverBusyDialogId !== undefined;
 
   useEffect(() => {
     preloadNewDialog();
@@ -32,6 +37,7 @@ export default function UserDialogsNav({ mobile = false }: { mobile?: boolean })
       <div className="border-b border-stone-100 p-4">
           <Button
             className="w-full"
+            disabled={isBusy}
             onClick={() => navigate("/user/new")}
             onFocus={preloadNewDialog}
             onPointerEnter={preloadNewDialog}
@@ -55,8 +61,14 @@ export default function UserDialogsNav({ mobile = false }: { mobile?: boolean })
             key={dialog.id}
             data-reorder-id={dialog.id}
             to={`/user/dialogs/${dialog.id}`}
+            aria-disabled={isBusy && busyDialogId !== dialog.id}
+            tabIndex={isBusy && busyDialogId !== dialog.id ? -1 : undefined}
+            onClick={(event) => {
+              if (isBusy && busyDialogId !== dialog.id) event.preventDefault();
+            }}
             className={({ isActive }) => cn(
               "mb-1 block rounded-2xl border p-3.5 transition",
+              isBusy && busyDialogId !== dialog.id && "pointer-events-none opacity-55",
               isActive ? "border-molvest-200 bg-molvest-50 shadow-sm" : "border-transparent hover:border-stone-200 hover:bg-stone-50",
             )}
           >

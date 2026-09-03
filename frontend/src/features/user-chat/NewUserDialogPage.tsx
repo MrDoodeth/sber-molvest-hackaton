@@ -7,6 +7,7 @@ import { dialogsApi } from "../../api/dialogs";
 import { queryKeys } from "../../api/queryKeys";
 import { ChatComposer, MessageList, isRuntimeImage } from "../../shared/chat";
 import type { MessageInfiniteData } from "../../shared/hooks/messageCache";
+import { useUserProcessing } from "../../shared/hooks/useUserProcessing";
 import { EmptyState, useToast } from "../../shared/ui";
 import {
   getErrorMessage,
@@ -19,6 +20,7 @@ export default function NewUserDialogPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const toast = useToast();
+  const processing = useUserProcessing();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const createdDialogRef = useRef<DialogDetailDto>();
   const [text, setText] = useState("");
@@ -35,6 +37,7 @@ export default function NewUserDialogPage() {
       return { dialog, message, hasScreenshot: attempt.attachments.some(isRuntimeImage) };
     },
     onSuccess: ({ dialog, message, hasScreenshot }) => {
+      processing.attach(dialog.id);
       const hydratedDialog: DialogDetailDto = {
         ...dialog,
         title: message.text || undefined,
@@ -57,6 +60,7 @@ export default function NewUserDialogPage() {
       });
     },
     onError: (error, attempt) => {
+      processing.end();
       setOptimisticMessage(undefined);
       setText(attempt.text);
       setAttachments(attempt.attachments);
@@ -68,7 +72,8 @@ export default function NewUserDialogPage() {
   });
 
   const submitAttempt = (attempt: SendAttempt) => {
-    if (startDialog.isPending) return;
+    if (startDialog.isPending || processing.isBusy) return;
+    processing.begin();
     setOptimisticMessage({
       id: attempt.clientMessageId,
       dialogId: "new",
@@ -123,13 +128,14 @@ export default function NewUserDialogPage() {
           ref={textareaRef}
           value={text}
            onChange={updateText}
-          onSend={submit}
-          pending={startDialog.isPending}
+           onSend={submit}
+           pending={startDialog.isPending}
+           disabled={processing.isBusy}
           attachments={attachments}
           attachmentError={attachmentError}
            onAttachmentChange={updateAttachments}
-          onAttachmentError={setAttachmentError}
-          placeholder="Опишите вопрос по 1С…"
+           onAttachmentError={setAttachmentError}
+           placeholder="Опишите вопрос по 1С…"
         />
       </section>
     </div>

@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from app.core.config import Settings
 from app.core.database import create_database
 from app.core.generation_gate import GenerationGate
+from app.core.turn_coordinator import TurnCoordinator
 from app.providers.docling import DoclingHybridParser
 from app.providers.embeddings import BgeM3EmbeddingProvider
 from app.providers.gigachat import GigaChatProvider
@@ -53,6 +54,7 @@ class ApplicationContainer:
     moderation: ModerationService
     admin: AdminService
     generation_gate: GenerationGate = field(default_factory=GenerationGate)
+    turn_coordinator: TurnCoordinator = field(default_factory=TurnCoordinator)
 
 
 def build_container(
@@ -66,6 +68,7 @@ def build_container(
 ) -> ApplicationContainer:
     engine, session_factory = create_database(settings.database_url)
     generation_gate = GenerationGate()
+    turn_coordinator = TurnCoordinator()
     actual_llm = llm_provider or GigaChatProvider(settings, generation_gate)
     actual_embedding = embedding_provider or BgeM3EmbeddingProvider(
         settings.embedding_device,
@@ -136,6 +139,7 @@ def build_container(
         broker=broker,
         tasks=tasks,
         generation_gate=generation_gate,
+        turn_coordinator=turn_coordinator,
         ensure_closed_candidate=moderation.ensure_candidate_for_closed_session,
     )
     return ApplicationContainer(
@@ -158,4 +162,5 @@ def build_container(
         moderation=moderation,
         admin=AdminService(session_factory, settings_service, prompt_service),
         generation_gate=generation_gate,
+        turn_coordinator=turn_coordinator,
     )

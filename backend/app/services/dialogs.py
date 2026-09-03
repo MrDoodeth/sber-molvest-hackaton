@@ -9,7 +9,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
 
-from sqlalchemy import and_, case, or_, select, update
+from sqlalchemy import and_, case, or_, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -43,6 +43,10 @@ from app.core.errors import (
     UnprocessableError,
 )
 from app.core.generation_gate import GenerationGate
+from app.core.turn_coordinator import (
+    AI_TURN_ADMISSION_LOCK_KEY,
+    TurnCoordinator,
+)
 from app.models import (
     Attachment,
     Dialog,
@@ -120,6 +124,7 @@ class DialogService:
         broker: EventBroker,
         tasks: TaskSupervisor,
         generation_gate: GenerationGate,
+        turn_coordinator: TurnCoordinator | None = None,
         ensure_closed_candidate: Callable[[AsyncSession, uuid.UUID], Awaitable[object]]
         | None = None,
     ) -> None:
@@ -132,10 +137,10 @@ class DialogService:
         self._broker = broker
         self._tasks = tasks
         self._generation_gate = generation_gate
+        self._turn_coordinator = turn_coordinator or TurnCoordinator()
         self._ensure_closed_candidate = ensure_closed_candidate
         self._dialog_locks: dict[uuid.UUID, asyncio.Lock] = {}
         self._processing_message_ids: set[uuid.UUID] = set()
-        self._pending_ai_dialogs: set[uuid.UUID] = set()
 
     def dialog_lock(self, dialog_id: uuid.UUID) -> asyncio.Lock:
         return self._dialog_locks.setdefault(dialog_id, asyncio.Lock())
@@ -150,50 +155,57 @@ class DialogService:
             return
         if message_id in self._processing_message_ids:
             return
+        if not self._turn_coordinator.try_acquire(dialog_id, message_id):
+            return
         self._processing_message_ids.add(message_id)
-        self._pending_ai_dialogs.add(dialog_id)
 
         async def run() -> None:
             try:
                 await self.process_user_message(message_id)
             finally:
                 self._processing_message_ids.discard(message_id)
-                self._pending_ai_dialogs.discard(dialog_id)
+                self._turn_coordinator.release(dialog_id, message_id)
+                await self._schedule_next_pending_turn()
 
         self._tasks.spawn(run())
 
     async def recover_pending_turns(self) -> None:
         async with self._session_factory() as session:
-            dialogs = list(
+            triggers = list(
                 await session.scalars(
-                    select(Dialog).where(
+                    select(Message)
+                    .join(Dialog, Message.dialog_id == Dialog.id)
+                    .where(
                         Dialog.status == DialogStatus.ACTIVE,
                         Dialog.mode == DialogMode.AI_SUPPORT,
+                        Message.author_type == MessageAuthor.USER,
+                        Message.processing_status.in_(
+                            [
+                                MessageProcessingStatus.PENDING,
+                                MessageProcessingStatus.PROCESSING,
+                            ]
+                        ),
                     )
+                    .order_by(Message.created_at, Message.id)
                 )
             )
-            pending: list[tuple[uuid.UUID, uuid.UUID, DialogMode]] = []
-            for dialog in dialogs:
-                triggers = list(
-                    await session.scalars(
-                        select(Message)
-                        .where(
-                            Message.dialog_id == dialog.id,
-                            Message.author_type == MessageAuthor.USER,
-                        )
-                        .order_by(Message.created_at, Message.id)
-                    )
-                )
-                for trigger in triggers:
-                    if not await self._turn_completed(session, trigger):
-                        pending.append((trigger.id, dialog.id, dialog.mode))
-        for message_id, dialog_id, mode in pending:
-            self._schedule_processing(message_id, dialog_id, mode)
+            changed = False
+            for trigger in triggers:
+                if await self._turn_completed(session, trigger):
+                    continue
+                if trigger.processing_status == MessageProcessingStatus.PROCESSING:
+                    trigger.processing_status = MessageProcessingStatus.PENDING
+                    trigger.processing_error = None
+                    changed = True
+            if changed:
+                await session.commit()
+        await self._schedule_next_pending_turn()
 
     async def create_dialog(self, user: User) -> DialogDetail:
         if user.role != UserRole.USER:
             raise ForbiddenError("Создавать обращения может только пользователь")
         async with self._session_factory() as session:
+            await self._assert_no_active_ai_turn(session)
             dialog = Dialog(
                 user_id=user.id,
                 status=DialogStatus.ACTIVE,
@@ -370,9 +382,19 @@ class DialogService:
                     and dialog.mode == DialogMode.AI_SUPPORT
                 ):
                     if existing.processing_status == MessageProcessingStatus.FAILED:
-                        existing.processing_status = MessageProcessingStatus.PENDING
-                        existing.processing_error = None
-                        await session.commit()
+                        await self._reserve_ai_turn(
+                            session,
+                            dialog_id,
+                            existing.id,
+                            exclude_message_id=existing.id,
+                        )
+                        try:
+                            existing.processing_status = MessageProcessingStatus.PENDING
+                            existing.processing_error = None
+                            await session.commit()
+                        except Exception:
+                            self._turn_coordinator.release(dialog_id, existing.id)
+                            raise
                     if not defer_processing:
                         self._schedule_processing(existing.id, dialog_id, dialog.mode)
                 return message_dto(
@@ -383,15 +405,14 @@ class DialogService:
 
             self._assert_send_access(requester, dialog)
 
-            if (
-                requester.role == UserRole.USER
-                and dialog.mode == DialogMode.AI_SUPPORT
-                and dialog_id in self._pending_ai_dialogs
-            ):
-                raise ConflictError("Дождитесь завершения текущего ответа AI")
-
+            message_id = uuid.uuid4()
+            reserved_turn = (
+                requester.role == UserRole.USER and dialog.mode == DialogMode.AI_SUPPORT
+            )
+            if reserved_turn:
+                await self._reserve_ai_turn(session, dialog_id, message_id)
             message = Message(
-                id=uuid.uuid4(),
+                id=message_id,
                 dialog_id=dialog_id,
                 client_message_id=client_message_id,
                 author_type=(
@@ -415,6 +436,8 @@ class DialogService:
                 await session.flush()
             except IntegrityError as exc:
                 await session.rollback()
+                if reserved_turn:
+                    self._turn_coordinator.release(dialog_id, message_id)
                 existing = await session.scalar(
                     select(Message).where(
                         Message.dialog_id == dialog_id,
@@ -462,6 +485,8 @@ class DialogService:
                 await session.commit()
             except Exception as exc:
                 await session.rollback()
+                if reserved_turn:
+                    self._turn_coordinator.release(dialog_id, message_id)
                 if stored_keys:
                     await self._attachment_service.cleanup_local(stored_keys)
                 if isinstance(exc, StorageError):
@@ -522,6 +547,35 @@ class DialogService:
                 return
             mode = dialog.mode
         self._schedule_processing(message_id, message.dialog_id, mode)
+
+    async def _schedule_next_pending_turn(self) -> None:
+        """Resume one persisted turn after the global turn becomes available."""
+        async with self._session_factory() as session:
+            triggers = list(
+                await session.scalars(
+                    select(Message)
+                    .join(Dialog, Message.dialog_id == Dialog.id)
+                    .where(
+                        Dialog.status == DialogStatus.ACTIVE,
+                        Dialog.mode == DialogMode.AI_SUPPORT,
+                        Message.author_type == MessageAuthor.USER,
+                        Message.processing_status.in_(
+                            [
+                                MessageProcessingStatus.PENDING,
+                                MessageProcessingStatus.PROCESSING,
+                            ]
+                        ),
+                    )
+                    .order_by(Message.created_at, Message.id)
+                )
+            )
+            for trigger in triggers:
+                if await self._turn_completed(session, trigger):
+                    continue
+                self._schedule_processing(
+                    trigger.id, trigger.dialog_id, DialogMode.AI_SUPPORT
+                )
+                return
 
     async def operator_queue(self, operator: User, scope: str) -> list[DialogSummary]:
         if operator.role != UserRole.OPERATOR:
@@ -882,7 +936,25 @@ class DialogService:
                         return
                     if dialog.mode != DialogMode.AI_SUPPORT:
                         return
+                    if trigger.processing_status != MessageProcessingStatus.PENDING:
+                        return
                     if await self._turn_completed(session, trigger):
+                        return
+                    await self._lock_turn_admission(session)
+                    trigger = await session.get(
+                        Message, message_id, with_for_update=True
+                    )
+                    if (
+                        trigger is None
+                        or trigger.processing_status != MessageProcessingStatus.PENDING
+                    ):
+                        return
+                    if (
+                        await self._find_active_ai_turn(
+                            session, exclude_message_id=message_id
+                        )
+                        is not None
+                    ):
                         return
                     trigger_text = trigger.text
                     trigger.processing_status = MessageProcessingStatus.PROCESSING
@@ -1181,6 +1253,86 @@ class DialogService:
             message.confidence = confidence
             message.sources = sources
             await session.commit()
+
+    async def _assert_no_active_ai_turn(self, session: AsyncSession) -> None:
+        active = self._turn_coordinator.active
+        if active is not None:
+            raise ConflictError(
+                "Дождитесь завершения обработки сообщения в другом чате",
+                {"dialog_id": str(active.dialog_id)},
+            )
+        await self._lock_turn_admission(session)
+        database_active = await self._find_active_ai_turn(session)
+        if database_active is not None:
+            raise ConflictError(
+                "Дождитесь завершения обработки сообщения в другом чате",
+                {"dialog_id": str(database_active[0])},
+            )
+
+    async def _reserve_ai_turn(
+        self,
+        session: AsyncSession,
+        dialog_id: uuid.UUID,
+        message_id: uuid.UUID,
+        *,
+        exclude_message_id: uuid.UUID | None = None,
+    ) -> None:
+        if not self._turn_coordinator.try_acquire(dialog_id, message_id):
+            active = self._turn_coordinator.active
+            raise ConflictError(
+                "Дождитесь завершения обработки сообщения в другом чате",
+                {"dialog_id": str(active.dialog_id) if active else None},
+            )
+        try:
+            await self._lock_turn_admission(session)
+            database_active = await self._find_active_ai_turn(
+                session, exclude_message_id=exclude_message_id
+            )
+            if database_active is not None:
+                raise ConflictError(
+                    "Дождитесь завершения обработки сообщения в другом чате",
+                    {"dialog_id": str(database_active[0])},
+                )
+        except Exception:
+            self._turn_coordinator.release(dialog_id, message_id)
+            raise
+
+    @staticmethod
+    async def _lock_turn_admission(session: AsyncSession) -> None:
+        bind = session.bind
+        if bind is not None and bind.dialect.name == "postgresql":
+            await session.execute(
+                text("SELECT pg_advisory_xact_lock(:lock_key)"),
+                {"lock_key": AI_TURN_ADMISSION_LOCK_KEY},
+            )
+
+    @staticmethod
+    async def _find_active_ai_turn(
+        session: AsyncSession,
+        *,
+        exclude_message_id: uuid.UUID | None = None,
+    ) -> tuple[uuid.UUID, uuid.UUID] | None:
+        statement = (
+            select(Message.dialog_id, Message.id)
+            .join(Dialog, Message.dialog_id == Dialog.id)
+            .where(
+                Dialog.status == DialogStatus.ACTIVE,
+                Dialog.mode == DialogMode.AI_SUPPORT,
+                Message.author_type == MessageAuthor.USER,
+                Message.processing_status.in_(
+                    [
+                        MessageProcessingStatus.PENDING,
+                        MessageProcessingStatus.PROCESSING,
+                    ]
+                ),
+            )
+            .order_by(Message.created_at, Message.id)
+            .limit(1)
+        )
+        if exclude_message_id is not None:
+            statement = statement.where(Message.id != exclude_message_id)
+        row = (await session.execute(statement)).first()
+        return (row[0], row[1]) if row is not None else None
 
     async def _escalate(
         self,
