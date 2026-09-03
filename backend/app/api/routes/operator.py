@@ -11,7 +11,7 @@ from app.api.openapi import (
     OPERATOR_QUEUE_SSE_RESPONSE,
     PROTECTED_RESPONSES,
 )
-from app.api.sse import SSE_HEADERS, event_stream
+from app.api.sse import SSE_HEADERS, event_stream, operator_dialog_event_stream
 from app.contracts.schemas import (
     DialogDetail,
     DialogSummary,
@@ -107,11 +107,13 @@ async def operator_dialog_events(
 ) -> StreamingResponse:
     await container.dialogs.assert_operator_sse_access(user, dialog_id)
     return StreamingResponse(
-        event_stream(
+        operator_dialog_event_stream(
             request,
             container.broker,
             operator_dialog_channel(dialog_id),
             container.settings.sse_heartbeat_seconds,
+            str(user.id),
+            lambda: container.dialogs.has_operator_sse_access(user, dialog_id),
         ),
         media_type="text/event-stream",
         headers=SSE_HEADERS,

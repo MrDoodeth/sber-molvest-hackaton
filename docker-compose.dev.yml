@@ -33,6 +33,8 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    env_file:
+      - .env
     command:
       - uvicorn
       - app.main:app
@@ -57,9 +59,11 @@ services:
       QDRANT_URL: http://qdrant:6333
       EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-cpu}
       EMBEDDING_MODEL_PATH: /opt/models/bge-m3
+      DOCLING_ARTIFACTS_PATH: /opt/models/docling
       SSE_HEARTBEAT_SECONDS: ${SSE_HEARTBEAT_SECONDS:-15}
+      DIALOG_IDLE_TIMEOUT_HOURS: ${DIALOG_IDLE_TIMEOUT_HOURS:-24}
+      DIALOG_IDLE_SCAN_SECONDS: ${DIALOG_IDLE_SCAN_SECONDS:-300}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
-      CREATE_SCHEMA_ON_STARTUP: "true"
       SEED_ON_STARTUP: ${SEED_ON_STARTUP:-true}
       WATCHFILES_FORCE_POLLING: "true"
     ports:

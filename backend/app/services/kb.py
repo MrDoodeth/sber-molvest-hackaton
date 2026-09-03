@@ -61,9 +61,38 @@ class KnowledgeBaseService:
         self._vector_store = vector_store
         self._tasks = tasks
         self._document_locks: dict[uuid.UUID, asyncio.Lock] = {}
+        self._scheduled_document_ids: set[uuid.UUID] = set()
 
     def _lock_for(self, document_id: uuid.UUID) -> asyncio.Lock:
         return self._document_locks.setdefault(document_id, asyncio.Lock())
+
+    def _schedule_ingestion(self, document_id: uuid.UUID) -> None:
+        if document_id in self._scheduled_document_ids:
+            return
+        self._scheduled_document_ids.add(document_id)
+
+        async def run() -> None:
+            try:
+                await self.ingest(document_id)
+            finally:
+                self._scheduled_document_ids.discard(document_id)
+
+        self._tasks.spawn(run())
+
+    async def recover_processing_documents(self) -> None:
+        """Resume documents whose in-process ingestion was interrupted."""
+        async with self._session_factory() as session:
+            document_ids = list(
+                await session.scalars(
+                    select(KnowledgeDocument.id).where(
+                        KnowledgeDocument.index_status.in_(
+                            [IndexStatus.UPLOADED, IndexStatus.PROCESSING]
+                        )
+                    )
+                )
+            )
+        for document_id in document_ids:
+            self._schedule_ingestion(document_id)
 
     async def list_sections(self) -> list[KnowledgeSectionDto]:
         async with self._session_factory() as session:
@@ -103,6 +132,8 @@ class KnowledgeBaseService:
             )
             if section is None:
                 raise NotFoundError("Раздел базы знаний не найден")
+            if section.id in PROTECTED_SECTION_IDS and patch.name is not None:
+                raise ConflictError("Системный раздел базы знаний нельзя переименовать")
             old_enabled = section.is_enabled
             if patch.name is not None:
                 section.name = patch.name
@@ -190,9 +221,7 @@ class KnowledgeBaseService:
                 await session.commit()
 
     async def list_documents(
-        self,
-        section_id: uuid.UUID | None,
-        status: IndexStatus | None,
+        self, section_id: uuid.UUID | None
     ) -> list[KnowledgeDocumentDto]:
         async with self._session_factory() as session:
             statement = (
@@ -201,12 +230,12 @@ class KnowledgeBaseService:
                     KnowledgeSection,
                     KnowledgeDocument.section_id == KnowledgeSection.id,
                 )
-                .order_by(KnowledgeDocument.title)
+                .order_by(
+                    KnowledgeDocument.created_at.desc(), KnowledgeDocument.id.desc()
+                )
             )
             if section_id is not None:
                 statement = statement.where(KnowledgeDocument.section_id == section_id)
-            if status is not None:
-                statement = statement.where(KnowledgeDocument.index_status == status)
             rows = (await session.execute(statement)).all()
             return [document_dto(document, section) for document, section in rows]
 
@@ -294,7 +323,7 @@ class KnowledgeBaseService:
                 raise
             result = document_dto(document, section)
         if schedule_ingestion:
-            self._tasks.spawn(self.ingest(document.id))
+            self._schedule_ingestion(document.id)
         return result
 
     async def patch_document(
@@ -307,18 +336,9 @@ class KnowledgeBaseService:
                 )
                 if document is None:
                     raise NotFoundError("Документ базы знаний не найден")
-                target_section_id = patch.section_id or document.section_id
-                section = await session.get(KnowledgeSection, target_section_id)
+                section = await session.get(KnowledgeSection, document.section_id)
                 if section is None:
                     raise NotFoundError("Раздел базы знаний не найден")
-                if patch.section_id is not None:
-                    document.section_id = patch.section_id
-                if patch.title is not None:
-                    document.title = patch.title.strip()
-                if patch.one_c_version is not None:
-                    document.one_c_version = patch.one_c_version.strip() or None
-                if patch.tags is not None:
-                    document.tags = [tag.strip() for tag in patch.tags if tag.strip()]
                 if patch.is_enabled is not None:
                     document.is_enabled = patch.is_enabled
                 await session.flush()
@@ -345,7 +365,7 @@ class KnowledgeBaseService:
             document.index_error = None
             await session.commit()
         result = await self.get_document(document_id)
-        self._tasks.spawn(self.ingest(document_id))
+        self._schedule_ingestion(document_id)
         return result
 
     async def ingest(self, document_id: uuid.UUID) -> None:

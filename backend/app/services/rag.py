@@ -76,6 +76,7 @@ class RAGService:
                     Chunk.vector_id.in_(vector_ids),
                     KnowledgeDocument.is_enabled.is_(True),
                     KnowledgeSection.is_enabled.is_(True),
+                    KnowledgeDocument.index_status == IndexStatus.INDEXED,
                 )
             )
         ).all()

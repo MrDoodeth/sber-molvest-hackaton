@@ -13,6 +13,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     EMBEDDING_MODEL_PATH=/opt/models/bge-m3 \
+    DOCLING_ARTIFACTS_PATH=/opt/models/docling \
     HF_HUB_OFFLINE=1 \
     TRANSFORMERS_OFFLINE=1 \
     TOKENIZERS_PARALLELISM=false
@@ -34,6 +35,22 @@ RUN pip install --upgrade pip==25.2 \
     && pip install --index-url https://download.pytorch.org/whl/cpu \
         torch==2.8.0 torchvision==0.23.0 \
     && pip install .
+
+RUN mkdir -p /opt/models/docling/ds4sd--docling-layout-old \
+    /opt/models/docling/ds4sd--docling-models \
+    /opt/models/docling/EasyOcr \
+    && HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0 python - <<'PY'
+from pathlib import Path
+
+from docling.models.easyocr_model import EasyOcrModel
+from docling.models.layout_model import LayoutModel
+from docling.models.table_structure_model import TableStructureModel
+
+base = Path("/opt/models/docling")
+LayoutModel.download_models(local_dir=base / "ds4sd--docling-layout-old")
+TableStructureModel.download_models(local_dir=base / "ds4sd--docling-models")
+EasyOcrModel.download_models(local_dir=base / "EasyOcr")
+PY
 
 RUN useradd --create-home --uid 10001 appuser \
     && mkdir -p /app/var/storage \

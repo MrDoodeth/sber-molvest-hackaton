@@ -31,6 +31,8 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    env_file:
+      - .env
     environment:
       ENVIRONMENT: production
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-molvest}:${POSTGRES_PASSWORD:-molvest}@postgres:5432/${POSTGRES_DB:-molvest}
@@ -39,15 +41,17 @@ services:
       GIGACHAT_CA_BUNDLE_FILE: /etc/ssl/certs/ca-certificates.crt
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set for production}
       JWT_TTL_MINUTES: ${JWT_TTL_MINUTES:-480}
-      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-true}
+      AUTH_COOKIE_SECURE: "true"
       DEMO_AUTH_ENABLED: ${DEMO_AUTH_ENABLED:-true}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
       EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-cpu}
       EMBEDDING_MODEL_PATH: /opt/models/bge-m3
+      DOCLING_ARTIFACTS_PATH: /opt/models/docling
       SSE_HEARTBEAT_SECONDS: ${SSE_HEARTBEAT_SECONDS:-15}
+      DIALOG_IDLE_TIMEOUT_HOURS: ${DIALOG_IDLE_TIMEOUT_HOURS:-24}
+      DIALOG_IDLE_SCAN_SECONDS: ${DIALOG_IDLE_SCAN_SECONDS:-300}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
-      CREATE_SCHEMA_ON_STARTUP: "true"
       SEED_ON_STARTUP: ${SEED_ON_STARTUP:-true}
     expose:
       - "8000"

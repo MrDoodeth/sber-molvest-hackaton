@@ -7,6 +7,8 @@ from typing import Annotated, Literal
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+PROJECT_ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
+
 
 @dataclass(frozen=True, slots=True)
 class ModelCapabilities:
@@ -34,7 +36,7 @@ QDRANT_COLLECTION = "knowledge_chunks"
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=PROJECT_ENV_FILE,
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
@@ -43,7 +45,6 @@ class Settings(BaseSettings):
     app_name: str = "Molvest 1C Support"
     environment: Literal["development", "test", "production"] = "development"
     database_url: str = "postgresql+asyncpg://molvest:molvest@localhost:5432/molvest"
-    create_schema_on_startup: bool = True
     seed_on_startup: bool = True
 
     jwt_secret: SecretStr = SecretStr("local-development-secret-change-in-production")
@@ -56,6 +57,8 @@ class Settings(BaseSettings):
 
     cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=list)
     sse_heartbeat_seconds: float = Field(default=15.0, gt=0)
+    dialog_idle_timeout_hours: float = Field(default=24.0, gt=0)
+    dialog_idle_scan_seconds: float = Field(default=300.0, gt=0)
 
     storage_backend: Literal["local", "s3"] = "local"
     local_storage_path: Path = Path("./var/storage")
@@ -70,6 +73,7 @@ class Settings(BaseSettings):
     qdrant_api_key: SecretStr | None = None
     embedding_device: str = "cpu"
     embedding_model_path: Path = Path("/opt/models/bge-m3")
+    docling_artifacts_path: Path | None = None
 
     gigachat_credentials: SecretStr | None = None
     gigachat_scope: str = "GIGACHAT_API_PERS"

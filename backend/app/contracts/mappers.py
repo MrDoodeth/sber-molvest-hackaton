@@ -17,7 +17,7 @@ from app.contracts.schemas import (
     SourceRef,
     UserRef,
 )
-from app.core.constants import DEFAULT_CASE_SECTION_ID, PROTECTED_SECTION_IDS
+from app.core.constants import PROTECTED_SECTION_IDS
 from app.models import (
     Attachment,
     Dialog,
@@ -55,12 +55,15 @@ def attachment_dto(attachment: Attachment) -> AttachmentDto:
 
 
 def message_dto(
-    message: Message, attachments: list[Attachment] | None = None
+    message: Message,
+    attachments: list[Attachment] | None = None,
+    author: User | None = None,
 ) -> MessageDto:
     return MessageDto(
         id=message.id,
         dialog_id=message.dialog_id,
         author_type=message.author_type,
+        author=user_ref(author) if author else None,
         text=message.text,
         confidence=message.confidence,
         attachments=[attachment_dto(item) for item in attachments or []],
@@ -165,12 +168,7 @@ def document_dto(
     return KnowledgeDocumentDto(
         id=document.id,
         section_id=document.section_id,
-        section_name=section.name,
-        source_type=document.source_type,
         title=document.title,
-        file_name=PurePosixPath(document.storage_key).name,
-        one_c_version=document.one_c_version,
-        tags=document.tags,
         is_enabled=document.is_enabled,
         index_status=document.index_status,
         index_error=document.index_error,
@@ -192,7 +190,6 @@ def candidate_dto(
         source=candidate.source,
         generated_card=candidate.generated_card,
         status=candidate.status,
-        default_section_id=DEFAULT_CASE_SECTION_ID,
         resulting_document_id=candidate.resulting_document_id,
         resulting_document=(
             document_dto(resulting_document, resulting_section)
@@ -218,8 +215,6 @@ def prompt_dto(prompt: SystemPrompt, updater: User | None = None) -> PromptDto:
         id=prompt.id,
         type=prompt.type,
         content=prompt.content,
-        is_active=prompt.is_active,
-        version=prompt.version,
         updated_at=prompt.updated_at,
         updated_by=user_ref(updater) if updater else None,
     )

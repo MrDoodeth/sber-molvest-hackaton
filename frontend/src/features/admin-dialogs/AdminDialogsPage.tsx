@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Bot, CalendarDays, ChevronLeft, ChevronRight, Image as ImageIcon, MessagesSquare, UserRound } from "lucide-react";
+import { Bot, ChevronLeft, ChevronRight, Image as ImageIcon, MessagesSquare, UserRound } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import { adminApi, type AdminDialogFilters } from "../../api/admin";
 import { queryKeys } from "../../api/queryKeys";
@@ -38,6 +38,9 @@ export default function AdminDialogsPage() {
     if (!("page" in patch)) next.set("page", "1");
     setSearchParams(next);
   };
+  const totalPages = dialogs.data?.totalPages ?? 0;
+  const canPrevious = Boolean(dialogs.data && dialogs.data.page > 1);
+  const canNext = Boolean(dialogs.data && dialogs.data.page < totalPages);
 
   return (
     <div className="p-4 sm:p-6 lg:p-8">
@@ -78,19 +81,18 @@ export default function AdminDialogsPage() {
           {dialogs.isSuccess && dialogs.data.items.length === 0 && <EmptyState icon={<MessagesSquare className="size-9" />} title="Обращений не найдено" description="Для выбранной группы и фильтров пока нет завершённых диалогов." />}
           {dialogs.data && dialogs.data.items.length > 0 && (
             <>
-              <div className="hidden overflow-x-auto md:block">
-                <table className="w-full border-collapse text-left text-sm">
-                  <thead className="bg-stone-50 text-[10px] font-extrabold uppercase tracking-[0.13em] text-stone-500">
-                    <tr><th className="px-5 py-3">Обращение</th><th className="px-4 py-3">Закрыто</th><th className="px-4 py-3">Решено</th><th className="px-4 py-3">Confidence</th><th className="px-4 py-3">Модерация</th><th className="px-5 py-3" /></tr>
+              <div className="hidden w-full md:block">
+                <table className="w-full table-fixed border-collapse text-left text-sm">
+                   <thead className="bg-stone-50 text-[10px] font-extrabold uppercase tracking-[0.13em] text-stone-500">
+                    <tr><th className="w-[45%] px-5 py-3">Обращение</th><th className="w-[19%] px-4 py-3">Закрыто</th><th className="w-[15%] px-4 py-3">Решено</th><th className="w-[13%] px-4 py-3">Confidence</th><th className="w-[8%] px-5 py-3" /></tr>
                   </thead>
                   <tbody className="divide-y divide-stone-100">
                     {dialogs.data.items.map((dialog) => (
                       <tr key={dialog.id} className="transition hover:bg-molvest-50/50">
-                        <td className="max-w-md px-5 py-4"><div className="flex items-start gap-3">{dialog.hasAttachment ? <ImageIcon className="mt-0.5 size-4 shrink-0 text-indigo-500" /> : <MessagesSquare className="mt-0.5 size-4 shrink-0 text-stone-300" />}<div><p className="line-clamp-2 font-bold text-stone-900">{dialog.title || dialog.lastMessagePreview || "Завершённое обращение"}</p><p className="mt-1 text-xs text-stone-400">{dialog.user?.displayName || `ID ${dialog.id.slice(0, 8)}`}</p></div></div></td>
+                        <td className="min-w-0 px-5 py-4"><div className="flex min-w-0 items-start gap-3">{dialog.hasAttachment ? <ImageIcon className="mt-0.5 size-4 shrink-0 text-indigo-500" /> : <MessagesSquare className="mt-0.5 size-4 shrink-0 text-stone-300" />}<div className="min-w-0"><p className="line-clamp-2 break-words font-bold text-stone-900">{dialog.title || dialog.lastMessagePreview || "Завершённое обращение"}</p><p className="mt-1 truncate text-xs text-stone-400">{dialog.user?.displayName || `ID ${dialog.id.slice(0, 8)}`}</p></div></div></td>
                         <td className="whitespace-nowrap px-4 py-4 text-xs text-stone-500">{formatDateTime(dialog.closedAt)}</td>
                         <td className="px-4 py-4"><Badge tone={dialog.resolvedBy === "ai" ? "giga" : "info"}>{dialog.resolvedBy === "ai" ? <><Bot className="mr-1 size-3" /> AI</> : <><UserRound className="mr-1 size-3" /> Оператор</>}</Badge></td>
                         <td className="px-4 py-4 font-bold text-stone-700">{dialog.lastConfidence === undefined ? "—" : formatPercent(dialog.lastConfidence)}</td>
-                        <td className="px-4 py-4">{dialog.candidate ? <Badge tone={dialog.candidate.status === "approved" ? "success" : dialog.candidate.status === "rejected" ? "danger" : "warning"}>{dialog.candidate.status}</Badge> : <span className="text-xs text-stone-400">Нет кандидата</span>}</td>
                         <td className="px-5 py-4 text-right"><Link to={`/admin/dialogs/${dialog.id}`} className="text-sm font-bold text-molvest-700 hover:text-molvest-900">Открыть</Link></td>
                       </tr>
                     ))}
@@ -101,21 +103,20 @@ export default function AdminDialogsPage() {
                 {dialogs.data.items.map((dialog) => (
                   <Link key={dialog.id} to={`/admin/dialogs/${dialog.id}`} className="p-4 transition hover:bg-molvest-50">
                     <div className="flex items-start justify-between gap-3"><p className="line-clamp-2 text-sm font-bold text-stone-900">{dialog.title || dialog.lastMessagePreview || "Завершённое обращение"}</p>{dialog.hasAttachment && <ImageIcon className="size-4 shrink-0 text-indigo-500" />}</div>
-                    <div className="mt-3 flex flex-wrap items-center gap-2"><Badge tone={dialog.resolvedBy === "ai" ? "giga" : "info"}>{dialog.resolvedBy === "ai" ? "AI" : "Оператор"}</Badge>{dialog.candidate && <Badge tone="warning">{dialog.candidate.status}</Badge>}<span className="ml-auto text-xs text-stone-400">{formatDateTime(dialog.closedAt)}</span></div>
+                    <div className="mt-3 flex flex-wrap items-center gap-2"><Badge tone={dialog.resolvedBy === "ai" ? "giga" : "info"}>{dialog.resolvedBy === "ai" ? "AI" : "Оператор"}</Badge><span className="ml-auto text-xs text-stone-400">{formatDateTime(dialog.closedAt)}</span></div>
                   </Link>
                 ))}
               </div>
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-stone-100 px-4 py-3">
-                <span className="text-xs text-stone-500">Страница {dialogs.data.page} из {Math.max(dialogs.data.totalPages, 1)}</span>
+                <span className="text-xs text-stone-500">Страница {dialogs.data.page} из {Math.max(totalPages, 1)}</span>
                 <div className="flex gap-2">
-                  <Button variant="secondary" size="sm" disabled={dialogs.data.page <= 1} onClick={() => patchFilters({ page: String(dialogs.data.page - 1) })}><ChevronLeft className="size-4" /> Назад</Button>
-                  <Button variant="secondary" size="sm" disabled={dialogs.data.page >= dialogs.data.totalPages} onClick={() => patchFilters({ page: String(dialogs.data.page + 1) })}>Далее <ChevronRight className="size-4" /></Button>
+                  <Button variant="secondary" size="sm" disabled={!canPrevious} onClick={() => { if (canPrevious) patchFilters({ page: String(dialogs.data.page - 1) }); }}><ChevronLeft className="size-4" /> Назад</Button>
+                  <Button variant="secondary" size="sm" disabled={!canNext} onClick={() => { if (canNext) patchFilters({ page: String(dialogs.data.page + 1) }); }}>Далее <ChevronRight className="size-4" /></Button>
                 </div>
               </div>
             </>
           )}
         </Card>
-        <p className="mt-4 flex items-center gap-2 text-xs text-stone-400"><CalendarDays className="size-3.5" /> Пагинация и фильтрация выполняются на backend.</p>
       </div>
     </div>
   );

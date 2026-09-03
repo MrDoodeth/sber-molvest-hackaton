@@ -52,7 +52,7 @@ async def update_prompt(
 ) -> PromptDto:
     require_admin(user)
     async with container.session_factory() as session:
-        return await container.prompt_service.create_version(
+        return await container.prompt_service.update(
             session, prompt_type, payload.content, user.id
         )
 
@@ -82,7 +82,6 @@ async def update_settings(
 async def admin_dialogs(
     feedback: Literal["helpful", "ai_error", "unrated"],
     page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=100),
     closed_on: date | None = Query(
         default=None,
         alias="date",
@@ -102,7 +101,7 @@ async def admin_dialogs(
         admin=user,
         feedback=feedback,
         page=page,
-        page_size=page_size,
+        page_size=10,
         date_from=date_from,
         date_to=date_to,
         resolved_by=resolved_by,
@@ -178,8 +177,21 @@ async def approve_candidate(
     container: ApplicationContainer = Depends(get_container),
 ) -> KnowledgeCandidateDto:
     return await container.moderation.approve(
-        user, candidate_id, payload.section_id if payload else None
+        user, candidate_id, payload.generated_card if payload else None
     )
+
+
+@router.post(
+    "/candidates/{candidate_id}/generate-card",
+    response_model=KnowledgeCandidateDto,
+    tags=["Admin Dialogs"],
+)
+async def generate_candidate_card(
+    candidate_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    container: ApplicationContainer = Depends(get_container),
+) -> KnowledgeCandidateDto:
+    return await container.moderation.generate_card(user, candidate_id)
 
 
 @router.post(

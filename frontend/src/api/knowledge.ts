@@ -1,21 +1,17 @@
 import { apiRequest, queryString } from "./client";
 import type {
-  IndexStatus,
   KnowledgeDocumentDto,
   KnowledgeDocumentsResponse,
   KnowledgeSectionDto,
-  SourceType,
 } from "./types";
 
 export interface DocumentFilters {
   sectionId?: string;
-  status?: IndexStatus | "";
 }
 
 export interface UploadDocumentInput {
   file: File;
   sectionId: string;
-  sourceType: Exclude<SourceType, "resolved_case">;
 }
 
 export const knowledgeApi = {
@@ -46,16 +42,13 @@ export const knowledgeApi = {
     apiRequest<KnowledgeDocumentsResponse>(
       `/api/admin/knowledge/documents${queryString({
         section_id: filters.sectionId,
-        status: filters.status,
       })}`,
       { signal },
     ),
   uploadDocument: (input: UploadDocumentInput, signal?: AbortSignal) => {
     const form = new FormData();
     form.set("file", input.file);
-    form.set("section_id", input.sectionId);
-    form.set("source_type", input.sourceType);
-    return apiRequest<KnowledgeDocumentDto>("/api/admin/knowledge/documents", {
+    return apiRequest<KnowledgeDocumentDto>(`/api/admin/knowledge/sections/${input.sectionId}/documents`, {
       method: "POST",
       body: form,
       signal,
@@ -65,7 +58,7 @@ export const knowledgeApi = {
     apiRequest<KnowledgeDocumentDto>(`/api/admin/knowledge/documents/${id}`, { signal }),
   updateDocument: (
     id: string,
-    patch: Partial<Pick<KnowledgeDocumentDto, "title" | "isEnabled" | "oneCVersion" | "tags">>,
+    patch: Pick<KnowledgeDocumentDto, "isEnabled">,
     signal?: AbortSignal,
   ) =>
     apiRequest<KnowledgeDocumentDto>(`/api/admin/knowledge/documents/${id}`, {
@@ -76,11 +69,6 @@ export const knowledgeApi = {
   reindex: (id: string, signal?: AbortSignal) =>
     apiRequest<KnowledgeDocumentDto>(`/api/admin/knowledge/documents/${id}/reindex`, {
       method: "POST",
-      signal,
-    }),
-  deleteDocument: (id: string, signal?: AbortSignal) =>
-    apiRequest<void>(`/api/admin/knowledge/documents/${id}`, {
-      method: "DELETE",
       signal,
     }),
 };

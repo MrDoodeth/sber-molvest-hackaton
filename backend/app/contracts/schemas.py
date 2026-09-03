@@ -12,7 +12,6 @@ from app.core.enums import (
     DialogChannel,
     DialogMode,
     DialogStatus,
-    DocumentSourceType,
     FeedbackVerdict,
     IndexStatus,
     MessageAuthor,
@@ -159,22 +158,13 @@ class KnowledgeSectionDto(ApiModel):
 
 
 class KnowledgeDocumentPatch(ApiModel):
-    section_id: uuid.UUID | None = None
-    title: str | None = Field(default=None, min_length=1, max_length=500)
-    one_c_version: str | None = Field(default=None, max_length=100)
-    tags: list[str] | None = None
     is_enabled: bool | None = None
 
 
 class KnowledgeDocumentDto(ApiModel):
     id: uuid.UUID
     section_id: uuid.UUID
-    section_name: str
-    source_type: DocumentSourceType
     title: str
-    file_name: str
-    one_c_version: str | None = None
-    tags: list[str]
     is_enabled: bool
     index_status: IndexStatus
     index_error: str | None = None
@@ -191,8 +181,6 @@ class PromptDto(ApiModel):
     id: uuid.UUID
     type: PromptType
     content: str
-    is_active: bool
-    version: int
     updated_at: datetime
     updated_by: UserRef | None = None
 
@@ -242,19 +230,21 @@ class AdminSettingsUpdate(ApiModel):
 
 class CaseCard(ApiModel):
     title: str = Field(min_length=1, max_length=500)
-    problem: str = Field(min_length=1)
-    symptoms: str = Field(min_length=1)
-    context: str = Field(min_length=1)
-    solution: str = Field(min_length=1)
-    result: str = Field(min_length=1)
+    problem: str = ""
+    result: str = ""
 
-    @field_validator("title", "problem", "symptoms", "context", "solution", "result")
+    @field_validator("title")
     @classmethod
-    def strip_card_text(cls, value: str) -> str:
+    def strip_title(cls, value: str) -> str:
         value = value.strip()
         if not value:
-            raise ValueError("Case-card fields must not be blank")
+            raise ValueError("Название кейса не может быть пустым")
         return value
+
+    @field_validator("problem", "result")
+    @classmethod
+    def strip_optional_card_text(cls, value: str) -> str:
+        return value.strip()
 
 
 class CandidatePatch(ApiModel):
@@ -262,7 +252,7 @@ class CandidatePatch(ApiModel):
 
 
 class CandidateApproveRequest(ApiModel):
-    section_id: uuid.UUID | None = None
+    generated_card: CaseCard | None = None
 
 
 class KnowledgeCandidateDto(ApiModel):
@@ -271,7 +261,6 @@ class KnowledgeCandidateDto(ApiModel):
     source: CandidateSource
     generated_card: CaseCard
     status: CandidateStatus
-    default_section_id: uuid.UUID
     resulting_document_id: uuid.UUID | None = None
     resulting_document: KnowledgeDocumentDto | None = None
     reviewed_by: UserRef | None = None
@@ -295,9 +284,8 @@ class AdminDialogPage(ApiModel):
 class AdminDialogAudit(ApiModel):
     resolved_by: Literal["ai", "operator"]
     gigachat_model: str | None = None
-    system_prompt_version: int | None = None
-    rag_top_k: int | None = None
-    operator_escalation_threshold: float | None = None
+    system_prompt: str | None = None
+    escalation_threshold: float | None = None
 
 
 class AdminDialogDetail(ApiModel):
@@ -314,6 +302,7 @@ class MonitoringResponse(ApiModel):
     ai_resolved_rate: float
     escalations: int
     escalation_rate: float
+    failed_requests: int
     average_response_time_ms: float
     helpful: int
     helpful_rate: float

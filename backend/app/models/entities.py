@@ -298,22 +298,10 @@ class KnowledgeCandidate(UUIDPrimaryKey, Base):
 
 class SystemPrompt(UUIDPrimaryKey, Base):
     __tablename__ = "system_prompts"
-    __table_args__ = (
-        UniqueConstraint("type", "version", name="uq_prompt_type_version"),
-        CheckConstraint("version >= 1", name="ck_prompt_version_positive"),
-        Index(
-            "uq_prompt_active_type",
-            "type",
-            unique=True,
-            postgresql_where=sql_text("is_active"),
-            sqlite_where=sql_text("is_active = 1"),
-        ),
-    )
+    __table_args__ = (UniqueConstraint("type", name="uq_prompt_type"),)
 
     type: Mapped[PromptType] = mapped_column(enum_type(PromptType, "prompt_type"))
     content: Mapped[str] = mapped_column(Text)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    version: Mapped[int] = mapped_column(Integer)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, server_default=func.now()
     )
@@ -356,10 +344,6 @@ class MetricEvent(UUIDPrimaryKey, Base):
             name="ck_metric_precached_tokens_nonnegative",
         ),
         CheckConstraint(
-            "system_prompt_version IS NULL OR system_prompt_version >= 1",
-            name="ck_metric_prompt_version_positive",
-        ),
-        CheckConstraint(
             "rag_top_k IS NULL OR rag_top_k >= 1",
             name="ck_metric_rag_top_k_positive",
         ),
@@ -375,6 +359,13 @@ class MetricEvent(UUIDPrimaryKey, Base):
     dialog_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("dialogs.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    event_type: Mapped[str] = mapped_column(
+        String(32), default="user_turn", server_default="user_turn", index=True
+    )
+    success: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=sql_text("true")
+    )
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     latency_ms: Mapped[int] = mapped_column(Integer)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     escalated: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -382,7 +373,7 @@ class MetricEvent(UUIDPrimaryKey, Base):
     completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     precached_prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     gigachat_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    system_prompt_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    system_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     rag_top_k: Mapped[int | None] = mapped_column(Integer, nullable=True)
     operator_escalation_threshold: Mapped[float | None] = mapped_column(
         Float, nullable=True

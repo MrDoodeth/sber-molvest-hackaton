@@ -43,10 +43,15 @@ export const adminApi = {
       json: { generatedCard },
       signal,
     }),
-  approveCandidate: (candidateId: string, sectionId: string, signal?: AbortSignal) =>
+  generateCandidateCard: (candidateId: string, signal?: AbortSignal) =>
+    apiRequest<KnowledgeCandidateDto>(`/api/admin/candidates/${candidateId}/generate-card`, {
+      method: "POST",
+      signal,
+    }),
+  approveCandidate: (candidateId: string, generatedCard: CaseCardDto, signal?: AbortSignal) =>
     apiRequest<KnowledgeCandidateDto>(`/api/admin/candidates/${candidateId}/approve`, {
       method: "POST",
-      json: { sectionId },
+      json: { generatedCard },
       signal,
     }),
   rejectCandidate: (candidateId: string, signal?: AbortSignal) =>

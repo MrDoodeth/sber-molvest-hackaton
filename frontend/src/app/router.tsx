@@ -15,7 +15,6 @@ const OperatorWorkspace = lazy(() => import("../features/operator/OperatorWorksp
 const AdminDialogsPage = lazy(() => import("../features/admin-dialogs/AdminDialogsPage"));
 const AdminDialogDetailPage = lazy(() => import("../features/admin-dialogs/AdminDialogDetailPage"));
 const KnowledgePage = lazy(() => import("../features/admin-knowledge/KnowledgePage"));
-const DocumentDetailPage = lazy(() => import("../features/admin-knowledge/DocumentDetailPage"));
 const PromptsPage = lazy(() => import("../features/admin-prompts/PromptsPage"));
 const SettingsPage = lazy(() => import("../features/admin-settings/SettingsPage"));
 const MonitoringPage = lazy(() => import("../features/admin-monitoring/MonitoringPage"));
@@ -58,7 +57,6 @@ export const router = createBrowserRouter([
           { path: "dialogs", element: suspended(<AdminDialogsPage />) },
           { path: "dialogs/:dialogId", element: suspended(<AdminDialogDetailPage />) },
           { path: "knowledge", element: suspended(<KnowledgePage />) },
-          { path: "knowledge/documents/:documentId", element: suspended(<DocumentDetailPage />) },
           { path: "prompts", element: suspended(<PromptsPage />) },
           { path: "settings", element: suspended(<SettingsPage />) },
           { path: "monitoring", element: suspended(<MonitoringPage />) },

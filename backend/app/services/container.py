@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
 from app.core.database import create_database
+from app.core.generation_gate import GenerationGate
 from app.providers.docling import DoclingHybridParser
 from app.providers.embeddings import BgeM3EmbeddingProvider
 from app.providers.gigachat import GigaChatProvider
@@ -51,6 +52,7 @@ class ApplicationContainer:
     dialogs: DialogService
     moderation: ModerationService
     admin: AdminService
+    generation_gate: GenerationGate = field(default_factory=GenerationGate)
 
 
 def build_container(
@@ -63,7 +65,8 @@ def build_container(
     storage: ObjectStorage | None = None,
 ) -> ApplicationContainer:
     engine, session_factory = create_database(settings.database_url)
-    actual_llm = llm_provider or GigaChatProvider(settings)
+    generation_gate = GenerationGate()
+    actual_llm = llm_provider or GigaChatProvider(settings, generation_gate)
     actual_embedding = embedding_provider or BgeM3EmbeddingProvider(
         settings.embedding_device,
         model_path=settings.embedding_model_path,
@@ -73,7 +76,8 @@ def build_container(
         settings.qdrant_api_key.get_secret_value() if settings.qdrant_api_key else None,
     )
     actual_parser = document_parser or DoclingHybridParser(
-        model_path=settings.embedding_model_path
+        model_path=settings.embedding_model_path,
+        artifacts_path=settings.docling_artifacts_path,
     )
     if storage is not None:
         actual_storage = storage
@@ -112,6 +116,16 @@ def build_container(
         vector_store=actual_vector,
         tasks=tasks,
     )
+    moderation = ModerationService(
+        session_factory=session_factory,
+        knowledge_base=knowledge_base,
+        attachment_service=attachment_service,
+        settings_service=settings_service,
+        prompt_service=prompt_service,
+        generation_context=generation_context,
+        llm_provider=actual_llm,
+        generation_gate=generation_gate,
+    )
     dialogs = DialogService(
         session_factory=session_factory,
         attachment_service=attachment_service,
@@ -121,15 +135,8 @@ def build_container(
         llm_provider=actual_llm,
         broker=broker,
         tasks=tasks,
-    )
-    moderation = ModerationService(
-        session_factory=session_factory,
-        knowledge_base=knowledge_base,
-        attachment_service=attachment_service,
-        settings_service=settings_service,
-        prompt_service=prompt_service,
-        generation_context=generation_context,
-        llm_provider=actual_llm,
+        generation_gate=generation_gate,
+        ensure_closed_candidate=moderation.ensure_candidate_for_closed_session,
     )
     return ApplicationContainer(
         settings=settings,
@@ -150,4 +157,5 @@ def build_container(
         dialogs=dialogs,
         moderation=moderation,
         admin=AdminService(session_factory, settings_service, prompt_service),
+        generation_gate=generation_gate,
     )

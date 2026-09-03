@@ -6,20 +6,27 @@ import type { OperatorDialogDetailDto, OperatorDialogEvent } from "../../api/typ
 import { appendPersistedMessage } from "./messageCache";
 import { useEventSource } from "./useEventSource";
 
-const eventNames = ["user_message", "dialog_closed", "error"] as const;
+const eventNames = [
+  "user_message",
+  "operator_access_revoked",
+  "dialog_closed",
+  "error",
+] as const;
 
-export function useOperatorDialogEvents(dialogId?: string) {
+export function useOperatorDialogEvents(dialogId?: string, operatorId?: string) {
   const queryClient = useQueryClient();
   const [eventError, setEventError] = useState<string>();
+  const [accessRevoked, setAccessRevoked] = useState(false);
 
   useEffect(() => {
     setEventError(undefined);
-  }, [dialogId]);
+    setAccessRevoked(false);
+  }, [dialogId, operatorId]);
 
   useEventSource<OperatorDialogEvent>({
     url: dialogId ? operatorApi.dialogEventsUrl(dialogId) : "",
     eventNames,
-    enabled: Boolean(dialogId),
+    enabled: Boolean(dialogId && operatorId) && !accessRevoked,
     onOpen: () => {
       if (!dialogId) return;
       void queryClient.refetchQueries({ queryKey: queryKeys.dialog.detail(dialogId), type: "active" });
@@ -28,6 +35,13 @@ export function useOperatorDialogEvents(dialogId?: string) {
     onEvent: (event) => {
       if (!dialogId) return;
       switch (event.type) {
+        case "operator_access_revoked":
+          if (event.operator.id !== operatorId) {
+            setAccessRevoked(true);
+            void queryClient.invalidateQueries({ queryKey: queryKeys.operator.queues() });
+            void queryClient.invalidateQueries({ queryKey: queryKeys.dialog.detail(dialogId) });
+          }
+          break;
         case "user_message":
           appendPersistedMessage(queryClient, dialogId, event.message);
           setEventError(undefined);

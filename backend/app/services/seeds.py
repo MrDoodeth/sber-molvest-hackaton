@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import func, select, text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.constants import (
@@ -40,10 +40,10 @@ DEFAULT_PROMPTS: dict[PromptType, str] = {
     ),
     PromptType.KNOWLEDGE_CARD: (
         "Ты редактор базы знаний по 1С. На основании полного закрытого тикета, "
-        "сообщений клиента и ответа поддержки заполни все поля карточки "
-        "решённого случая. Выдели проверяемую проблему, симптомы, контекст, "
-        "решение и результат. Не придумывай факты, версии и пункты меню: если "
-        "решение не зафиксировано, честно укажи это в соответствующем поле."
+        "сообщений клиента и финального ответа поддержки заполни JSON карточки "
+        "решённого случая только полями title, problem и result. Не придумывай "
+        "факты, версии и пункты меню: если проблема или результат не зафиксированы, "
+        "оставь соответствующее поле пустым."
     ),
 }
 
@@ -76,24 +76,16 @@ async def seed_defaults(
         await session.flush()
 
         for prompt_type, content in DEFAULT_PROMPTS.items():
-            active = await session.scalar(
+            prompt = await session.scalar(
                 select(SystemPrompt).where(
                     SystemPrompt.type == prompt_type,
-                    SystemPrompt.is_active.is_(True),
                 )
             )
-            if active is None:
-                last_version = await session.scalar(
-                    select(func.max(SystemPrompt.version)).where(
-                        SystemPrompt.type == prompt_type
-                    )
-                )
+            if prompt is None:
                 session.add(
                     SystemPrompt(
                         type=prompt_type,
                         content=content,
-                        is_active=True,
-                        version=(last_version or 0) + 1,
                         updated_by=DEMO_ADMIN_ID,
                     )
                 )

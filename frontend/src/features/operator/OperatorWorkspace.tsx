@@ -57,7 +57,7 @@ export default function OperatorWorkspace() {
     refetchInterval: 2500,
     refetchOnMount: "always",
   });
-  const events = useOperatorDialogEvents(dialogId);
+  const events = useOperatorDialogEvents(dialogId, me.data?.id);
   const allMessages = messages.data ? mergePersistedMessages(...messages.data.pages.map((page) => page.items)) : [];
   const processingError = events.eventError ?? detail.data?.processingError ?? undefined;
   const isAssignedToMe = Boolean(detail.data?.assignedOperator?.id && detail.data.assignedOperator.id === me.data?.id);

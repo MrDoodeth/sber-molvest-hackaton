@@ -3,9 +3,10 @@ from __future__ import annotations
 import math
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import func, select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.contracts.mappers import prompt_dto
@@ -153,11 +154,7 @@ class SettingsService:
 class PromptService:
     async def list_active(self, session: AsyncSession) -> list[PromptDto]:
         prompts = (
-            await session.scalars(
-                select(SystemPrompt)
-                .where(SystemPrompt.is_active.is_(True))
-                .order_by(SystemPrompt.type)
-            )
+            await session.scalars(select(SystemPrompt).order_by(SystemPrompt.type))
         ).all()
         updater_ids = {prompt.updated_by for prompt in prompts if prompt.updated_by}
         users = {}
@@ -182,14 +179,13 @@ class PromptService:
         prompt = await session.scalar(
             select(SystemPrompt).where(
                 SystemPrompt.type == prompt_type,
-                SystemPrompt.is_active.is_(True),
             )
         )
         if prompt is None:
             raise NotFoundError(f"Активный prompt {prompt_type.value} не найден")
         return prompt
 
-    async def create_version(
+    async def update(
         self,
         session: AsyncSession,
         prompt_type: PromptType,
@@ -198,31 +194,20 @@ class PromptService:
     ) -> PromptDto:
         current = await session.scalar(
             select(SystemPrompt)
-            .where(
-                SystemPrompt.type == prompt_type,
-                SystemPrompt.is_active.is_(True),
-            )
+            .where(SystemPrompt.type == prompt_type)
             .with_for_update()
         )
-        max_version = await session.scalar(
-            select(func.max(SystemPrompt.version)).where(
-                SystemPrompt.type == prompt_type
+        if current is None:
+            current = SystemPrompt(
+                type=prompt_type,
+                content=content,
+                updated_by=updated_by,
             )
-        )
-        if current is not None:
-            await session.execute(
-                update(SystemPrompt)
-                .where(SystemPrompt.id == current.id)
-                .values(is_active=False)
-            )
-        prompt = SystemPrompt(
-            type=prompt_type,
-            content=content,
-            is_active=True,
-            version=(max_version or 0) + 1,
-            updated_by=updated_by,
-        )
-        session.add(prompt)
+            session.add(current)
+        else:
+            current.content = content
+            current.updated_by = updated_by
+            current.updated_at = datetime.now(UTC)
         await session.commit()
         updater = await session.get(User, updated_by)
-        return prompt_dto(prompt, updater)
+        return prompt_dto(current, updater)

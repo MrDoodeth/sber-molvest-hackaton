@@ -27,7 +27,6 @@ from app.core.enums import (
     FeedbackVerdict,
     MessageAuthor,
     MonitoringPeriod,
-    PromptType,
     UserRole,
 )
 from app.core.errors import ForbiddenError, NotFoundError
@@ -255,19 +254,30 @@ class AdminService:
                 ),
                 None,
             )
+            resolution_event_types = (
+                ("operator_template", "user_turn")
+                if dialog.mode == DialogMode.OPERATOR_SUPPORT
+                else ("user_turn",)
+            )
             latest_metric = await session.scalar(
                 select(MetricEvent)
-                .where(MetricEvent.dialog_id == dialog_id)
+                .where(
+                    MetricEvent.dialog_id == dialog_id,
+                    MetricEvent.event_type.in_(resolution_event_types),
+                )
                 .order_by(MetricEvent.created_at.desc(), MetricEvent.id.desc())
                 .limit(1)
             )
-            runtime = await self._settings_service.get_runtime(session)
-            prompt_type = (
-                PromptType.OPERATOR_GIGACHAT
-                if dialog.mode == DialogMode.OPERATOR_SUPPORT
-                else PromptType.USER_SUPPORT
+            escalation_metric = await session.scalar(
+                select(MetricEvent)
+                .where(
+                    MetricEvent.dialog_id == dialog_id,
+                    MetricEvent.event_type == "user_turn",
+                    MetricEvent.escalated.is_(True),
+                )
+                .order_by(MetricEvent.created_at.desc(), MetricEvent.id.desc())
+                .limit(1)
             )
-            active_prompt = await self._prompt_service.get_active(session, prompt_type)
             last = messages[-1] if messages else None
             return AdminDialogDetail(
                 dialog=dialog_detail(
@@ -281,7 +291,13 @@ class AdminService:
                     candidate=candidate,
                 ),
                 messages=[
-                    message_dto(message, attachments_by_message.get(message.id, []))
+                    message_dto(
+                        message,
+                        attachments_by_message.get(message.id, []),
+                        operator
+                        if message.author_type == MessageAuthor.OPERATOR
+                        else None,
+                    )
                     for message in messages
                 ],
                 feedback=feedback_dto(feedback) if feedback else None,
@@ -302,25 +318,15 @@ class AdminService:
                         else "ai"
                     ),
                     gigachat_model=(
-                        latest_metric.gigachat_model
-                        if latest_metric and latest_metric.gigachat_model
-                        else runtime.active_model
+                        latest_metric.gigachat_model if latest_metric else None
                     ),
-                    system_prompt_version=(
-                        latest_metric.system_prompt_version
-                        if latest_metric and latest_metric.system_prompt_version
-                        else active_prompt.version
+                    system_prompt=(
+                        latest_metric.system_prompt if latest_metric else None
                     ),
-                    rag_top_k=(
-                        latest_metric.rag_top_k
-                        if latest_metric and latest_metric.rag_top_k is not None
-                        else runtime.rag_top_k
-                    ),
-                    operator_escalation_threshold=(
-                        latest_metric.operator_escalation_threshold
-                        if latest_metric
-                        and latest_metric.operator_escalation_threshold is not None
-                        else runtime.operator_escalation_threshold
+                    escalation_threshold=(
+                        escalation_metric.operator_escalation_threshold
+                        if escalation_metric
+                        else None
                     ),
                 ),
             )
@@ -331,7 +337,9 @@ class AdminService:
         self._require_admin(admin)
         start = self._period_start(period)
         async with self._session_factory() as session:
-            metric_statement = select(MetricEvent)
+            metric_statement = select(MetricEvent).where(
+                MetricEvent.event_type == "user_turn"
+            )
             if start is not None:
                 metric_statement = metric_statement.where(
                     MetricEvent.created_at >= start
@@ -343,9 +351,12 @@ class AdminService:
                     DialogFeedback.created_at >= start
                 )
             feedback_rows = list(await session.scalars(feedback_statement))
-        total = len(metrics)
-        escalations = sum(1 for metric in metrics if metric.escalated)
-        resolved_by_ai = total - escalations
+            total = len(metrics)
+            escalations = sum(1 for metric in metrics if metric.escalated)
+            failed = sum(1 for metric in metrics if not metric.success)
+            resolved_by_ai = sum(
+                1 for metric in metrics if metric.success and not metric.escalated
+            )
         average_latency = (
             sum(metric.latency_ms for metric in metrics) / total if total else 0.0
         )
@@ -360,6 +371,7 @@ class AdminService:
             ai_resolved_rate=self._percent(resolved_by_ai, total) / 100,
             escalations=escalations,
             escalation_rate=self._percent(escalations, total) / 100,
+            failed_requests=failed,
             average_response_time_ms=round(average_latency, 2),
             helpful=helpful,
             helpful_rate=self._percent(helpful, len(feedback_rows)) / 100,

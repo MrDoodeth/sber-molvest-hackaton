@@ -5,7 +5,6 @@ export type MessageAuthor = "user" | "assistant" | "operator" | "system";
 export type FeedbackVerdict = "helpful" | "ai_error";
 export type CandidateStatus = "pending" | "approved" | "rejected";
 export type CandidateSource = "user_feedback" | "operator" | "admin";
-export type SourceType = "official_1c_docs" | "internal_kb" | "resolved_case";
 export type IndexStatus = "uploaded" | "processing" | "indexed" | "failed";
 export type PromptType = "user_support" | "operator_gigachat" | "knowledge_card";
 export type MonitoringPeriod = "today" | "7d" | "30d" | "all";
@@ -112,16 +111,11 @@ export interface KnowledgeSectionDto {
 export interface KnowledgeDocumentDto {
   id: string;
   sectionId: string;
-  sourceType: SourceType;
   title: string;
-  fileName?: string;
-  oneCVersion?: string;
-  tags: string[];
   isEnabled: boolean;
   indexStatus: IndexStatus;
   indexError?: string;
   indexedAt?: string;
-  version?: number;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -133,16 +127,12 @@ export interface KnowledgeDocumentsResponse {
 export interface CaseCardDto {
   title: string;
   problem: string;
-  symptoms: string;
-  context: string;
-  solution: string;
   result: string;
 }
 
 export interface KnowledgeCandidateDto extends CandidateRef {
   dialogId: string;
   generatedCard: CaseCardDto;
-  defaultSectionId?: string;
   resultingDocumentId?: string;
   resultingDocument?: Pick<KnowledgeDocumentDto, "id" | "title" | "indexStatus" | "indexError">;
   reviewedBy?: UserRef;
@@ -154,10 +144,8 @@ export interface SystemPromptDto {
   id: string;
   type: PromptType;
   content: string;
-  isActive: boolean;
-  version: number;
   updatedAt: string;
-  updatedBy: UserRef;
+  updatedBy?: UserRef;
 }
 
 export interface ModelOptionDto {
@@ -198,9 +186,8 @@ export interface PageResponse<T> {
 export interface AdminDialogAuditDto {
   resolvedBy: "ai" | "operator";
   gigachatModel?: string;
-  systemPromptVersion?: number;
-  ragTopK?: number;
-  operatorEscalationThreshold?: number;
+  systemPrompt?: string;
+  escalationThreshold?: number;
 }
 
 export interface AdminDialogDetailDto {
@@ -217,6 +204,7 @@ export interface MonitoringResponse {
   aiResolvedRate: number;
   escalations: number;
   escalationRate: number;
+  failedRequests: number;
   averageResponseTimeMs: number;
   helpful: number;
   helpfulRate: number;
@@ -238,5 +226,6 @@ export type OperatorQueueEvent =
 
 export type OperatorDialogEvent =
   | { type: "user_message"; message: MessageDto }
+  | { type: "operator_access_revoked"; operator: UserRef }
   | { type: "dialog_closed" }
   | { type: "error"; message: string };

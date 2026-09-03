@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import timedelta
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,15 +27,26 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        if actual_settings.create_schema_on_startup:
-            async with actual_container.engine.begin() as connection:
-                await connection.run_sync(Base.metadata.create_all)
+        async with actual_container.engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
         if actual_settings.seed_on_startup:
             await seed_defaults(actual_container.session_factory)
         warmup = getattr(actual_container.embedding_provider, "warmup", None)
         if callable(warmup):
             await warmup()
+        parser_warmup = getattr(actual_container.document_parser, "warmup", None)
+        if callable(parser_warmup):
+            await parser_warmup()
+        await actual_container.knowledge_base.recover_processing_documents()
+        await actual_container.moderation.recover_closed_candidates()
         await actual_container.dialogs.recover_pending_turns()
+        actual_container.tasks.spawn(
+            actual_container.dialogs.close_idle_dialogs_loop(
+                idle_after=timedelta(hours=actual_settings.dialog_idle_timeout_hours),
+                scan_interval_seconds=actual_settings.dialog_idle_scan_seconds,
+            ),
+            cancel_on_shutdown=True,
+        )
         try:
             yield
         finally:

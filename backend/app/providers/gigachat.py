@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from app.contracts.schemas import CaseCard
 from app.core.config import Settings
+from app.core.generation_gate import GenerationGate
 from app.providers.interfaces import (
     ConfidenceAssessment,
     GenerationRequest,
@@ -39,9 +40,12 @@ class _ScreenshotSchema(BaseModel):
 
 
 class GigaChatProvider:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self, settings: Settings, generation_gate: GenerationGate | None = None
+    ) -> None:
         self._settings = settings
         self._clients: dict[tuple[str, int], Any] = {}
+        self._generation_gate = generation_gate or GenerationGate()
 
     def _require_credentials(self) -> str:
         if self._settings.gigachat_credentials is None:
@@ -261,21 +265,24 @@ class GigaChatProvider:
         model: str,
         session_id: uuid.UUID | None = None,
     ) -> str:
-        client = self._client(model, 64)
-        try:
-            with self._request_headers(session_id or uuid.uuid4()):
-                uploaded = await client.aupload_file(
-                    (file_name, content),
-                    purpose="general",
+        async with self._generation_gate.acquire():
+            client = self._client(model, 64)
+            try:
+                with self._request_headers(session_id or uuid.uuid4()):
+                    uploaded = await client.aupload_file(
+                        (file_name, content),
+                        purpose="general",
+                    )
+                file_id = getattr(uploaded, "id_", None) or getattr(
+                    uploaded, "id", None
                 )
-            file_id = getattr(uploaded, "id_", None) or getattr(uploaded, "id", None)
-            if not file_id:
-                raise ProviderServerError("GigaChat не вернул file_id")
-            return str(file_id)
-        except ProviderError:
-            raise
-        except Exception as exc:
-            raise self._map_error(exc) from exc
+                if not file_id:
+                    raise ProviderServerError("GigaChat не вернул file_id")
+                return str(file_id)
+            except ProviderError:
+                raise
+            except Exception as exc:
+                raise self._map_error(exc) from exc
 
     async def delete_file(
         self,
@@ -283,15 +290,16 @@ class GigaChatProvider:
         model: str,
         session_id: uuid.UUID | None = None,
     ) -> None:
-        client = self._client(model, 64)
-        try:
-            with self._request_headers(session_id or uuid.uuid4()):
-                await client.adelete_file(file_id)
-        except Exception as exc:
-            mapped = self._map_error(exc)
-            if isinstance(mapped, ProviderNotFoundError):
-                return
-            raise mapped from exc
+        async with self._generation_gate.acquire():
+            client = self._client(model, 64)
+            try:
+                with self._request_headers(session_id or uuid.uuid4()):
+                    await client.adelete_file(file_id)
+            except Exception as exc:
+                mapped = self._map_error(exc)
+                if isinstance(mapped, ProviderNotFoundError):
+                    return
+                raise mapped from exc
 
     async def analyze_screenshot(
         self,
@@ -300,35 +308,36 @@ class GigaChatProvider:
         model: str,
         session_id: uuid.UUID,
     ) -> ScreenshotAnalysis:
-        try:
-            from langchain_core.messages import HumanMessage, SystemMessage
-        except ImportError as exc:
-            raise ProviderUnavailableError("langchain-core не установлен") from exc
-        screenshot_blocks: list[Any] = [
-            {"type": "text", "text": question or "Проанализируй скриншот."},
-            {"type": "image", "file_id": file_id},
-        ]
-        messages = [
-            SystemMessage(
-                content=(
-                    "Извлеки текст, код ошибки и значимые элементы интерфейса 1С "
-                    "со скриншота. Сформируй только структурированный результат; "
-                    "не предлагай решение проблемы."
-                )
-            ),
-            HumanMessage(content_blocks=screenshot_blocks),
-        ]
-        result = await self._structured(
-            client=self._client(model, 512),
-            schema=_ScreenshotSchema,
-            messages=messages,
-            session_id=session_id,
-        )
-        parsed = _ScreenshotSchema.model_validate(result)
-        return ScreenshotAnalysis(
-            extracted_text=parsed.extracted_text,
-            visual_summary=parsed.visual_summary,
-        )
+        async with self._generation_gate.acquire():
+            try:
+                from langchain_core.messages import HumanMessage, SystemMessage
+            except ImportError as exc:
+                raise ProviderUnavailableError("langchain-core не установлен") from exc
+            screenshot_blocks: list[Any] = [
+                {"type": "text", "text": question or "Проанализируй скриншот."},
+                {"type": "image", "file_id": file_id},
+            ]
+            messages = [
+                SystemMessage(
+                    content=(
+                        "Извлеки текст, код ошибки и значимые элементы интерфейса 1С "
+                        "со скриншота. Сформируй только структурированный результат; "
+                        "не предлагай решение проблемы."
+                    )
+                ),
+                HumanMessage(content_blocks=screenshot_blocks),
+            ]
+            result = await self._structured(
+                client=self._client(model, 512),
+                schema=_ScreenshotSchema,
+                messages=messages,
+                session_id=session_id,
+            )
+            parsed = _ScreenshotSchema.model_validate(result)
+            return ScreenshotAnalysis(
+                extracted_text=parsed.extracted_text,
+                visual_summary=parsed.visual_summary,
+            )
 
     async def assess_confidence(
         self,
@@ -336,33 +345,34 @@ class GigaChatProvider:
         model: str,
         session_id: uuid.UUID,
     ) -> ConfidenceAssessment:
-        confidence_attachments = [
-            (file_id, mime_type)
-            for file_id, mime_type in zip(
-                request.attachment_file_ids,
-                request.attachment_mime_types,
-                strict=False,
+        async with self._generation_gate.acquire():
+            confidence_attachments = [
+                (file_id, mime_type)
+                for file_id, mime_type in zip(
+                    request.attachment_file_ids,
+                    request.attachment_mime_types,
+                    strict=False,
+                )
+                if mime_type.startswith("image/")
+            ]
+            confidence_request = replace(
+                request,
+                attachment_file_ids=tuple(item[0] for item in confidence_attachments),
+                attachment_mime_types=tuple(item[1] for item in confidence_attachments),
             )
-            if mime_type.startswith("image/")
-        ]
-        confidence_request = replace(
-            request,
-            attachment_file_ids=tuple(item[0] for item in confidence_attachments),
-            attachment_mime_types=tuple(item[1] for item in confidence_attachments),
-        )
-        messages = self._messages(confidence_request)
-        messages[0].content += (
-            "\n\nCONFIDENCE GATE\nВерни только confidence от 0 до 1. "
-            "Если пользователь явно просит оператора, верни 0."
-        )
-        result = await self._structured(
-            client=self._client(model, 64),
-            schema=_ConfidenceSchema,
-            messages=messages,
-            session_id=session_id,
-        )
-        parsed = _ConfidenceSchema.model_validate(result)
-        return ConfidenceAssessment(confidence=parsed.confidence)
+            messages = self._messages(confidence_request)
+            messages[0].content += (
+                "\n\nCONFIDENCE GATE\nВерни только confidence от 0 до 1. "
+                "Если пользователь явно просит оператора, верни 0."
+            )
+            result = await self._structured(
+                client=self._client(model, 64),
+                schema=_ConfidenceSchema,
+                messages=messages,
+                session_id=session_id,
+            )
+            parsed = _ConfidenceSchema.model_validate(result)
+            return ConfidenceAssessment(confidence=parsed.confidence)
 
     async def generate_case_card(
         self,
@@ -371,20 +381,21 @@ class GigaChatProvider:
         max_output_tokens: int,
         session_id: uuid.UUID,
     ) -> CaseCard:
-        messages = self._messages(request)
-        messages[0].content += (
-            "\n\nKNOWLEDGE CARD\nВерни только структурированную карточку с полями "
-            "title, problem, symptoms, context, solution и result. Каждый field "
-            "должен содержать конкретный текст на русском языке. Не добавляй "
-            "Markdown-обёртку, комментарии или поля вне схемы."
-        )
-        result = await self._structured(
-            client=self._client(model, max_output_tokens),
-            schema=CaseCard,
-            messages=messages,
-            session_id=session_id,
-        )
-        return CaseCard.model_validate(result)
+        async with self._generation_gate.acquire():
+            messages = self._messages(request)
+            messages[0].content += (
+                "\n\nKNOWLEDGE CARD\nВерни только структурированную карточку с полями "
+                "title, problem и result. Название кейса должно быть кратким. Не "
+                "добавляй Markdown-обёртку, комментарии или поля вне схемы; если "
+                "факт не зафиксирован в диалоге, оставь поле пустым."
+            )
+            result = await self._structured(
+                client=self._client(model, max_output_tokens),
+                schema=CaseCard,
+                messages=messages,
+                session_id=session_id,
+            )
+            return CaseCard.model_validate(result)
 
     async def stream_text(
         self,
@@ -393,63 +404,64 @@ class GigaChatProvider:
         max_output_tokens: int,
         session_id: uuid.UUID,
     ) -> AsyncIterator[StreamChunk]:
-        client = self._client(model, max_output_tokens)
-        messages = self._messages(request)
-        messages[0].content += (
-            "\n\nANSWER OR TEMPLATE\nВерни только обычный текст ответа "
-            "пользователю или шаблона для оператора. Не возвращай JSON и "
-            "отдельное поле confidence. "
-            "Используй Markdown для заголовков, списков и выделения; код "
-            "оформляй fenced-блоком с языком, если это уместно. "
-            "Если пользователь просит показать или проверить виды Markdown, "
-            "не заключай заголовки, списки, цитаты, жирный/курсивный/"
-            "зачёркнутый текст, ссылки, изображения и горизонтальные линии "
-            "в code fence: верни их как настоящую Markdown-разметку. "
-            "Code fence используй только для программного кода, SQL или "
-            "явно запрошенного исходного Markdown; не вкладывай тройные "
-            "backticks друг в друга. "
-            "Не добавляй служебные статусы интерфейса, таймеры или счётчики "
-            "времени, например «осталось 00:00»."
-        )
-        usage: ProviderUsage | None = None
-        try:
-            request_id = uuid.uuid4()
-            with self._request_headers(session_id, request_id):
-                stream_kwargs: dict[str, Any] = {
-                    "config": {
-                        "metadata": {
-                            "session_id": str(session_id),
-                            "request_id": str(request_id),
+        async with self._generation_gate.acquire():
+            client = self._client(model, max_output_tokens)
+            messages = self._messages(request)
+            messages[0].content += (
+                "\n\nANSWER OR TEMPLATE\nВерни только обычный текст ответа "
+                "пользователю или шаблона для оператора. Не возвращай JSON и "
+                "отдельное поле confidence. "
+                "Используй Markdown для заголовков, списков и выделения; код "
+                "оформляй fenced-блоком с языком, если это уместно. "
+                "Если пользователь просит показать или проверить виды Markdown, "
+                "не заключай заголовки, списки, цитаты, жирный/курсивный/"
+                "зачёркнутый текст, ссылки, изображения и горизонтальные линии "
+                "в code fence: верни их как настоящую Markdown-разметку. "
+                "Code fence используй только для программного кода, SQL или "
+                "явно запрошенного исходного Markdown; не вкладывай тройные "
+                "backticks друг в друга. "
+                "Не добавляй служебные статусы интерфейса, таймеры или счётчики "
+                "времени, например «осталось 00:00»."
+            )
+            usage: ProviderUsage | None = None
+            try:
+                request_id = uuid.uuid4()
+                with self._request_headers(session_id, request_id):
+                    stream_kwargs: dict[str, Any] = {
+                        "config": {
+                            "metadata": {
+                                "session_id": str(session_id),
+                                "request_id": str(request_id),
+                            }
                         }
                     }
-                }
-                if self._has_text_attachments(request):
-                    # Text files use the built-in get_file_content function;
-                    # without auto mode GigaChat only reads the first one.
-                    stream_kwargs["function_call"] = "auto"
-                async for chunk in client.astream(messages, **stream_kwargs):
-                    metadata = getattr(chunk, "response_metadata", None) or {}
-                    if metadata.get("finish_reason") == "blacklist":
-                        raise ProviderPolicyError()
-                    if self._is_function_progress(chunk, metadata):
-                        continue
-                    raw_usage = getattr(chunk, "usage_metadata", None)
-                    if raw_usage:
-                        input_details = raw_usage.get("input_token_details") or {}
-                        usage = ProviderUsage(
-                            prompt_tokens=raw_usage.get("input_tokens"),
-                            completion_tokens=raw_usage.get("output_tokens"),
-                            precached_prompt_tokens=input_details.get("cache_read"),
-                        )
-                    text = self._extract_text(getattr(chunk, "content", ""))
-                    if text and not self._is_timer_status(text):
-                        yield StreamChunk(text=text)
-            if usage is not None:
-                yield StreamChunk(text="", usage=usage)
-        except ProviderError:
-            raise
-        except Exception as exc:
-            raise self._map_error(exc) from exc
+                    if self._has_text_attachments(request):
+                        # Text files use the built-in get_file_content function;
+                        # without auto mode GigaChat only reads the first one.
+                        stream_kwargs["function_call"] = "auto"
+                    async for chunk in client.astream(messages, **stream_kwargs):
+                        metadata = getattr(chunk, "response_metadata", None) or {}
+                        if metadata.get("finish_reason") == "blacklist":
+                            raise ProviderPolicyError()
+                        if self._is_function_progress(chunk, metadata):
+                            continue
+                        raw_usage = getattr(chunk, "usage_metadata", None)
+                        if raw_usage:
+                            input_details = raw_usage.get("input_token_details") or {}
+                            usage = ProviderUsage(
+                                prompt_tokens=raw_usage.get("input_tokens"),
+                                completion_tokens=raw_usage.get("output_tokens"),
+                                precached_prompt_tokens=input_details.get("cache_read"),
+                            )
+                        text = self._extract_text(getattr(chunk, "content", ""))
+                        if text and not self._is_timer_status(text):
+                            yield StreamChunk(text=text)
+                if usage is not None:
+                    yield StreamChunk(text="", usage=usage)
+            except ProviderError:
+                raise
+            except Exception as exc:
+                raise self._map_error(exc) from exc
 
     @staticmethod
     def _extract_text(content: Any) -> str:

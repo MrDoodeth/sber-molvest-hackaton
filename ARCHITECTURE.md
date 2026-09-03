@@ -53,7 +53,7 @@
 - **Backend — модульный монолит на FastAPI**, не микросервисы: меньше DevOps-расходов на хакатон, модули (RAG, Vision, Escalation, KB) изолированы и готовы к выносу в отдельные сервисы позже.
 - **GigaChat — центральная генеративная модель:** используем API для формирования финального ответа и анализа приложенных скриншотов. Для MVP основной кандидат — `GigaChat (активная модель)`.
 - **Embeddings делаем локально:** Freemium предоставляет бесплатные токены генерации, но векторное представление текста оплачивается отдельно. Поэтому retrieval не зависит от платного Embeddings API; основной локальный кандидат — `BAAI/bge-m3`.
-- **Критичное ограничение Freemium — 1 поток генерации.** Обычный пользовательский turn использует до **двух последовательных GigaChat generation-call** (`confidence → answer`), а turn со screenshot — до **трёх** (`screenshot parse → confidence → answer`). Ручной шаблон оператора выполняется отдельным generation-call.
+- **Критичное ограничение Freemium — 1 поток генерации.** Все GigaChat generation, vision и Files API операции проходят через единый re-entrant `GenerationGate`. Обычный пользовательский turn использует до **двух последовательных GigaChat generation-call** (`confidence → answer`), а turn со screenshot — до **трёх** (`screenshot parse → confidence → answer`). Ручной шаблон оператора выполняется отдельным generation-call.
 - **GigaChain используем точечно**, где он ускоряет интеграцию с GigaChat/LangChain, но не строим многошаговую agent-chain, которая последовательно занимает единственный поток.
 
 ## 2. Контекст, цели и требования
@@ -143,7 +143,9 @@ Message.sources = <snapshot RAG evidence>
 
 Изображения и скриншоты пользователей являются runtime-источником контекста: извлечённый из них текст и визуальное описание участвуют в поиске по БЗ и генерации ответа.
 
-На MVP база знаний должна содержать **как минимум реальную документацию 1С**, чтобы основной RAG-сценарий демонстрировался на фактических данных.
+Загрузка реальной документации 1С остаётся отдельным roadmap-шагом и не выполняется
+автоматически при startup. В MVP документы загружаются администратором через KB API;
+seed не скачивает внешний массив документов.
 
 ## 3. Архитектурные решения (ADR)
 
@@ -167,8 +169,9 @@ Message.sources = <snapshot RAG evidence>
 - **Единственная embedding-модель MVP:** `BAAI/bge-m3`.
 - **Почему `BGE-M3`:** мультиязычность (>100 языков), 1024-мерные dense-вектора, контекст до 8192 токенов, MIT-лицензия и возможность получать dense + sparse representations для hybrid retrieval.
 - **Runtime BGE-M3:** зафиксированный snapshot модели скачивается на этапе сборки backend-образа, загружается через `BGEM3FlagModel` в FastAPI lifespan и прогревается до readiness. Во время обработки запросов сеть для Hugging Face не используется.
+- **Runtime Docling:** layout, TableFormer и EasyOCR artifacts скачиваются на этапе сборки backend-образа в `/opt/models/docling`, передаются в `DocumentConverter` через `DOCLING_ARTIFACTS_PATH` и прогреваются в FastAPI lifespan. Во время ingestion сеть для Hugging Face и EasyOCR не используется.
 - **Интерфейсы разделяем:** `GigaChatProvider` отвечает за generation/multimodal input, `EmbeddingProvider` — за локальную векторизацию. Это не смешивает платёжные/сетевые ограничения GigaChat с индексом БЗ.
-- **Ограничение Freemium:** один поток generation-запросов. Generation-вызовы одного turn выполняются строго последовательно под `Semaphore(1)`: два для обычного turn и до трёх для screenshot-turn; embeddings/retrieval выполняются локально.
+- **Ограничение Freemium:** один поток generation-запросов. Единый re-entrant `GenerationGate` находится в `app/core/generation_gate.py`; provider защищает каждый GigaChat/file/vision вызов, а сервис удерживает тот же gate на всём атомарном user turn. Embeddings/retrieval выполняются локально.
 - **Не делаем в MVP:** self-hosted генеративную LLM и альтернативные embedding-модели «на всякий случай». Если BGE-M3 не проходит наш golden dataset, модель меняется через `EmbeddingProvider`, но до измерений не усложняем архитектуру.
 
 ### ADR-4 · Qdrant + единая коллекция знаний
@@ -182,9 +185,9 @@ Message.sources = <snapshot RAG evidence>
 
 ### ADR-5 · Схема PostgreSQL создаётся из актуальных моделей
 
-- **Решение:** backend создаёт схему через `Base.metadata.create_all` во время
-  startup lifespan. Начальные пользователи, разделы БЗ, настройки и все три
-  системных prompt добавляются через seed.
+- **Решение:** backend безусловно создаёт схему через `Base.metadata.create_all`
+  во время startup lifespan. Начальные пользователи, разделы БЗ, настройки и все
+  три системных prompt добавляются через seed.
 - **Миграции базы данных не используются:** в репозитории нет Alembic и других
   migration-скриптов, а контейнеры запускают сразу Uvicorn.
 - **Почему:** для MVP нужен один воспроизводимый initial state при сборке и
@@ -193,6 +196,42 @@ Message.sources = <snapshot RAG evidence>
   `backend/app/models`, после чего для среды с изменившимся контрактом
   пересоздаётся PostgreSQL volume. Создание схемы идемпотентно для уже
   существующего актуального volume.
+- **Конфигурация Docker:** runtime-переменные хранятся в единственном корневом
+  `.env`; оба Compose-файла передают его backend через `env_file`, а
+  Docker-specific hostnames, ports и TLS paths задаются только в Compose.
+
+### 3.1. Текущее состояние реализации
+
+Следующие правила уже реализованы в backend и являются частью текущего MVP-контракта:
+
+- все generation, vision и Files API вызовы GigaChat сериализуются единым
+  re-entrant `GenerationGate`; сервисы могут удерживать его на всём атомарном turn,
+  а provider дополнительно защищает отдельные вызовы;
+- при закрытии любого Dialog в той же транзакции создаётся один pending
+  `KnowledgeCandidate` с детерминированной начальной карточкой; старые закрытые
+  Dialog backfill-ятся при старте приложения;
+- `DialogFeedback` хранится независимо от candidate и допускает `helpful`,
+  `ai_error` либо отсутствие оценки (`unrated`);
+- approve/reject/hard-delete блокируют Dialog и candidate в одном порядке и
+  удерживают блокировки до commit или компенсации внешних операций;
+- после restart восстанавливаются user turns со статусом `processing`, а документы
+  `uploaded/processing` снова ставятся в ingestion; в RAG участвуют только
+  документы со статусом `indexed`;
+- BGE-M3 и Docling PDF pipeline прогреваются до readiness; runtime image содержит
+  все необходимые model artifacts и не скачивает модели во время обработки запроса;
+- operator Dialog SSE публикует `operator_access_revoked` после назначения тикета
+  другому оператору и закрывает доступ к дальнейшим событиям;
+- `MetricEvent` хранит тип операции, success/error, модель, полный prompt,
+  retrieval-настройки и usage generation-call.
+- фоновый sweeper каждые `DIALOG_IDLE_SCAN_SECONDS` закрывает неактивные Dialog в
+  режиме `ai_support` после `DIALOG_IDLE_TIMEOUT_HOURS` без новых user/assistant
+  сообщений; такие тикеты остаются `unrated` и отображаются как решённые AI.
+- demo-auth/seed-пользователи остаются намеренным MVP-режимом для демонстрации и не
+  являются текущей P0-задачей; production identity provider — отдельный roadmap.
+
+В этой версии `knowledge_card` prompt остаётся для явного legacy/admin backfill;
+обычный candidate создаётся без дополнительного LLM-вызова и редактируется
+администратором перед approve.
 
 ## 4. Высокоуровневая архитектура
 
@@ -264,7 +303,7 @@ flowchart TB
 - **API Gateway** — FastAPI, REST для команд/сообщений + SSE для streaming и событий состояния; те же контракты позже используются интеграционными адаптерами.
 - **Dialog Service** — состояние диалога/история, роутинг в RAG/Vision/Escalation.
 - **RAG Engine** — локальная векторизация (`EmbeddingProvider`) → hybrid retrieval из Qdrant → evidence для confidence/answer pipeline.
-- **Vision / Attachments Handler** — хранит runtime attachment, для screenshot выполняет отдельный GigaChat parse (`extracted_text + visual_summary`) до RAG, затем переиспользует тот же `file_id` в confidence/answer pipeline.
+- **Vision / Attachments Handler** — хранит runtime attachment, для screenshot выполняет отдельный GigaChat parse (`extracted_text + visual_summary`) до RAG, затем переиспользует тот же `file_id` в answer pipeline. Документы сознательно исключены из confidence-call, но передаются в Knowledge Card через общий context builder.
 - **Escalation Service** — сравнивает `dialog_confidence` с административным `operator_escalation_threshold` и при необходимости помещает обращение в операторскую очередь.
 - **Error Review Service** — показывает администратору завершённые тикеты с `DialogFeedback.verdict=ai_error` и выполняет подтверждённое каскадное удаление разобранных ошибочных чатов.
 - **KB Service** — CRUD документов, чанкинг, (ре)индексация.
@@ -325,7 +364,7 @@ flowchart TB
 
 **Безопасность и данные:** self-hosted Qdrant/хранилище/Postgres; JWT + роли user/operator/admin. GigaChat credentials находятся только на backend. В Docker/Linux устанавливаем доверенный сертификат НУЦ Минцифры или задаём `ca_bundle_file`; SSL verification не отключаем. Runtime-файлы после использования удаляются из GigaChat File Storage. PII не пишем в технические логи без необходимости.
 
-**Масштабирование:** на MVP отдельная очередь задач не нужна. Индексация запускается через FastAPI `BackgroundTasks` / простой worker. Generation-запросы GigaChat сериализуются локальным `asyncio.Semaphore(1)`, потому что `GIGACHAT_API_PERS` физлица имеет один поток. Redis + Celery/RQ добавляются только при реальном росте нагрузки/числа backend replicas и необходимости распределённой очереди/retry.
+**Масштабирование:** на MVP отдельная очередь задач не нужна. Индексация запускается через FastAPI `BackgroundTasks` / простой worker, а документы в `uploaded/processing` восстанавливаются при старте. Generation-запросы GigaChat сериализуются единым re-entrant `GenerationGate`, потому что `GIGACHAT_API_PERS` физлица имеет один поток. Redis + Celery/RQ добавляются только при реальном росте нагрузки/числа backend replicas и необходимости распределённой очереди/retry.
 
 ## 7. Метрики эффективности
 
@@ -336,6 +375,11 @@ flowchart TB
 | Количество эскалаций | count(escalated=true) / период | Тренд к снижению |
 | Проверка retrieval | `tests/rag/evaluate_rag.py`: сколько golden-вопросов нашли ожидаемый источник в top-3 | Используем как внутреннюю проверку при изменениях RAG |
 
+`MetricEvent.event_type` различает `user_turn`, `operator_template` и
+`knowledge_card`; monitoring KPI агрегирует только `user_turn`, чтобы ручные
+шаблоны и служебный backfill не искажали пользовательские показатели. Ошибки
+обработки считаются по `success=false`.
+
 ## 8. MVP и Production Roadmap
 
 | Функция ТЗ | Хакатон (MVP) | Прод (Roadmap) |
@@ -344,7 +388,7 @@ flowchart TB
 | Совместимость каналов | Единые backend-контракты `IncomingMessage/OutgoingMessage`, channel-agnostic ядро | Реальные webhooks/API конкретных платформ |
 | Автоподключение к чату | **Не реализуем как обязательный MVP** | Listener Bitrix24/Redmine + режимы `suggest/auto` |
 | База знаний | **Секции + CRUD документов + добавление/удаление разделов + индексация** | Версионирование, массовый импорт, approval workflow |
-| Минимальные данные | **Документация 1С обязательно**; по возможности обращения и внутренняя БЗ | Полный массив источников заказчика |
+| Минимальные данные | Документы загружаются через KB API; автоматический seed реальной документации 1С не выполняется | Полный массив источников заказчика и автоматическая стартовая загрузка |
 | Админ-настройки | **Выбор GigaChat Lite/Pro/Max/Ultra + ползунок confidence**, управление разделами, базовые логи/метрики | Продвинутые политики эскалации, RBAC, SLA |
 | Метрики | % успешных ответов, среднее время ответа, число эскалаций | Prometheus/Grafana, алерты, расширенная аналитика |
 | Очереди/фоновые задачи | FastAPI `BackgroundTasks` / простой worker | Redis + Celery/RQ при росте объёма индексации и параллельных задач |
@@ -482,7 +526,8 @@ AI самостоятельно продолжает диалог с польз�
 
 #### Этап 2A. AI решил проблему без оператора
 
-Если задача решена, пользователь завершает обращение и после закрытия тикета видит:
+Если задача решена, пользователь завершает обращение. В транзакции закрытия backend
+создаёт один `KnowledgeCandidate` со статусом `pending`; затем пользователь видит:
 
 ```text
 Решение помогло?
@@ -496,7 +541,8 @@ AI самостоятельно продолжает диалог с польз�
 Да, помогло
 ```
 
-backend выполняет idempotent get-or-create:
+backend сохраняет итоговую оценку и выполняет idempotent get-or-create только как
+backfill для старых закрытых тикетов:
 
 ```text
 create_or_get_candidate(
@@ -505,15 +551,14 @@ create_or_get_candidate(
 )
 ```
 
-В БД действует:
+Для новых закрытых тикетов кандидат уже создан при `close`. В БД действует:
 
 ```text
 UNIQUE(KnowledgeCandidate.dialog_id)
 ```
 
 Поэтому один Dialog физически не может создать два кандидата на модерацию.
-
-и попадает в отдельную административную очередь / журнал успешно решённых AI-обращений.
+Кандидат попадает в отдельную административную очередь / журнал закрытых обращений.
 
 Администратор видит:
 
@@ -532,7 +577,7 @@ UNIQUE(KnowledgeCandidate.dialog_id)
 [ Reject ]  → не добавлять
 ```
 
-Только после `Approve` case card проходит обычный pipeline:
+Только после `Approve` case card публикуется и проходит обычный pipeline:
 
 ```text
 Docling / нормализация
@@ -544,7 +589,8 @@ Docling / нормализация
       Qdrant
 ```
 
-То есть пользовательский approve **не обучает систему автоматически** — он только создаёт кандидата для ручной проверки.
+То есть закрытие **не обучает систему автоматически** — кандидат только создаётся
+для ручной проверки, а `Approve` публикует его в БЗ.
 
 Если пользователь выбирает:
 
@@ -552,7 +598,7 @@ Docling / нормализация
 Нет, AI ошибся
 ```
 
-закрытый тикет попадает в очередь:
+оценка сохраняется, а закрытый тикет попадает в очередь:
 
 ```text
 Ошибки AI
@@ -648,7 +694,8 @@ POST /api/operator/dialogs/{dialogId}/template
 Dialog.status = closed
 ```
 
-После закрытия тикет ожидает итоговую оценку пользователя.
+После закрытия тикет ожидает итоговую оценку пользователя, а его pending-кандидат
+уже доступен администратору.
 
 Пользователь отмечает:
 
@@ -656,9 +703,9 @@ Dialog.status = closed
 [ Да, помогло ]
 ```
 
-После чего завершённый тикет можно отправить в очередь административной модерации.
-
-Оператор не создаёт кандидата вручную: закрытый тикет остаётся в административном журнале до оценки пользователя, а администратор может создать кандидата из любого закрытого тикета.
+Оператор не создаёт кандидата вручную: при закрытии того же Dialog backend автоматически
+создаёт pending-кандидата, а оценка пользователя хранится независимо и может быть
+`helpful`, `ai_error` или отсутствовать.
 
 ---
 
@@ -719,8 +766,8 @@ AI-агента.
 → attachments/screenshots доступны в любом сообщении обоих режимов
 
 Управление БЗ / обучение
-→ успешные завершённые тикеты попадают в KnowledgeCandidate
-   только через ручную модерацию администратора
+→ все закрытые тикеты попадают в KnowledgeCandidate
+   и публикуются только после ручной модерации администратора
 ```
 
 Получается один сквозной lifecycle:
@@ -729,24 +776,25 @@ AI-агента.
 USER
   ↓
 AI SUPPORT
-  ├── решено → closed → helpful → KnowledgeCandidate
-  │                            └→ admin Approve / Reject
+  ├── решено → closed → KnowledgeCandidate
+  │                         ├→ feedback helpful / ai_error / unrated
+  │                         └→ admin Approve / Reject
   │
   ├── ошибся → closed → ai_error → очередь «Ошибки AI»
   │
-  └── confidence < threshold
-              ↓
-       OPERATOR SUPPORT
-              ↓
-       MANUAL AI TEMPLATE
-              ↓
-            closed
-              ↓
-      user helpful
-              ↓
-       KnowledgeCandidate
-              ↓
-       admin Approve / Reject
+   └── confidence < threshold
+               ↓
+        OPERATOR SUPPORT
+               ↓
+        MANUAL AI TEMPLATE
+               ↓
+             closed
+               ↓
+        KnowledgeCandidate уже создан при close
+               ↓
+        feedback helpful / ai_error / unrated
+               ↓
+        admin Approve / Reject
 ```
 
 ### Confidence диалога и эскалация
@@ -940,7 +988,7 @@ if confidence < operator_escalation_threshold:
 Для физлица доступен один generation-поток, поэтому все GigaChat-вызовы одного turn выполняются внутри одного критического участка:
 
 ```python
-async with gigachat_semaphore:
+async with generation_gate.acquire():
     screenshot_context = None
 
     if screenshot:
@@ -1165,9 +1213,10 @@ ACTIVE CHAT
     ↓
 CLOSED TICKET
     ↓
-финальная оценка пользователя
-    ├── helpful  → очередь KnowledgeCandidate
-    └── ai_error → очередь «Ошибки AI»
+    pending KnowledgeCandidate уже создан при close
+    ├── helpful  → сохраняется оценка + candidate
+    ├── ai_error → сохраняется оценка + очередь «Ошибки AI»
+    └── unrated  → ожидает оценку
 ```
 
 ### Runtime sequence
@@ -1398,18 +1447,20 @@ PDF / DOCX / HTML / MD
 
 LLM-суммаризацию тикетов можно добавить позже как offline enrichment, но она **не нужна для первого рабочего RAG**.
 
-##### AI-only кейсы: подтверждение пользователем → модерация администратором
+##### Закрытые кейсы: автоматический candidate → модерация администратором
 
-Если обращение было решено **без участия оператора**, AI-ассистент дал рекомендацию и пользователь явно подтвердил, что решение помогло, такой кейс **не добавляется в БЗ автоматически**.
+Любой закрытый Dialog, решённый AI или оператором, **не добавляется в БЗ автоматически**.
+В момент закрытия создаётся один pending `KnowledgeCandidate`; пользовательская
+оценка сохраняется отдельно и не является условием создания candidate.
 
-Вместо этого создаётся `KnowledgeCandidate`:
+Lifecycle кандидата:
 
 ```text
-AI решил обращение
+AI или оператор решил обращение
         ↓
-пользователь подтвердил: "помогло"
+Dialog закрыт
         ↓
-формируется карточка-кандидат
+создаётся initial карточка-кандидат
         ↓
 очередь модерации администратора
         ↓
@@ -1426,9 +1477,9 @@ AI решил обращение
 
 - исходный вопрос пользователя;
 - контекст диалога;
-- ответ AI;
+- финальное решение AI или оператора;
 - использованные источники;
-- итоговое подтверждение пользователя;
+- итоговую оценку пользователя, если она есть;
 - автоматически сформированную карточку;
 - при необходимости — возможность отредактировать карточку перед `Approve`.
 
@@ -1442,7 +1493,7 @@ rejected
 
 Только после `approved` case card становится permanent KB document.
 
-Admin на экране Approve выбирает целевой `section_id`. По умолчанию selector предзаполнен:
+Approve всегда использует `DEFAULT_CASE_SECTION_ID`; selector в UI отсутствует:
 
 ```text
 DEFAULT_CASE_SECTION_ID
@@ -1455,14 +1506,16 @@ DEFAULT_CASE_SECTION_ID
 Approve выполняется атомарно:
 
 ```python
-def approve(candidate, section_id=DEFAULT_CASE_SECTION_ID):
+def approve(candidate, generated_card=None):
+    if generated_card is not None:
+        candidate.generated_card = generated_card
     storage_key = put_object(
         f"case-cards/{candidate.id}.md",
         render_markdown(candidate.generated_card),
     )
 
     doc = KnowledgeDocument.create(
-        section_id=section_id,
+        section_id=DEFAULT_CASE_SECTION_ID,
         source_type="resolved_case",
         storage_key=storage_key,
         title=candidate.generated_card.title,
@@ -1476,9 +1529,13 @@ def approve(candidate, section_id=DEFAULT_CASE_SECTION_ID):
     candidate.resulting_document_id = doc.id
 ```
 
-Case card **не обходит Docling**: после материализации в Markdown она проходит тот же permanent ingestion, что и любой другой документ БЗ. Для небольшой структурированной карточки это обычно даст один компактный chunk, но отдельный bypass-пipeline не вводим.
+Case card **не обходит Docling**: после materialization в Markdown она проходит тот же
+permanent ingestion, что и любой другой документ БЗ. Начальная карточка создаётся
+детерминированно из первого user message и последнего support message; администратор
+может отредактировать её перед approve.
 
-Так система действительно «обучается» на успешно решённых кейсах, но между пользовательским подтверждением и попаданием в эталонную БЗ остаётся **human-in-the-loop контроль качества**.
+Так система действительно пополняет БЗ закрытыми кейсами, но между закрытием тикета
+и попаданием в эталонную БЗ остаётся **human-in-the-loop контроль качества**.
 
 Неуспешные кейсы:
 
@@ -1959,7 +2016,7 @@ rag_top_k >= 1
 
 ## 13. GigaChat + LangChain/GigaChain
 
-Этот раздел фиксирует детали интеграции, подтверждённые актуальной официальной документацией GigaChat API. Конкретный код через `langchain-gigachat` будет уточнён после отдельного разбора документации LangChain/GigaChain, но контракт backend с GigaChat уже определён.
+Этот раздел фиксирует детали интеграции, подтверждённые актуальной официальной документацией GigaChat API и реализованные через `langchain-gigachat`. Контракт backend с GigaChat определён через LangChain primitives и provider boundary.
 
 ### Роль GigaChat в продукте
 
@@ -1968,19 +2025,21 @@ GigaChat — **основная интеллектуальная модель п
 В runtime GigaChat получает:
 
 - системный prompt выбранного режима: `SystemPrompt(type=user_support)` для AI-ответа или `SystemPrompt(type=operator_gigachat)` для ручного шаблона;
-- для создания карточки из закрытого тикета — `SystemPrompt(type=knowledge_card)` и structured output;
+- для ручного заполнения карточки по кнопке или явного legacy/admin backfill — `SystemPrompt(type=knowledge_card)` и structured output;
 - текущий вопрос пользователя или последнее user message тикета для шаблона;
 - хвост истории диалога, собранный `ContextBuilder`;
 - найденные RAG evidence chunks;
 - текущий `operator_escalation_threshold`;
 - runtime attachments: screenshot / документ, если приложены.
 
-В одном generation-вызове модель выполняет:
+В финальном generation-вызове модель выполняет:
 
 1. интерпретацию проблемы;
-2. анализ изображения/разового вложения, если оно есть;
+2. учитывает уже подготовленный анализ изображения/разового вложения;
 3. сопоставление вопроса с RAG evidence;
 4. формирование ответа пользователю или шаблона для оператора.
+
+Анализ screenshot выполняется отдельным structured vision-вызовом до retrieval.
 
 `confidence` оценивается отдельным structured-вызовом только в `ai_support` до
 формирования ответа пользователю.
@@ -2108,20 +2167,20 @@ CALL #2 → answer, только если он нужен
 И дополнительно сериализуем обращения к GigaChat внутри backend:
 
 ```python
-gigachat_semaphore = asyncio.Semaphore(1)
+generation_gate = GenerationGate()  # re-entrant asyncio gate
 ```
 
 Схематично:
 
 ```text
 request A ─┐
-request B ─┼→ GigaChatProvider queue → Semaphore(1) → GigaChat API
+request B ─┼→ GenerationGate → GigaChatProvider → GigaChat API
 request C ─┘
 ```
 
 На хакатонном MVP с одним экземпляром backend этого достаточно.
 
-Если когда-нибудь появится несколько backend replicas, локальный `Semaphore(1)` уже не обеспечит глобальный лимит — тогда понадобится централизованная очередь/lock. Это Roadmap, не MVP.
+Если когда-нибудь появится несколько backend replicas, локальный `GenerationGate` уже не обеспечит глобальный лимит — тогда понадобится централизованная очередь/lock. Это Roadmap, не MVP.
 
 Не строим длинную LLM-chain вида:
 
@@ -2342,7 +2401,7 @@ Frontend
 
 Это позволяет показывать пользователю начало ответа раньше, чем генерация завершилась полностью.
 
-Важно: generation stream занимает наш единственный доступный GigaChat-поток до завершения запроса, поэтому `Semaphore(1)` освобождается только после закрытия SSE-stream.
+Важно: generation stream занимает наш единственный доступный GigaChat-поток до завершения запроса, поэтому `GenerationGate` освобождается только после закрытия SSE-stream.
 
 Документация:
 - https://developers.sber.ru/docs/ru/gigachat/guides/response-token-streaming
@@ -2651,7 +2710,7 @@ CALL #1 confidence
 CALL #2 user answer
 ```
 
-Все GigaChat-вызовы выполняются последовательно под `Semaphore(1)`.
+Все GigaChat-вызовы выполняются последовательно под единым re-entrant `GenerationGate`.
 
 ### Финальный prompt
 
@@ -2699,8 +2758,8 @@ SystemPrompt(type=knowledge_card)
 
 Промпты хранятся в PostgreSQL, редактируются администратором и применяются без
 рестарта. `operator_gigachat` используется для ручного шаблона ответа, а
-`knowledge_card` — для структурированного заполнения полей карточки из закрытого
-тикета.
+`knowledge_card` — кнопкой заполнения карточки и для explicit legacy/admin backfill.
+Новые candidates получают deterministic initial card.
 
 System Prompt:
 
@@ -3231,9 +3290,9 @@ MVP-модель оставляем минимальной: каждая сущ�
 | `KnowledgeDocument` | `id`, `section_id`, `source_type`, `title`, `storage_key`, `one_c_version?`, `tags`, `is_enabled`, `index_status`, `index_error?`, `indexed_at?` | `one_c_version` — версия конфигурации 1С, не история правок документа; версионирование файла остаётся Roadmap |
 | `Chunk` | `id`, `doc_id`, `text`, `vector_id`, `metadata` | Внутренний RAG-фрагмент, напрямую frontend не редактирует |
 | `KnowledgeCandidate` | `id`, `dialog_id`, `source`, `generated_card`, `status`, `resulting_document_id?`, `reviewed_by?`, `reviewed_at?` | `UNIQUE(dialog_id)`; после Approve `resulting_document_id → KnowledgeDocument.id` |
-| `SystemPrompt` | `id`, `type`, `content`, `is_active`, `version`, `updated_at`, `updated_by` | Одна сущность для трёх prompt: `user_support / operator_gigachat / knowledge_card` |
+| `SystemPrompt` | `id`, `type`, `content`, `updated_at`, `updated_by` | Одна редактируемая запись на каждый prompt: `user_support / operator_gigachat / knowledge_card` |
 | `SystemSetting` | `key`, `value`, `updated_at` | Runtime AI/RAG settings без restart |
-| `MetricEvent` | `id`, `dialog_id?`, `latency_ms`, `confidence?`, `escalated`, `prompt_tokens?`, `completion_tokens?`, `precached_prompt_tokens?`, `created_at` | Агрегаты мониторинга и технические usage-метрики |
+| `MetricEvent` | `id`, `dialog_id?`, `event_type`, `success`, `error_message?`, `latency_ms`, `confidence?`, `escalated`, `prompt_tokens?`, `completion_tokens?`, `precached_prompt_tokens?`, `gigachat_model?`, `system_prompt?`, `rag_top_k?`, `operator_escalation_threshold?`, `created_at` | Агрегаты мониторинга и snapshots generation-call |
 
 
 ### DB constraints / delete rules
@@ -3257,7 +3316,8 @@ DialogFeedback.dialog_id
 → FK Dialog.id ON DELETE CASCADE
 ```
 
-Candidate создаётся во всех источниках через один service method:
+Candidate создаётся для каждого нового закрытого Dialog в той же транзакции, что и
+закрытие. Для старых данных и legacy admin-пути используется idempotent service method:
 
 ```python
 def create_or_get_candidate(dialog_id, source):
@@ -3880,8 +3940,8 @@ Frontend не решает concurrency самостоятельно.
 | POST | `/api/admin/knowledge/sections` | создать section |
 | PATCH | `/api/admin/knowledge/sections/{id}` | rename / enable-disable |
 | DELETE | `/api/admin/knowledge/sections/{id}` | удалить section |
-| GET | `/api/admin/knowledge/documents?section_id=&status=` | documents |
-| POST | `/api/admin/knowledge/documents` | upload permanent KB document |
+| GET | `/api/admin/knowledge/documents?section_id=` | documents, sorted by newest first |
+| POST | `/api/admin/knowledge/sections/{section_id}/documents` | upload one permanent KB file |
 | GET | `/api/admin/knowledge/documents/{id}` | document detail |
 | PATCH | `/api/admin/knowledge/documents/{id}` | enable-disable / metadata |
 | POST | `/api/admin/knowledge/documents/{id}/reindex` | повторный ingestion |
@@ -3891,8 +3951,8 @@ Frontend не решает concurrency самостоятельно.
 
 | Method | Endpoint | Назначение |
 | --- | --- | --- |
-| GET | `/api/admin/prompts` | оба активных prompt + версии |
-| PUT | `/api/admin/prompts/{type}` | сохранить новую версию |
+| GET | `/api/admin/prompts` | три системных prompt |
+| PUT | `/api/admin/prompts/{type}` | обновить prompt целиком |
 | GET | `/api/admin/settings` | typed AI/RAG settings + model capabilities |
 | PUT | `/api/admin/settings` | сохранить настройки |
 
@@ -3921,10 +3981,11 @@ Frontend не хардкодит model context limit.
 | --- | --- | --- |
 | GET | `/api/admin/dialogs?feedback=helpful|ai_error|unrated&page=` | grouped closed dialogs |
 | GET | `/api/admin/dialogs/{dialogId}` | полный audit/detail |
-| POST | `/api/admin/dialogs/{dialogId}/candidate` | вручную создать KnowledgeCandidate из любого closed Dialog |
+| POST | `/api/admin/dialogs/{dialogId}/candidate` | idempotent backfill KnowledgeCandidate для closed Dialog |
 | GET | `/api/admin/candidates/{id}` | candidate + case card |
 | PATCH | `/api/admin/candidates/{id}` | редактировать case card |
-| POST | `/api/admin/candidates/{id}/approve` | approve + permanent ingestion |
+| POST | `/api/admin/candidates/{id}/generate-card` | заполнить case card через GigaChat |
+| POST | `/api/admin/candidates/{id}/approve` | сохранить переданную card + approve + permanent ingestion |
 | POST | `/api/admin/candidates/{id}/reject` | reject |
 | DELETE | `/api/admin/dialogs/{dialogId}` | hard delete разобранного `ai_error` Dialog |
 
@@ -4139,7 +4200,9 @@ UI:
 [ Нет, AI ошибся ]
 ```
 
-Feedback отправляется один раз.
+Feedback отправляется один раз. Pending `KnowledgeCandidate` уже создан в транзакции
+закрытия; feedback не создаёт и не удаляет candidate. Если AI Dialog неактивен
+24 часа, этот же close-flow запускается sweeper-ом без участия пользователя.
 
 Если тикет закрыл operator, user получает `dialog_closed` и видит тот же feedback block.
 
@@ -4407,16 +4470,18 @@ screenshot extracted_text / visual_summary
 RAG sources
 confidence history
 GigaChat model snapshot
-SystemPrompt version
+full SystemPrompt snapshot
+escalation threshold snapshot, if escalated
 feedback
 KnowledgeCandidate status
 ```
 
 Не показываем raw vector embeddings.
 
-### 23.3 Actions для любого closed Dialog
+### 23.3 Candidate для любого closed Dialog
 
-Admin может создать candidate из любого закрытого Dialog.
+Каждый закрытый Dialog уже имеет candidate, созданный во время close. Admin endpoint
+остаётся idempotent backfill-механизмом для данных, созданных до этого правила.
 
 Backend использует тот же:
 
@@ -4429,19 +4494,13 @@ candidate = create_or_get_candidate(
 
 `UNIQUE(dialog_id)` является основной гарантией отсутствия дублей; UI-проверка только отражает состояние схемы.
 
-Если candidate отсутствует:
-
 ```text
-[ Создать кандидата в БЗ ]
+Knowledge candidate
+Карточка решения
 ```
 
-Если candidate уже существует:
-
-```text
-[ Открыть кандидата ]
-```
-
-Кнопка создания disabled/заменяется ссылкой на существующий candidate.
+Для legacy-данных backend endpoint выполняет idempotent backfill; обычная форма
+создаётся сразу для любого закрытого Dialog.
 
 Это одинаково работает для:
 
@@ -4458,16 +4517,15 @@ unrated
 Если candidate существует, в detail показываем editable case card:
 
 ```text
-Problem
-Symptoms
-Context
-Solution
-Result
+Название кейса
+Проблема
+Результат
 ```
 
 Actions:
 
 ```text
+[ Заполнить через GigaChat ]
 [ Approve ]
 [ Reject ]
 ```
@@ -4519,12 +4577,9 @@ Closed Dialog без `DialogFeedback`:
 Ожидает оценки
 ```
 
-Admin может:
-
-- просмотреть;
-- вручную создать candidate.
-
-Feedback за пользователя admin не выставляет.
+Admin может просмотреть candidate и дождаться оценки пользователя; feedback за
+пользователя admin не выставляет. Legacy candidate создаётся только idempotent
+backfill endpoint-ом.
 
 ---
 
@@ -4573,13 +4628,10 @@ Section switch = master switch.
 Table:
 
 ```text
-Title
-Section
-Source type
-Index status
+Document
 Enabled
-Indexed at
-Actions
+Updated
+Index status
 ```
 
 `index_status`:
@@ -4591,36 +4643,26 @@ indexed
 failed
 ```
 
-Actions:
-
-```text
-View
-Enable/Disable
-Reindex
-Delete
-```
+Actions: enable/disable; failed documents additionally show `Reindex` directly in
+the status cell. Separate document detail/edit/delete UI is not part of this panel.
 
 Upload:
 
 ```text
-file
-section
-→ POST
+выбранный section
+→ browser file picker
+→ POST /api/admin/knowledge/sections/{section_id}/documents
 → status=processing
 ```
 
-Для processing documents React Query может использовать `refetchInterval` только пока есть активная индексация. Отдельный SSE для ingestion в MVP не нужен.
+Поля source/title/version/tags не вводятся пользователем: backend выводит source из
+системного раздела, title из имени файла, а tags и one_c_version оставляет пустыми.
+Для processing documents React Query использует `refetchInterval` только пока есть
+активная индексация. Отдельный SSE для ingestion в MVP не нужен.
 
-Document detail показывает:
-
-```text
-metadata
-index status
-index error
-version
-```
-
-Raw chunks редактировать через UI не нужно.
+Отдельная страница document detail не нужна: список показывает только документ,
+enabled, compact updated date и index status; failed status содержит action для
+повторной индексации. Raw chunks и служебные metadata через UI не редактируются.
 
 ---
 
@@ -4652,7 +4694,6 @@ UI:
 
 ```text
 multiline editor
-version
 updated_at
 updated_by
 [ Save ]
@@ -4667,10 +4708,11 @@ Monaco/IDE editor не нужен.
 - mutation pending;
 - success/error toast.
 
-Новая версия применяется только к следующим GigaChat calls. `knowledge_card`
-используется при создании кандидата из закрытого промодерированного тикета и
-возвращает структурированные поля `title`, `problem`, `symptoms`, `context`,
-`solution`, `result`.
+Изменение prompt применяется к следующим GigaChat calls; уже запущенный stream не
+меняется. `knowledge_card` используется кнопкой «Заполнить через GigaChat» и для
+явного legacy/admin backfill, если у старого закрытого тикета ещё нет candidate.
+Structured output содержит только `title`, `problem`, `result`. Новые candidates
+получают initial карточку без дополнительного LLM-вызова.
 
 ---
 
@@ -4753,6 +4795,9 @@ KPI cards:
 Backend возвращает агрегаты.
 
 Frontend не загружает все Dialog ради подсчёта KPI.
+
+Дополнительно показывается число ошибок обработки (`failed_requests`), не смешанное
+с эскалациями.
 
 ---
 
@@ -4872,7 +4917,7 @@ PostgreSQL models, schema creation on startup, settings, system prompts, баз�
 Docling, chunking, BGE-M3, Qdrant, hybrid retrieval, `rag_top_k`, enable/disable документов и разделов, golden retrieval test.
 
 ### Backend B3 — GigaChatProvider
-LangChain-first integration, auth/certificates, active model, `ainvoke`, structured output, retry/error mapping, `Semaphore(1)`, X-Session-ID.
+LangChain-first integration, auth/certificates, active model, `ainvoke`, structured output, retry/error mapping, единый re-entrant `GenerationGate`, X-Session-ID.
 
 ### Backend B4 — пользовательский Q&A
 DialogService, ContextBuilder, sliding windows, RAG evidence, confidence и threshold.
@@ -4885,7 +4930,7 @@ Upload, Files API lifecycle, screenshot/document, cleanup.
 шаблона и ручная генерация шаблона по актуальной истории.
 
 ### Backend B7 — feedback и модерация
-`helpful | ai_error`, KnowledgeCandidate, Approve/Reject, очередь ошибок AI, hard delete.
+`helpful | ai_error`, automatic candidate on every close, KnowledgeCandidate, Approve/Reject, очередь ошибок AI, hard delete.
 
 ### Frontend F1 — app shell + auth
 React Router layouts, `/api/me`, role guards, API client, QueryClient, shared UI.
@@ -4897,10 +4942,12 @@ Dialogs, messages, SSE answer stream, attachment, sources, escalation state, clo
 Realtime queue, claim, dialog, operator-only SSE, manual AI GigaChat template, send/close.
 
 ### Frontend F4 — admin journal
-Helpful / ai_error / unrated groups, Dialog detail, candidate create/edit/approve/reject, hard delete error chat.
+Helpful / ai_error / unrated groups, 10-item pagination, Dialog detail, automatic
+candidate card edit/fill/approve/reject, hard delete error chat.
 
 ### Frontend F5 — admin KB
-Sections master switches, documents, upload, indexing states, reindex/delete.
+Sections master switches, file-picker upload into the selected section, newest-first
+documents, indexing states and inline failed-document reindex.
 
 ### Frontend F6 — admin config
 System Prompts, AI Settings, Monitoring.
@@ -4933,8 +4980,9 @@ System Prompts, AI Settings, Monitoring.
 │       └── rag_golden.json
 ├── docker-compose.yml            # production
 ├── docker-compose.dev.yml        # hot reload development
+├── .env.example                  # common root runtime configuration template
 ├── ARCHITECTURE.md
-└── ARCHITECTURE.md
+└── Problems                      # current product backlog
 ```
 
 ## 33. Источники

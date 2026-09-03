@@ -24,7 +24,7 @@ from app.providers.interfaces import (
     VectorStoreError,
 )
 from app.services.attachments import RUNTIME_IMAGE_MIME_TYPES, AttachmentService
-from app.services.context import ContextBuilder, estimate_tokens
+from app.services.context import ContextBuilder
 from app.services.rag import RAGService
 from app.services.settings import RuntimeSettings
 
@@ -112,15 +112,17 @@ class GenerationContextService:
     ) -> PreparedGenerationContext:
         messages, attachments = await self._dialog_snapshot(dialog_id)
         history = self._history(messages, attachments)
-        transcript = self._dialog_transcript(history, settings)
-        if not transcript:
-            transcript = "В тикете нет текстовых сообщений."
+        all_attachments = [
+            attachment
+            for message in messages
+            for attachment in attachments.get(message.id, [])
+        ]
         return await self._build_request(
             dialog_id=dialog_id,
             system_prompt=system_prompt,
-            current_text=f"{instruction}\n\nКОНТЕКСТ ТИКЕТА\n{transcript}",
-            history=[],
-            attachments=[],
+            current_text=instruction,
+            history=history,
+            attachments=all_attachments,
             settings=settings,
         )
 
@@ -254,7 +256,7 @@ class GenerationContextService:
         mime_types: list[str] = []
         for attachment in attachments:
             file_id = attachment.gigachat_file_id
-            if file_id is None:
+            if file_id is None or attachment.remote_deleted_at is not None:
                 content = await self._attachment_service.storage.get(
                     attachment.storage_key
                 )
@@ -271,13 +273,18 @@ class GenerationContextService:
                     if persisted is None:
                         await self._llm_provider.delete_file(file_id, model, dialog_id)
                         raise NotFoundError("Вложение не найдено")
-                    if persisted.gigachat_file_id is not None:
+                    if (
+                        persisted.gigachat_file_id is not None
+                        and persisted.remote_deleted_at is None
+                    ):
                         await self._llm_provider.delete_file(file_id, model, dialog_id)
                         file_id = persisted.gigachat_file_id
                     else:
                         persisted.gigachat_file_id = file_id
+                        persisted.remote_deleted_at = None
                         await session.commit()
                 attachment.gigachat_file_id = file_id
+                attachment.remote_deleted_at = None
             file_ids.append(file_id)
             mime_types.append(attachment.mime_type)
         return file_ids, mime_types
@@ -348,23 +355,3 @@ class GenerationContextService:
                 text = f"[Системное событие] {text}"
             history.append(ChatTurn(role=role, text=text))
         return history
-
-    @staticmethod
-    def _dialog_transcript(history: list[ChatTurn], settings: RuntimeSettings) -> str:
-        labels = {
-            MessageAuthor.USER.value: "Клиент",
-            MessageAuthor.ASSISTANT.value: "GigaChat",
-            MessageAuthor.OPERATOR.value: "Оператор",
-        }
-        remaining = max(512, settings.gigachat_input_budget // 2)
-        selected: list[str] = []
-        for turn in reversed(history):
-            entry = f"{labels.get(turn.role, turn.role)}:\n{turn.text}"
-            cost = estimate_tokens(entry)
-            if cost > remaining:
-                if not selected:
-                    selected.append(entry[: remaining * 3].rstrip())
-                break
-            selected.append(entry)
-            remaining -= cost
-        return "\n\n".join(reversed(selected))
