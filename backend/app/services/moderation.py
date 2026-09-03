@@ -358,7 +358,18 @@ class ModerationService:
                     candidate.resulting_document_id = document.id
                     candidate.reviewed_by = admin.id
                     candidate.reviewed_at = datetime.now(UTC)
-                    await session.commit()
+                    try:
+                        await session.commit()
+                    except Exception:
+                        await session.rollback()
+                        try:
+                            await self._knowledge_base.delete_document(document.id)
+                        except Exception:
+                            logger.exception(
+                                "Failed to compensate published candidate document %s",
+                                document.id,
+                            )
+                        raise
                     return await self._candidate_with_reviewer(session, candidate)
 
     async def generate_card(
