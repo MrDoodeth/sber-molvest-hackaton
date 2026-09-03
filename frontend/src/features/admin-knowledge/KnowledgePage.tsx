@@ -63,7 +63,6 @@ export default function KnowledgePage() {
       setRenameSection(undefined);
       setSectionAction(undefined);
       setName("");
-      toast("Раздел обновлён", "success");
     },
     onError: (error) => toast(error.message, "error"),
   });
