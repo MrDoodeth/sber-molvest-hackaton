@@ -384,9 +384,10 @@ class KnowledgeBaseService:
                 )
                 if document is None:
                     raise NotFoundError("Документ базы знаний не найден")
-                document.index_status = IndexStatus.PROCESSING
-                document.index_error = None
-                await session.commit()
+                if document_id not in self._scheduled_document_ids:
+                    document.index_status = IndexStatus.PROCESSING
+                    document.index_error = None
+                    await session.commit()
         result = await self.get_document(document_id)
         self._schedule_ingestion(document_id)
         return result
