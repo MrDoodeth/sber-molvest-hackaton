@@ -377,13 +377,16 @@ class KnowledgeBaseService:
                 return document_dto(document, section)
 
     async def request_reindex(self, document_id: uuid.UUID) -> KnowledgeDocumentDto:
-        async with self._session_factory() as session:
-            document = await session.get(KnowledgeDocument, document_id)
-            if document is None:
-                raise NotFoundError("Документ базы знаний не найден")
-            document.index_status = IndexStatus.PROCESSING
-            document.index_error = None
-            await session.commit()
+        async with self._lock_for(document_id):
+            async with self._session_factory() as session:
+                document = await session.get(
+                    KnowledgeDocument, document_id, with_for_update=True
+                )
+                if document is None:
+                    raise NotFoundError("Документ базы знаний не найден")
+                document.index_status = IndexStatus.PROCESSING
+                document.index_error = None
+                await session.commit()
         result = await self.get_document(document_id)
         self._schedule_ingestion(document_id)
         return result
