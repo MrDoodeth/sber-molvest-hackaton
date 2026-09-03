@@ -56,13 +56,32 @@ class RAGService:
             return RetrievalResult([], await self._empty_status(session))
 
         candidate_limit = max(top_k * 4, 20)
-        hit_lists = await asyncio.gather(
-            *(self._vector_store.search(query, candidate_limit) for query in queries)
-        )
-        hits = self._fuse_hits(hit_lists, weights)
-        if not hits:
-            return RetrievalResult([], await self._empty_status(session))
+        evidence: list[Evidence] = []
+        for _ in range(3):
+            hit_lists = await asyncio.gather(
+                *(
+                    self._vector_store.search(query, candidate_limit)
+                    for query in queries
+                )
+            )
+            hits = self._fuse_hits(hit_lists, weights)
+            evidence = await self._load_evidence(session, hits, top_k)
+            if len(evidence) >= top_k or not any(
+                len(hit_list) >= candidate_limit for hit_list in hit_lists
+            ):
+                break
+            candidate_limit *= 2
 
+        if not evidence:
+            return RetrievalResult([], await self._empty_status(session))
+        return RetrievalResult(evidence, "ready")
+
+    @staticmethod
+    async def _load_evidence(
+        session: AsyncSession, hits: list[VectorHit], top_k: int
+    ) -> list[Evidence]:
+        if not hits:
+            return []
         vector_ids = [hit.vector_id for hit in hits]
         rows = (
             await session.execute(
@@ -87,22 +106,19 @@ class RAGService:
             if row is None:
                 continue
             chunk, document = row
-            label = f"S{len(evidence) + 1}"
             evidence.append(
                 Evidence(
                     source=SourceRef(
                         document_id=document.id,
                         title=document.title,
-                        label=label,
+                        label=f"S{len(evidence) + 1}",
                     ),
                     text=chunk.text,
                 )
             )
             if len(evidence) == top_k:
                 break
-        if not evidence:
-            return RetrievalResult([], await self._empty_status(session))
-        return RetrievalResult(evidence, "ready")
+        return evidence
 
     @staticmethod
     def _fuse_hits(

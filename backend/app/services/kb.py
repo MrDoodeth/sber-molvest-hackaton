@@ -542,6 +542,13 @@ class KnowledgeBaseService:
                 raise ServiceUnavailableError(
                     "Не удалось удалить документ из поискового индекса"
                 ) from exc
+            try:
+                await self._storage.delete(storage_key)
+            except Exception as exc:
+                raise ServiceUnavailableError(
+                    "Не удалось очистить документ из storage; запись сохранена "
+                    "для повторной попытки"
+                ) from exc
             async with self._session_factory() as session:
                 document = await session.get(
                     KnowledgeDocument, document_id, with_for_update=True
@@ -549,12 +556,6 @@ class KnowledgeBaseService:
                 if document is not None:
                     await session.delete(document)
                     await session.commit()
-            try:
-                await self._storage.delete(storage_key)
-            except Exception as exc:
-                raise ServiceUnavailableError(
-                    "Документ удалён из БД, но очистка storage не завершена"
-                ) from exc
 
     @staticmethod
     def _write_temporary(data: bytes, suffix: str) -> Path:
