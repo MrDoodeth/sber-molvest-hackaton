@@ -141,7 +141,29 @@ export default function UserDialogPage() {
     initialTurn.current = null;
     setAwaitingTerminal(false);
     events.cancelTurn();
-  }, [detail.data?.mode, detail.data?.processingError, events, initialTurnCompleted]);
+    processing.end(dialogId);
+  }, [detail.data?.mode, detail.data?.processingError, dialogId, events, initialTurnCompleted, processing]);
+
+  useEffect(() => {
+    if (
+      !processing.isBusy
+      || send.isPending
+      || !detail.data
+      || detail.data.isProcessing
+      || (
+        detail.data.mode !== "operator_support"
+        && !detail.data.processingError
+        && !hasPersistedTerminalMessage
+      )
+    ) return;
+    processing.end(dialogId);
+  }, [
+    detail.data,
+    dialogId,
+    hasPersistedTerminalMessage,
+    processing,
+    send.isPending,
+  ]);
 
   const submitAttempt = (attempt: SendAttempt) => {
     if (!detail.data || send.isPending || processing.isBlocked(dialogId)) return;
