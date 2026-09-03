@@ -215,6 +215,7 @@ export type UserDialogEvent =
 
 export type OperatorQueueEvent =
   | { type: "ticket_available"; dialog: DialogSummary }
+  | { type: "ticket_updated"; dialog: DialogSummary }
   | { type: "ticket_claimed"; dialogId: string; operator: UserRef }
   | { type: "ticket_closed"; dialogId: string };
 
