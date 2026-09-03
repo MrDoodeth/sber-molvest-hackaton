@@ -482,6 +482,11 @@ class KnowledgeBaseService:
                     if document is None:
                         await self._vector_store.delete_points(new_vector_ids)
                         return
+                    section = await session.get(
+                        KnowledgeSection, document.section_id, with_for_update=True
+                    )
+                    if section is None:
+                        raise NotFoundError("Раздел базы знаний не найден")
                     await session.execute(
                         delete(Chunk).where(Chunk.doc_id == document_id)
                     )
@@ -504,6 +509,13 @@ class KnowledgeBaseService:
                     document.index_status = IndexStatus.INDEXED
                     document.index_error = None
                     document.indexed_at = indexed_at
+                    await self._vector_store.set_document_payload(
+                        document.id,
+                        {
+                            "is_enabled": section.is_enabled and document.is_enabled,
+                            "answer_eligible": True,
+                        },
+                    )
                     await session.commit()
                 stale_ids = list(set(old_vector_ids) - set(new_vector_ids))
                 try:
