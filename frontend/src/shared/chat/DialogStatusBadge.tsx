@@ -18,5 +18,5 @@ export function DialogStatusBadge({
       : dialog.mode === "operator_support"
         ? "info"
         : "success";
-  return <Badge tone={tone}>{label}</Badge>;
+  return <Badge tone={tone} className="justify-center text-center">{label}</Badge>;
 }
