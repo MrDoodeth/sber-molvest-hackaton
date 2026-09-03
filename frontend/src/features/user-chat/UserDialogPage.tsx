@@ -2,6 +2,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import { ArrowLeft, CheckCircle2, Image as ImageIcon, LockKeyhole, RotateCcw, XCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { ApiError } from "../../api/client";
 import { dialogsApi } from "../../api/dialogs";
 import { queryKeys } from "../../api/queryKeys";
 import type { FeedbackVerdict } from "../../api/types";
@@ -82,7 +83,22 @@ export default function UserDialogPage() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.user.dialogs() });
       setCloseOpen(false);
     },
-    onError: (error) => toast(error.message, "error"),
+    onError: async (error) => {
+      if (error instanceof ApiError && error.status === 409) {
+        try {
+          const current = await dialogsApi.detail(dialogId);
+          queryClient.setQueryData(queryKeys.dialog.detail(dialogId), current);
+          void queryClient.invalidateQueries({ queryKey: queryKeys.user.dialogs() });
+          if (current.status === "closed") {
+            setCloseOpen(false);
+            return;
+          }
+        } catch {
+          // Keep the original conflict message when the state refresh fails.
+        }
+      }
+      toast(getErrorMessage(error), "error");
+    },
   });
   const feedback = useMutation({
     mutationFn: (verdict: FeedbackVerdict) => dialogsApi.feedback(dialogId, verdict),

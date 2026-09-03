@@ -156,7 +156,22 @@ export default function OperatorWorkspace() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.operator.queues() });
       setCloseOpen(false);
     },
-    onError: (error) => toast(error.message, "error"),
+    onError: async (error) => {
+      if (error instanceof ApiError && error.status === 409 && dialogId) {
+        try {
+          const current = await operatorApi.detail(dialogId);
+          queryClient.setQueryData(queryKeys.dialog.detail(dialogId), current);
+          void queryClient.invalidateQueries({ queryKey: queryKeys.operator.queues() });
+          if (current.status === "closed") {
+            setCloseOpen(false);
+            return;
+          }
+        } catch {
+          // Keep the original conflict message when the state refresh fails.
+        }
+      }
+      toast(getErrorMessage(error), "error");
+    },
   });
   const submitAttempt = (attempt: SendAttempt) => {
     if (!isAssignedToMe || send.isPending) return;

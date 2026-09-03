@@ -662,7 +662,7 @@ class DialogService:
                 if dialog is None:
                     raise NotFoundError("Диалог не найден")
                 if dialog.status == DialogStatus.CLOSED:
-                    return await self.get_dialog(requester, dialog_id)
+                    raise ConflictError("Диалог уже закрыт")
                 if requester.role == UserRole.USER:
                     if dialog.user_id != requester.id:
                         raise ForbiddenError()
