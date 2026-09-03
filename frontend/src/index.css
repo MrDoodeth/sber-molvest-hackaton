@@ -101,21 +101,6 @@ select {
   animation: message-enter 180ms ease-out;
 }
 
-@keyframes dialog-reorder {
-  from {
-    opacity: 0.72;
-    transform: translateY(-0.35rem) scale(0.99);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-.dialog-reorder-item {
-  animation: dialog-reorder 240ms ease-out;
-}
-
 .markdown-body ul,
 .markdown-body ol {
   margin: 0.75rem 0;
@@ -148,8 +133,7 @@ select {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .message-enter,
-  .dialog-reorder-item {
+  .message-enter {
     animation: none;
   }
 }

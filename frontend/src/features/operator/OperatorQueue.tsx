@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { Clock3, Inbox, UserRound } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { operatorApi } from "../../api/operator";
 import { queryKeys } from "../../api/queryKeys";
 import { useOperatorQueueEvents } from "../../shared/hooks/useOperatorQueueEvents";
+import { useListReorderAnimation } from "../../shared/hooks/useListReorderAnimation";
 import { Badge, EmptyState, ErrorState, Skeleton, Tabs } from "../../shared/ui";
 import { cn, formatPercent, formatRelativeDate, truncateTitle } from "../../shared/utils";
 
@@ -24,16 +25,7 @@ export default function OperatorQueue({
     refetchInterval: 2500,
     refetchOnMount: "always",
   });
-  const order = queue.data?.map((dialog) => dialog.id).join(",") ?? "";
-  const previousOrder = useRef(order);
-  const [orderRevision, setOrderRevision] = useState(0);
-
-  useEffect(() => {
-    if (previousOrder.current && previousOrder.current !== order) {
-      setOrderRevision((current) => current + 1);
-    }
-    previousOrder.current = order;
-  }, [order]);
+  const listRef = useListReorderAnimation<HTMLDivElement>(queue.data?.map((dialog) => dialog.id) ?? []);
   return (
     <aside className={cn("min-h-0 flex-col border-r border-stone-200 bg-white", className)}>
       <div className="border-b border-stone-100 p-4">
@@ -51,7 +43,7 @@ export default function OperatorQueue({
           items={[{ value: "unassigned", label: "Не назначены" }, { value: "mine", label: "Мои" }]}
         />
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-2">
+      <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto p-2">
         {queue.isPending && <div className="grid gap-2 p-2"><Skeleton className="h-32" /><Skeleton className="h-32" /><Skeleton className="h-32" /></div>}
         {queue.isError && <ErrorState description={queue.error.message} onRetry={() => void queue.refetch()} />}
         {queue.isSuccess && queue.data.length === 0 && (
@@ -59,11 +51,12 @@ export default function OperatorQueue({
         )}
         {queue.data?.map((dialog) => (
           <button
-            key={`${dialog.id}-${orderRevision}`}
+            key={dialog.id}
+            data-reorder-id={dialog.id}
             type="button"
             onClick={() => onSelect(dialog.id)}
             className={cn(
-              "dialog-reorder-item mb-1 w-full rounded-2xl border p-3.5 text-left transition",
+              "mb-1 w-full rounded-2xl border p-3.5 text-left transition",
               selectedId === dialog.id ? "border-sky-200 bg-sky-50 shadow-sm" : "border-transparent hover:border-stone-200 hover:bg-stone-50",
             )}
             >

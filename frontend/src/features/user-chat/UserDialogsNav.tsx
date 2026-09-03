@@ -1,10 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { MessageCircleMore, Plus } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { dialogsApi } from "../../api/dialogs";
 import { queryKeys } from "../../api/queryKeys";
 import { DialogStatusBadge } from "../../shared/chat/DialogStatusBadge";
+import { useListReorderAnimation } from "../../shared/hooks/useListReorderAnimation";
 import { Button, EmptyState, ErrorState, Skeleton } from "../../shared/ui";
 import { cn, formatRelativeDate, truncateTitle } from "../../shared/utils";
 
@@ -20,20 +21,11 @@ export default function UserDialogsNav({ mobile = false }: { mobile?: boolean })
     refetchInterval: 2500,
     refetchOnMount: "always",
   });
-  const order = dialogs.data?.map((dialog) => dialog.id).join(",") ?? "";
-  const previousOrder = useRef(order);
-  const [orderRevision, setOrderRevision] = useState(0);
+  const listRef = useListReorderAnimation<HTMLElement>(dialogs.data?.map((dialog) => dialog.id) ?? []);
 
   useEffect(() => {
     preloadNewDialog();
   }, []);
-
-  useEffect(() => {
-    if (previousOrder.current && previousOrder.current !== order) {
-      setOrderRevision((current) => current + 1);
-    }
-    previousOrder.current = order;
-  }, [order]);
 
   return (
     <aside className={cn("flex min-h-0 flex-col border-stone-200 bg-white", mobile ? "h-full" : "hidden border-r md:flex md:w-80 md:shrink-0")}>
@@ -52,7 +44,7 @@ export default function UserDialogsNav({ mobile = false }: { mobile?: boolean })
         <h2 className="text-xs font-extrabold uppercase tracking-[0.16em] text-stone-500">Мои обращения</h2>
         {dialogs.data && <span className="text-xs font-bold text-stone-400">{dialogs.data.length}</span>}
       </div>
-      <nav aria-label="Мои обращения" className="min-h-0 flex-1 overflow-y-auto p-2">
+      <nav ref={listRef} aria-label="Мои обращения" className="min-h-0 flex-1 overflow-y-auto p-2">
         {dialogs.isPending && <div className="grid gap-2 p-2"><Skeleton className="h-24" /><Skeleton className="h-24" /><Skeleton className="h-24" /></div>}
         {dialogs.isError && <ErrorState description={dialogs.error.message} onRetry={() => void dialogs.refetch()} />}
         {dialogs.isSuccess && dialogs.data.length === 0 && (
@@ -60,10 +52,11 @@ export default function UserDialogsNav({ mobile = false }: { mobile?: boolean })
         )}
         {dialogs.data?.map((dialog) => (
           <NavLink
-            key={`${dialog.id}-${orderRevision}`}
+            key={dialog.id}
+            data-reorder-id={dialog.id}
             to={`/user/dialogs/${dialog.id}`}
             className={({ isActive }) => cn(
-              "dialog-reorder-item mb-1 block rounded-2xl border p-3.5 transition",
+              "mb-1 block rounded-2xl border p-3.5 transition",
               isActive ? "border-molvest-200 bg-molvest-50 shadow-sm" : "border-transparent hover:border-stone-200 hover:bg-stone-50",
             )}
           >
