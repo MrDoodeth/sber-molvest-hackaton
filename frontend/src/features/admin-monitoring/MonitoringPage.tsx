@@ -31,7 +31,7 @@ export default function MonitoringPage() {
         {monitoring.isError && <ErrorState description={monitoring.error.message} onRetry={() => void monitoring.refetch()} />}
         {monitoring.data && (
           <>
-             <div className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
+              <div className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
               {cards.map(({ label, value, detail, icon: Icon, tone }) => <Card key={label} className="p-5"><span className={`flex size-10 items-center justify-center rounded-2xl ${tone}`}><Icon className="size-5" /></span><p className="mt-5 text-xs font-bold text-stone-500">{label}</p><strong className="mt-1 block text-2xl font-black tracking-[-0.025em] text-molvest-950">{value}</strong><span className="mt-1 block text-xs font-semibold text-stone-400">{detail}</span></Card>)}
             </div>
             {monitoring.data.totalRequests === 0 ? <Card className="mt-5"><EmptyState icon={<TrendingUp className="size-8" />} title="За период данных нет" description="KPI появятся после обработки первых пользовательских запросов." /></Card> : <Card className="mt-5 overflow-hidden"><div className="border-b border-stone-100 px-5 py-4"><h2 className="font-bold text-molvest-950">Контур эффективности</h2><p className="mt-1 text-xs text-stone-500">Доли основаны на агрегатах выбранного периода.</p></div><div className="grid gap-6 p-5 sm:grid-cols-3"><Rate label="Автоматизация" value={monitoring.data.aiResolvedRate} color="bg-indigo-500" /><Rate label="Передано специалистам" value={monitoring.data.escalationRate} color="bg-sky-500" /><Rate label="Подтверждено полезным" value={monitoring.data.helpfulRate} color="bg-emerald-500" /></div></Card>}
