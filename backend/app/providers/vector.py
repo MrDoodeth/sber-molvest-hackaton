@@ -12,6 +12,8 @@ from app.providers.interfaces import (
     VectorStoreError,
 )
 
+DENSE_RELEVANCE_THRESHOLD = 0.35
+
 
 class QdrantHybridVectorStore:
     def __init__(self, url: str, api_key: str | None = None) -> None:
@@ -111,31 +113,51 @@ class QdrantHybridVectorStore:
             )
 
             prefetch_limit = max(limit * 4, 20)
+            knowledge_filter = Filter(
+                must=[
+                    FieldCondition(key="is_enabled", match=MatchValue(value=True)),
+                ]
+            )
+            dense_response = await self._get_client().query_points(
+                collection_name=QDRANT_COLLECTION,
+                query=query.dense,
+                using="dense",
+                query_filter=knowledge_filter,
+                limit=prefetch_limit,
+                score_threshold=DENSE_RELEVANCE_THRESHOLD,
+                with_payload=False,
+            )
+            dense_ids = {str(point.id) for point in dense_response.points}
+            if not dense_ids:
+                return []
             response = await self._get_client().query_points(
                 collection_name=QDRANT_COLLECTION,
                 prefetch=[
-                    Prefetch(query=query.dense, using="dense", limit=prefetch_limit),
+                    Prefetch(
+                        query=query.dense,
+                        using="dense",
+                        filter=knowledge_filter,
+                        limit=prefetch_limit,
+                    ),
                     Prefetch(
                         query=SparseVector(
                             indices=query.sparse_indices,
                             values=query.sparse_values,
                         ),
                         using="sparse",
+                        filter=knowledge_filter,
                         limit=prefetch_limit,
                     ),
                 ],
                 query=FusionQuery(fusion=Fusion.RRF),
-                query_filter=Filter(
-                    must=[
-                        FieldCondition(key="is_enabled", match=MatchValue(value=True)),
-                    ]
-                ),
+                query_filter=knowledge_filter,
                 limit=limit,
                 with_payload=False,
             )
             return [
                 VectorHit(vector_id=uuid.UUID(str(point.id)), score=float(point.score))
                 for point in response.points
+                if str(point.id) in dense_ids
             ]
         except Exception as exc:
             raise VectorStoreError("Qdrant hybrid retrieval failed") from exc
