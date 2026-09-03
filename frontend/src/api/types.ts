@@ -163,7 +163,7 @@ export interface AdminSettingsResponse {
   availableModels: ModelOptionDto[];
 }
 
-export type AdminSettingsInput = Omit<AdminSettingsResponse, "capabilities" | "availableModels">;
+export type AdminSettingsInput = Pick<AdminSettingsResponse, "operatorEscalationThreshold">;
 
 export interface AdminDialogListItem extends DialogSummary {
   resolvedBy: "ai" | "operator";

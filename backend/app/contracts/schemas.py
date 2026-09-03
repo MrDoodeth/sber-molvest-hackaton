@@ -220,11 +220,6 @@ class AdminSettingsResponse(ApiModel):
 
 
 class AdminSettingsUpdate(ApiModel):
-    active_model: str
-    gigachat_context_ratio: float = Field(ge=0, le=1)
-    gigachat_max_output_tokens: int = Field(gt=0)
-    embedding_context_ratio: float = Field(ge=0, le=1)
-    rag_top_k: int = Field(ge=1)
     operator_escalation_threshold: float = Field(ge=0, le=1)
 
 

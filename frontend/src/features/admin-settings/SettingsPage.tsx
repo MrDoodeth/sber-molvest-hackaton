@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { queryKeys } from "../../api/queryKeys";
 import { settingsApi } from "../../api/settings";
 import type { AdminSettingsInput } from "../../api/types";
-import { Badge, Button, Card, EmptyState, ErrorState, Field, Input, PageLoader, Select, useToast } from "../../shared/ui";
+import { Badge, Button, Card, EmptyState, ErrorState, Field, PageLoader, useToast } from "../../shared/ui";
 import { formatPercent } from "../../shared/utils";
 
 function RangeField({ label, value, onChange, preview }: { label: string; value: number; onChange: (value: number) => void; preview: string }) {
@@ -18,14 +18,9 @@ function RangeField({ label, value, onChange, preview }: { label: string; value:
   );
 }
 
-function validate(settings: AdminSettingsInput, gigachatContextLimit: number): string[] {
+function validate(settings: AdminSettingsInput): string[] {
   const errors: string[] = [];
-  if (settings.gigachatContextRatio < 0 || settings.gigachatContextRatio > 1) errors.push("Размер контекста GigaChat должен быть от 0% до 100%.");
-  if (settings.embeddingContextRatio < 0 || settings.embeddingContextRatio > 1) errors.push("Контекст Embeddings должен быть от 0% до 100%.");
   if (settings.operatorEscalationThreshold < 0 || settings.operatorEscalationThreshold > 1) errors.push("Порог оператора должен быть от 0% до 100%.");
-  const totalBudget = Math.floor(gigachatContextLimit * settings.gigachatContextRatio);
-  if (!Number.isInteger(settings.gigachatMaxOutputTokens) || settings.gigachatMaxOutputTokens <= 0 || settings.gigachatMaxOutputTokens >= totalBudget) errors.push("Максимальный ответ должен быть целым положительным числом меньше общего budget GigaChat.");
-  if (!Number.isInteger(settings.ragTopK) || settings.ragTopK < 1) errors.push("rag_top_k должен быть целым числом не меньше 1.");
   return errors;
 }
 
@@ -37,28 +32,18 @@ export default function SettingsPage() {
   useEffect(() => {
     if (!settings.data) return;
     setForm({
-      activeModel: settings.data.activeModel,
-      gigachatContextRatio: settings.data.gigachatContextRatio,
-      gigachatMaxOutputTokens: settings.data.gigachatMaxOutputTokens,
-      embeddingContextRatio: settings.data.embeddingContextRatio,
-      ragTopK: settings.data.ragTopK,
       operatorEscalationThreshold: settings.data.operatorEscalationThreshold,
     });
   }, [settings.data]);
-  const selectedModel = settings.data?.availableModels?.find((model) => model.id === form?.activeModel);
+  const selectedModel = settings.data?.availableModels?.find((model) => model.id === settings.data.activeModel);
   const gigachatLimit = selectedModel?.contextLimit ?? settings.data?.capabilities.gigachatContextLimit ?? 0;
   const embeddingLimit = settings.data?.capabilities.embeddingContextLimit ?? 0;
-  const totalBudget = form ? Math.floor(gigachatLimit * form.gigachatContextRatio) : 0;
-  const inputBudget = form ? totalBudget - form.gigachatMaxOutputTokens : 0;
-  const embeddingBudget = form ? Math.floor(embeddingLimit * form.embeddingContextRatio) : 0;
-  const errors = form ? validate(form, gigachatLimit) : [];
+  const totalBudget = settings.data ? Math.floor(gigachatLimit * settings.data.gigachatContextRatio) : 0;
+  const inputBudget = settings.data ? totalBudget - settings.data.gigachatMaxOutputTokens : 0;
+  const embeddingBudget = settings.data ? Math.floor(embeddingLimit * settings.data.embeddingContextRatio) : 0;
+  const errors = form ? validate(form) : [];
   const dirty = Boolean(form && settings.data && (
-    form.activeModel !== settings.data.activeModel ||
-    form.gigachatContextRatio !== settings.data.gigachatContextRatio ||
-    form.gigachatMaxOutputTokens !== settings.data.gigachatMaxOutputTokens ||
-    form.embeddingContextRatio !== settings.data.embeddingContextRatio ||
-    form.ragTopK !== settings.data.ragTopK ||
-    form.operatorEscalationThreshold !== settings.data.operatorEscalationThreshold
+     form.operatorEscalationThreshold !== settings.data.operatorEscalationThreshold
   ));
   const save = useMutation({
     mutationFn: () => settingsApi.saveSettings(form!),
@@ -76,23 +61,23 @@ export default function SettingsPage() {
   return (
     <div className="p-4 sm:p-6 lg:p-8">
       <div className="mx-auto max-w-6xl">
-        <header className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-extrabold uppercase tracking-[0.18em] text-molvest-600">Runtime configuration</p><h1 className="mt-1 text-3xl font-black tracking-[-0.025em] text-molvest-950">AI Settings</h1><p className="mt-2 text-sm text-stone-500">Одна атомарная операция для модели, контекста, retrieval и эскалации.</p></div>{dirty && <Badge tone="warning">Настройки изменены</Badge>}</header>
+         <header className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-extrabold uppercase tracking-[0.18em] text-molvest-600">Runtime configuration</p><h1 className="mt-1 text-3xl font-black tracking-[-0.025em] text-molvest-950">AI Settings</h1><p className="mt-2 text-sm text-stone-500">Изменяется только порог подключения оператора. Остальные параметры зафиксированы backend-политикой.</p></div>{dirty && <Badge tone="warning">Настройки изменены</Badge>}</header>
         <div className="mt-6 grid gap-5 lg:grid-cols-2">
           <Card className="overflow-hidden">
             <div className="flex items-center gap-3 border-b border-stone-100 bg-stone-50 px-5 py-4"><span className="flex size-10 items-center justify-center rounded-2xl bg-indigo-100 text-indigo-700"><BrainCircuit className="size-5" /></span><div><h2 className="font-bold text-stone-950">GigaChat</h2><p className="text-xs text-stone-500">Generation, context и routing gate</p></div></div>
-            <div className="grid gap-5 p-5">
-              <Field label="Активная модель" hint="Context limits для каждой модели возвращает backend."><Select value={form.activeModel} onChange={(event) => setForm({ ...form, activeModel: event.target.value })}>{settings.data.availableModels?.map((model) => <option key={model.id} value={model.id}>{model.label} · {model.id}</option>)}</Select></Field>
-              <RangeField label="Размер скользящего окна GigaChat" value={form.gigachatContextRatio} onChange={(value) => setForm({ ...form, gigachatContextRatio: value })} preview={`${formatPercent(form.gigachatContextRatio)} от ${gigachatLimit.toLocaleString("ru-RU")} = ${totalBudget.toLocaleString("ru-RU")} tokens`} />
-              <Field label="Максимальный размер ответа" hint={`Под вход остаётся ${Math.max(inputBudget, 0).toLocaleString("ru-RU")} tokens.`}><Input type="number" min="1" step="1" value={form.gigachatMaxOutputTokens} onChange={(event) => setForm({ ...form, gigachatMaxOutputTokens: Number(event.target.value) })} /></Field>
-              <RangeField label="Порог подключения оператора" value={form.operatorEscalationThreshold} onChange={(value) => setForm({ ...form, operatorEscalationThreshold: value })} preview={`${formatPercent(form.operatorEscalationThreshold)}: ниже этого confidence тикет эскалируется`} />
-            </div>
+             <div className="grid gap-5 p-5">
+               <Field label="Активная модель" hint="Зафиксирована backend-политикой."><output className="flex min-h-11 items-center rounded-xl border border-stone-200 bg-stone-50 px-3.5 text-sm text-ink">{settings.data.activeModel}</output></Field>
+               <Field label="Размер скользящего окна GigaChat" hint={`${formatPercent(settings.data.gigachatContextRatio)} от ${gigachatLimit.toLocaleString("ru-RU")} = ${totalBudget.toLocaleString("ru-RU")} tokens. Параметр фиксирован.`}><output className="flex min-h-11 items-center rounded-xl border border-stone-200 bg-stone-50 px-3.5 text-sm text-ink">{formatPercent(settings.data.gigachatContextRatio)}</output></Field>
+               <Field label="Максимальный размер ответа" hint={`Под вход остаётся ${Math.max(inputBudget, 0).toLocaleString("ru-RU")} tokens. Параметр фиксирован.`}><output className="flex min-h-11 items-center rounded-xl border border-stone-200 bg-stone-50 px-3.5 text-sm text-ink">{settings.data.gigachatMaxOutputTokens.toLocaleString("ru-RU")} tokens</output></Field>
+               <RangeField label="Порог подключения оператора" value={form.operatorEscalationThreshold} onChange={(value) => setForm({ ...form, operatorEscalationThreshold: value })} preview={`${formatPercent(form.operatorEscalationThreshold)}: ниже этого confidence тикет эскалируется`} />
+             </div>
           </Card>
           <Card className="overflow-hidden">
             <div className="flex items-center gap-3 border-b border-stone-100 bg-stone-50 px-5 py-4"><span className="flex size-10 items-center justify-center rounded-2xl bg-molvest-100 text-molvest-700"><Database className="size-5" /></span><div><h2 className="font-bold text-stone-950">Retrieval</h2><p className="text-xs text-stone-500">BGE-M3 и hybrid evidence</p></div></div>
-            <div className="grid gap-5 p-5">
-              <RangeField label="Контекст Embeddings" value={form.embeddingContextRatio} onChange={(value) => setForm({ ...form, embeddingContextRatio: value })} preview={`${formatPercent(form.embeddingContextRatio)} от ${embeddingLimit.toLocaleString("ru-RU")} = ${embeddingBudget.toLocaleString("ru-RU")} tokens`} />
-              <Field label="rag_top_k" hint="Количество лучших chunks после RRF. Верхняя граница не задаётся frontend."><Input type="number" min="1" step="1" value={form.ragTopK} onChange={(event) => setForm({ ...form, ragTopK: Number(event.target.value) })} /></Field>
-              <div className="rounded-2xl border border-molvest-100 bg-molvest-50 p-4"><div className="flex items-center gap-2 text-sm font-bold text-molvest-900"><Sigma className="size-4" /> Расчёт budget</div><dl className="mt-4 grid gap-3 text-xs"><div className="flex justify-between gap-4"><dt className="text-stone-500">Общий GigaChat</dt><dd className="font-black text-molvest-900">{totalBudget.toLocaleString("ru-RU")}</dd></div><div className="flex justify-between gap-4"><dt className="text-stone-500">Вход GigaChat</dt><dd className="font-black text-molvest-900">{Math.max(inputBudget, 0).toLocaleString("ru-RU")}</dd></div><div className="flex justify-between gap-4"><dt className="text-stone-500">Вход BGE-M3</dt><dd className="font-black text-molvest-900">{embeddingBudget.toLocaleString("ru-RU")}</dd></div></dl></div>
+             <div className="grid gap-5 p-5">
+               <Field label="Контекст Embeddings" hint={`${formatPercent(settings.data.embeddingContextRatio)} от ${embeddingLimit.toLocaleString("ru-RU")} = ${embeddingBudget.toLocaleString("ru-RU")} tokens. Параметр фиксирован.`}><output className="flex min-h-11 items-center rounded-xl border border-stone-200 bg-stone-50 px-3.5 text-sm text-ink">{formatPercent(settings.data.embeddingContextRatio)}</output></Field>
+               <Field label="rag_top_k" hint="Количество лучших chunks после RRF. Параметр фиксирован backend-политикой."><output className="flex min-h-11 items-center rounded-xl border border-stone-200 bg-stone-50 px-3.5 text-sm text-ink">{settings.data.ragTopK}</output></Field>
+               <div className="rounded-2xl border border-molvest-100 bg-molvest-50 p-4"><div className="flex items-center gap-2 text-sm font-bold text-molvest-900"><Sigma className="size-4" /> Расчёт budget</div><dl className="mt-4 grid gap-3 text-xs"><div className="flex justify-between gap-4"><dt className="text-stone-500">Общий GigaChat</dt><dd className="font-black text-molvest-900">{totalBudget.toLocaleString("ru-RU")}</dd></div><div className="flex justify-between gap-4"><dt className="text-stone-500">Вход GigaChat</dt><dd className="font-black text-molvest-900">{Math.max(inputBudget, 0).toLocaleString("ru-RU")}</dd></div><div className="flex justify-between gap-4"><dt className="text-stone-500">Вход BGE-M3</dt><dd className="font-black text-molvest-900">{embeddingBudget.toLocaleString("ru-RU")}</dd></div></dl></div>
             </div>
           </Card>
         </div>
