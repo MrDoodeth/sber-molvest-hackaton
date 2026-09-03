@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Bot, CheckCircle2, Clock3, MessageSquareMore, TrendingUp, TriangleAlert, UserRoundCheck } from "lucide-react";
+import { Bot, CheckCircle2, Clock3, MessageSquareMore, TrendingUp, UserRoundCheck } from "lucide-react";
 import { useState } from "react";
 import { monitoringApi } from "../../api/monitoring";
 import { queryKeys } from "../../api/queryKeys";
@@ -19,7 +19,6 @@ export default function MonitoringPage() {
     { label: "Всего запросов", value: monitoring.data.totalRequests.toLocaleString("ru-RU"), detail: "пользовательских turn", icon: MessageSquareMore, tone: "bg-stone-100 text-stone-700" },
     { label: "Решено AI", value: monitoring.data.aiResolved.toLocaleString("ru-RU"), detail: formatPercent(monitoring.data.aiResolvedRate), icon: Bot, tone: "bg-indigo-100 text-indigo-700" },
     { label: "Эскалации", value: monitoring.data.escalations.toLocaleString("ru-RU"), detail: formatPercent(monitoring.data.escalationRate), icon: UserRoundCheck, tone: "bg-sky-100 text-sky-700" },
-    { label: "Ошибки обработки", value: monitoring.data.failedRequests.toLocaleString("ru-RU"), detail: "turn не завершён", icon: TriangleAlert, tone: "bg-red-100 text-red-700" },
     { label: "Среднее время ответа", value: formatDuration(monitoring.data.averageResponseTimeMs), detail: "backend aggregate", icon: Clock3, tone: "bg-amber-100 text-amber-800" },
     { label: "Полезные решения", value: monitoring.data.helpful.toLocaleString("ru-RU"), detail: formatPercent(monitoring.data.helpfulRate), icon: CheckCircle2, tone: "bg-emerald-100 text-emerald-700" },
   ] : [];
