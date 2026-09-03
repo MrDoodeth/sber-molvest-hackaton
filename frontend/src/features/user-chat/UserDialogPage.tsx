@@ -10,7 +10,7 @@ import { ChatComposer, DialogStatusBadge, MessageList, isRuntimeImage } from "..
 import { appendPersistedMessage } from "../../shared/hooks/messageCache";
 import { useUserDialogEvents } from "../../shared/hooks/useUserDialogEvents";
 import { Button, ConfirmDialog, EmptyState, ErrorState, PageLoader, useToast } from "../../shared/ui";
-import { createSendAttempt, getErrorMessage, mergePersistedMessages, truncateTitle, type SendAttempt } from "../../shared/utils";
+import { getErrorMessage, mergePersistedMessages, retryOrCreateSendAttempt, truncateTitle, type SendAttempt } from "../../shared/utils";
 import { FeedbackPanel } from "./FeedbackPanel";
 import UserDialogsNav from "./UserDialogsNav";
 
@@ -25,6 +25,7 @@ export default function UserDialogPage() {
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<File[]>([]);
   const [attachmentError, setAttachmentError] = useState<string>();
+  const [failedAttempt, setFailedAttempt] = useState<SendAttempt>();
   const [awaitingTerminal, setAwaitingTerminal] = useState(Boolean(initialTurn.current?.pendingTurn));
   const [closeOpen, setCloseOpen] = useState(false);
   const detail = useQuery({
@@ -58,9 +59,10 @@ export default function UserDialogPage() {
     mutationFn: (attempt: SendAttempt) => dialogsApi.sendMessage(dialogId, attempt),
     onSuccess: (message) => {
       appendPersistedMessage(queryClient, dialogId, message);
-      setText("");
-      setAttachments([]);
-      setAttachmentError(undefined);
+       setText("");
+       setAttachments([]);
+       setAttachmentError(undefined);
+       setFailedAttempt(undefined);
       if (detail.data?.mode === "operator_support") setAwaitingTerminal(false);
       void queryClient.invalidateQueries({ queryKey: queryKeys.user.dialogs() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.dialog.detail(dialogId) });
@@ -69,7 +71,8 @@ export default function UserDialogPage() {
     onError: (error, attempt) => {
       setAwaitingTerminal(false);
       setText(attempt.text);
-      setAttachments([]);
+      setAttachments(attempt.attachments);
+      setFailedAttempt(attempt);
       setAttachmentError(undefined);
       events.cancelTurn();
       toast(getErrorMessage(error), "error");
@@ -141,7 +144,15 @@ export default function UserDialogPage() {
     send.mutate(attempt);
   };
   const submit = () => {
-    submitAttempt(createSendAttempt(text.trim(), attachments));
+    submitAttempt(retryOrCreateSendAttempt(text.trim(), attachments, failedAttempt));
+  };
+  const updateText = (value: string) => {
+    setText(value);
+    if (failedAttempt?.text !== value.trim()) setFailedAttempt(undefined);
+  };
+  const updateAttachments = (files: File[]) => {
+    setAttachments(files);
+    setFailedAttempt(undefined);
   };
 
   if (!dialogId) return <ErrorState title="Диалог не найден" />;
@@ -194,13 +205,13 @@ export default function UserDialogPage() {
               <ChatComposer
                 ref={textareaRef}
                 value={text}
-                onChange={setText}
+                 onChange={updateText}
                 onSend={submit}
                 pending={send.isPending}
                 disabled={detail.data.mode === "ai_support" && pendingTurn}
                 attachments={attachments}
                 attachmentError={attachmentError}
-                onAttachmentChange={setAttachments}
+                 onAttachmentChange={updateAttachments}
                 onAttachmentError={setAttachmentError}
                 placeholder={detail.data.mode === "operator_support" ? "Сообщение специалисту…" : "Опишите вопрос по 1С…"}
                 footer={detail.data.mode === "ai_support" && pendingTurn ? <span className="flex items-center gap-1 font-semibold text-molvest-700"><LockKeyhole className="size-3" /> Дождитесь ответа</span> : undefined}

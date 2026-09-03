@@ -9,8 +9,8 @@ import { ChatComposer, MessageList, isRuntimeImage } from "../../shared/chat";
 import type { MessageInfiniteData } from "../../shared/hooks/messageCache";
 import { EmptyState, useToast } from "../../shared/ui";
 import {
-  createSendAttempt,
   getErrorMessage,
+  retryOrCreateSendAttempt,
   type SendAttempt,
 } from "../../shared/utils";
 import UserDialogsNav from "./UserDialogsNav";
@@ -25,6 +25,7 @@ export default function NewUserDialogPage() {
   const [attachments, setAttachments] = useState<File[]>([]);
   const [attachmentError, setAttachmentError] = useState<string>();
   const [optimisticMessage, setOptimisticMessage] = useState<MessageDto>();
+  const [failedAttempt, setFailedAttempt] = useState<SendAttempt>();
 
   const startDialog = useMutation({
     mutationFn: async (attempt: SendAttempt) => {
@@ -58,7 +59,8 @@ export default function NewUserDialogPage() {
     onError: (error, attempt) => {
       setOptimisticMessage(undefined);
       setText(attempt.text);
-      setAttachments([]);
+      setAttachments(attempt.attachments);
+      setFailedAttempt(attempt);
       setAttachmentError(undefined);
       toast(getErrorMessage(error), "error");
       requestAnimationFrame(() => textareaRef.current?.focus());
@@ -83,11 +85,20 @@ export default function NewUserDialogPage() {
     });
     setText("");
     setAttachments([]);
+    setFailedAttempt(undefined);
     setAttachmentError(undefined);
     startDialog.mutate(attempt);
   };
   const submit = () => {
-    submitAttempt(createSendAttempt(text.trim(), attachments));
+    submitAttempt(retryOrCreateSendAttempt(text.trim(), attachments, failedAttempt));
+  };
+  const updateText = (value: string) => {
+    setText(value);
+    if (failedAttempt?.text !== value.trim()) setFailedAttempt(undefined);
+  };
+  const updateAttachments = (files: File[]) => {
+    setAttachments(files);
+    setFailedAttempt(undefined);
   };
 
   return (
@@ -111,12 +122,12 @@ export default function NewUserDialogPage() {
         <ChatComposer
           ref={textareaRef}
           value={text}
-          onChange={setText}
+           onChange={updateText}
           onSend={submit}
           pending={startDialog.isPending}
           attachments={attachments}
           attachmentError={attachmentError}
-          onAttachmentChange={setAttachments}
+           onAttachmentChange={updateAttachments}
           onAttachmentError={setAttachmentError}
           placeholder="Опишите вопрос по 1С…"
         />
