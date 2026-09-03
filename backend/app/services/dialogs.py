@@ -5,10 +5,11 @@ import logging
 import time
 import uuid
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
 
-from sqlalchemy import and_, case, or_, select, update
+from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -78,6 +79,18 @@ from app.services.settings import PromptService, RuntimeSettings, SettingsServic
 from app.services.tasks import TaskSupervisor
 
 logger = logging.getLogger(__name__)
+_OPERATOR_REQUEST_MARKERS = (
+    "подключите оператора",
+    "позовите оператора",
+    "соедините с оператором",
+    "переключите на оператора",
+    "хочу поговорить с оператором",
+    "нужен оператор",
+    "нужен специалист",
+    "позовите специалиста",
+    "подключите специалиста",
+    "хочу поговорить с человеком",
+)
 
 
 class DialogService:
@@ -844,6 +857,7 @@ class DialogService:
         runtime_settings: RuntimeSettings | None = None
         prompt_content: str | None = None
         usage: ProviderUsage | None = None
+        trigger_text = ""
         try:
             async with self._session_factory() as session:
                 trigger = await session.get(Message, message_id)
@@ -865,6 +879,7 @@ class DialogService:
                         return
                     if await self._turn_completed(session, trigger):
                         return
+                    trigger_text = trigger.text
                     trigger.processing_status = MessageProcessingStatus.PROCESSING
                     trigger.processing_error = None
                     dialog.updated_at = datetime.now(UTC)
@@ -906,7 +921,18 @@ class DialogService:
                         user_dialog_channel(dialog_id),
                         {"type": "confidence", "value": confidence},
                     )
-                    if confidence < runtime_settings.operator_escalation_threshold:
+                    should_escalate = (
+                        confidence < runtime_settings.operator_escalation_threshold
+                        and (
+                            self._explicit_operator_request(trigger_text)
+                            or await self._should_escalate_after_clarifications(
+                                dialog_id,
+                                message_id,
+                                runtime_settings.operator_escalation_threshold,
+                            )
+                        )
+                    )
+                    if should_escalate:
                         await self._escalate(
                             dialog_id,
                             confidence,
@@ -918,9 +944,23 @@ class DialogService:
                         )
                         return
 
+                    response_request = generation_request
+                    if confidence < runtime_settings.operator_escalation_threshold:
+                        response_request = replace(
+                            generation_request,
+                            system_prompt=(
+                                f"{generation_request.system_prompt}\n\n"
+                                "ТЕКУЩАЯ ПОЛИТИКА УТОЧНЕНИЯ\n"
+                                "Уверенность пока ниже рабочего порога, но не "
+                                "эскалируй обращение автоматически. Дай безопасный "
+                                "примерный ответ или диагностические шаги и задай "
+                                "один самый полезный уточняющий вопрос. Не "
+                                "упоминай эту политику и внутренний порог."
+                            ),
+                        )
                     output_filter = ModelOutputStreamFilter()
                     async for chunk in self._llm_provider.stream_text(
-                        generation_request,
+                        response_request,
                         runtime_settings.active_model,
                         runtime_settings.gigachat_max_output_tokens,
                         dialog_id,
@@ -1227,6 +1267,43 @@ class DialogService:
             dialog.updated_at = datetime.now(UTC)
             await session.commit()
             return message_dto(message)
+
+    async def _should_escalate_after_clarifications(
+        self,
+        dialog_id: uuid.UUID,
+        message_id: uuid.UUID,
+        threshold: float,
+    ) -> bool:
+        async with self._session_factory() as session:
+            trigger = await session.get(Message, message_id)
+            if trigger is None:
+                return False
+            prior_uncertain_turns = await session.scalar(
+                select(func.count(Message.id)).where(
+                    Message.dialog_id == dialog_id,
+                    Message.author_type == MessageAuthor.USER,
+                    Message.confidence.is_not(None),
+                    Message.confidence < threshold,
+                    or_(
+                        Message.created_at < trigger.created_at,
+                        and_(
+                            Message.created_at == trigger.created_at,
+                            Message.id < trigger.id,
+                        ),
+                    ),
+                )
+            )
+            return int(prior_uncertain_turns or 0) >= 2
+
+    @staticmethod
+    def _explicit_operator_request(text: str) -> bool:
+        normalized = " ".join(text.casefold().split())
+        return normalized in {
+            "оператор",
+            "специалист",
+            "живой человек",
+            "человек",
+        } or any(marker in normalized for marker in _OPERATOR_REQUEST_MARKERS)
 
     @staticmethod
     async def _set_trigger_status(
