@@ -99,8 +99,11 @@ class GenerationRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class ConfidenceAssessment:
+class AnswerAssessment:
     confidence: float
+    clarification_useful: bool
+    clarification_question: str | None = None
+    escalation_required: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,12 +149,13 @@ class LLMProvider(Protocol):
         session_id: uuid.UUID,
     ) -> ScreenshotAnalysis: ...
 
-    async def assess_confidence(
+    async def assess_answer(
         self,
         request: GenerationRequest,
+        candidate_answer: str,
         model: str,
         session_id: uuid.UUID,
-    ) -> ConfidenceAssessment: ...
+    ) -> AnswerAssessment: ...
 
     async def generate_case_card(
         self,

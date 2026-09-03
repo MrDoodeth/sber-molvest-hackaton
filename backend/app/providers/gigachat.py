@@ -3,7 +3,6 @@ from __future__ import annotations
 import contextlib
 import uuid
 from collections.abc import AsyncIterator, Iterator
-from dataclasses import replace
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -12,7 +11,7 @@ from app.contracts.schemas import CaseCard
 from app.core.config import Settings
 from app.core.generation_gate import GenerationGate
 from app.providers.interfaces import (
-    ConfidenceAssessment,
+    AnswerAssessment,
     GenerationRequest,
     ProviderAuthenticationError,
     ProviderBadRequestError,
@@ -30,8 +29,11 @@ from app.providers.interfaces import (
 )
 
 
-class _ConfidenceSchema(BaseModel):
+class _AnswerAssessmentSchema(BaseModel):
     confidence: float = Field(ge=0, le=1)
+    clarification_useful: bool
+    clarification_question: str | None = None
+    escalation_required: bool
 
 
 class _ScreenshotSchema(BaseModel):
@@ -339,40 +341,45 @@ class GigaChatProvider:
                 visual_summary=parsed.visual_summary,
             )
 
-    async def assess_confidence(
+    async def assess_answer(
         self,
         request: GenerationRequest,
+        candidate_answer: str,
         model: str,
         session_id: uuid.UUID,
-    ) -> ConfidenceAssessment:
+    ) -> AnswerAssessment:
         async with self._generation_gate.acquire():
-            confidence_attachments = [
-                (file_id, mime_type)
-                for file_id, mime_type in zip(
-                    request.attachment_file_ids,
-                    request.attachment_mime_types,
-                    strict=False,
-                )
-                if mime_type.startswith("image/")
-            ]
-            confidence_request = replace(
-                request,
-                attachment_file_ids=tuple(item[0] for item in confidence_attachments),
-                attachment_mime_types=tuple(item[1] for item in confidence_attachments),
-            )
-            messages = self._messages(confidence_request)
+            messages = self._messages(request)
             messages[0].content += (
-                "\n\nCONFIDENCE GATE\nВерни только confidence от 0 до 1. "
-                "Если пользователь явно просит оператора, верни 0."
+                "\n\nANSWER JUDGE\nПеред тобой готовый CANDIDATE ANSWER. Оцени "
+                "уверенность именно в его корректности и способности решить проблему "
+                "пользователя, а не общую понятность вопроса. Верни confidence от 0 "
+                "до 1. Если confidence ниже порога, укажи, может ли один конкретный "
+                "вопрос существенно повысить уверенность. Если да, заполни "
+                "clarification_question ровно одним вопросом; если дополнительная "
+                "информация не поможет и нужен специалист, установи "
+                "escalation_required=true. Не оценивай ответ, который не приведён "
+                "ниже.\n\nCANDIDATE ANSWER\n"
+                f"{candidate_answer.strip()}"
             )
             result = await self._structured(
                 client=self._client(model, 64),
-                schema=_ConfidenceSchema,
+                schema=_AnswerAssessmentSchema,
                 messages=messages,
                 session_id=session_id,
             )
-            parsed = _ConfidenceSchema.model_validate(result)
-            return ConfidenceAssessment(confidence=parsed.confidence)
+            parsed = _AnswerAssessmentSchema.model_validate(result)
+            question = (
+                parsed.clarification_question.strip()
+                if parsed.clarification_question
+                else None
+            )
+            return AnswerAssessment(
+                confidence=parsed.confidence,
+                clarification_useful=parsed.clarification_useful,
+                clarification_question=question or None,
+                escalation_required=parsed.escalation_required,
+            )
 
     async def generate_case_card(
         self,

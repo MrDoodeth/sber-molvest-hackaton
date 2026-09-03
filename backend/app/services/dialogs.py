@@ -5,7 +5,6 @@ import logging
 import time
 import uuid
 from collections.abc import Awaitable, Callable
-from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
 
@@ -85,7 +84,10 @@ _OPERATOR_REQUEST_MARKERS = (
     "подключите живого оператора",
     "подключите живого специалиста",
     "позовите оператора",
+    "хочу специалиста",
     "соедините с оператором",
+    "соедините с поддержкой",
+    "соедините меня с поддержкой",
     "соедините меня с оператором",
     "соедините меня со специалистом",
     "переключите на оператора",
@@ -985,31 +987,18 @@ class DialogService:
                         item.source.model_dump(mode="json")
                         for item in generation_request.evidence
                     ]
-                    assessment = await self._llm_provider.assess_confidence(
-                        generation_request,
-                        runtime_settings.active_model,
-                        dialog_id,
-                    )
-                    confidence = assessment.confidence
-                    await self._persist_confidence(
-                        dialog_id, message_id, confidence, source_snapshot
-                    )
-                    await self._broker.publish(
-                        user_dialog_channel(dialog_id),
-                        {"type": "confidence", "value": confidence},
-                    )
                     explicit_operator_request = self._explicit_operator_request(
                         trigger_text
                     )
-                    should_escalate = explicit_operator_request or (
-                        confidence < runtime_settings.operator_escalation_threshold
-                        and await self._should_escalate_after_clarifications(
-                            dialog_id,
-                            message_id,
-                            runtime_settings.operator_escalation_threshold,
+                    if explicit_operator_request:
+                        confidence = 0.0
+                        await self._persist_confidence(
+                            dialog_id, message_id, confidence, source_snapshot
                         )
-                    )
-                    if should_escalate:
+                        await self._broker.publish(
+                            user_dialog_channel(dialog_id),
+                            {"type": "confidence", "value": confidence},
+                        )
                         await self._escalate(
                             dialog_id,
                             confidence,
@@ -1021,23 +1010,9 @@ class DialogService:
                         )
                         return
 
-                    response_request = generation_request
-                    if confidence < runtime_settings.operator_escalation_threshold:
-                        response_request = replace(
-                            generation_request,
-                            system_prompt=(
-                                f"{generation_request.system_prompt}\n\n"
-                                "ТЕКУЩАЯ ПОЛИТИКА УТОЧНЕНИЯ\n"
-                                "Уверенность пока ниже рабочего порога, но не "
-                                "эскалируй обращение автоматически. Дай безопасный "
-                                "примерный ответ или диагностические шаги и задай "
-                                "один самый полезный уточняющий вопрос. Не "
-                                "упоминай эту политику и внутренний порог."
-                            ),
-                        )
                     output_filter = ModelOutputStreamFilter()
                     async for chunk in self._llm_provider.stream_text(
-                        response_request,
+                        generation_request,
                         runtime_settings.active_model,
                         runtime_settings.gigachat_max_output_tokens,
                         dialog_id,
@@ -1046,15 +1021,82 @@ class DialogService:
                             usage = chunk.usage
                         if not chunk.text:
                             continue
-                        visible_text = output_filter.push(chunk.text)
-                        if visible_text:
-                            await self._broker.publish(
-                                user_dialog_channel(dialog_id),
-                                {"type": "assistant_token", "token": visible_text},
-                            )
+                        output_filter.push(chunk.text)
                     generated_text = output_filter.final()
                     if not generated_text:
                         raise ProviderServerError("GigaChat вернул пустой ответ")
+
+                    assessment = await self._llm_provider.assess_answer(
+                        generation_request,
+                        generated_text,
+                        runtime_settings.active_model,
+                        dialog_id,
+                    )
+                    confidence = assessment.confidence
+                    await self._persist_confidence(
+                        dialog_id, message_id, confidence, source_snapshot
+                    )
+                    await self._broker.publish(
+                        user_dialog_channel(dialog_id),
+                        {"type": "confidence", "value": confidence},
+                    )
+                    threshold = runtime_settings.operator_escalation_threshold
+                    if confidence < threshold:
+                        (
+                            clarification_count,
+                            previous_confidence,
+                        ) = await self._clarification_state(
+                            dialog_id, message_id, threshold
+                        )
+                        confidence_did_not_grow = (
+                            clarification_count > 0
+                            and previous_confidence is not None
+                            and confidence <= previous_confidence
+                        )
+                        question = (assessment.clarification_question or "").strip()
+                        can_clarify = (
+                            assessment.clarification_useful
+                            and not assessment.escalation_required
+                            and bool(question)
+                            and question.count("?") + question.count("？") <= 1
+                            and clarification_count < 2
+                            and not confidence_did_not_grow
+                        )
+                        if not can_clarify:
+                            await self._escalate(
+                                dialog_id,
+                                confidence,
+                                source_snapshot,
+                                started,
+                                runtime_settings,
+                                prompt_content,
+                                message_id,
+                            )
+                            return
+                        dto = await self._persist_assistant(
+                            dialog_id,
+                            question,
+                            confidence,
+                            source_snapshot,
+                            trigger_message_id=message_id,
+                        )
+                        await self._broker.publish(
+                            user_dialog_channel(dialog_id),
+                            {
+                                "type": "assistant_done",
+                                "message": dto.model_dump(mode="json"),
+                            },
+                        )
+                        await self._record_metric(
+                            dialog_id,
+                            started,
+                            confidence,
+                            False,
+                            usage,
+                            runtime_settings,
+                            prompt_content,
+                        )
+                        return
 
                 dto = await self._persist_assistant(
                     dialog_id,
@@ -1063,6 +1105,7 @@ class DialogService:
                     source_snapshot,
                     trigger_message_id=message_id,
                 )
+                await self._publish_buffered_answer(dialog_id, generated_text)
                 await self._broker.publish(
                     user_dialog_channel(dialog_id),
                     {
@@ -1425,22 +1468,21 @@ class DialogService:
             await session.commit()
             return message_dto(message)
 
-    async def _should_escalate_after_clarifications(
+    async def _clarification_state(
         self,
         dialog_id: uuid.UUID,
         message_id: uuid.UUID,
         threshold: float,
-    ) -> bool:
+    ) -> tuple[int, float | None]:
         async with self._session_factory() as session:
             trigger = await session.get(Message, message_id)
             if trigger is None:
-                return False
-            prior_turns = list(
+                return 0, None
+            prior_messages = list(
                 await session.scalars(
-                    select(Message.confidence)
+                    select(Message)
                     .where(
                         Message.dialog_id == dialog_id,
-                        Message.author_type == MessageAuthor.USER,
                         or_(
                             Message.created_at < trigger.created_at,
                             and_(
@@ -1449,27 +1491,63 @@ class DialogService:
                             ),
                         ),
                     )
-                    .order_by(Message.created_at.desc(), Message.id.desc())
+                    .order_by(Message.created_at, Message.id)
                 )
             )
-            consecutive_uncertain_turns = 0
-            for prior_confidence in prior_turns:
-                if prior_confidence is None or prior_confidence >= threshold:
+            clarification_count = 0
+            previous_confidence: float | None = None
+            for index in range(len(prior_messages) - 1, -1, -1):
+                message = prior_messages[index]
+                if message.author_type != MessageAuthor.USER:
+                    continue
+                if message.confidence is None or message.confidence >= threshold:
                     break
-                consecutive_uncertain_turns += 1
-            return consecutive_uncertain_turns >= 2
+                next_user_index = next(
+                    (
+                        next_index
+                        for next_index in range(index + 1, len(prior_messages))
+                        if prior_messages[next_index].author_type == MessageAuthor.USER
+                    ),
+                    len(prior_messages),
+                )
+                if not any(
+                    item.author_type == MessageAuthor.ASSISTANT
+                    for item in prior_messages[index + 1 : next_user_index]
+                ):
+                    break
+                clarification_count += 1
+                if previous_confidence is None:
+                    previous_confidence = message.confidence
+            return clarification_count, previous_confidence
+
+    async def _publish_buffered_answer(self, dialog_id: uuid.UUID, text: str) -> None:
+        for offset in range(0, len(text), 512):
+            await self._broker.publish(
+                user_dialog_channel(dialog_id),
+                {"type": "assistant_token", "token": text[offset : offset + 512]},
+            )
 
     @staticmethod
     def _explicit_operator_request(text: str) -> bool:
         normalized = " ".join(text.casefold().split())
-        if any(marker in normalized for marker in _OPERATOR_REQUEST_NEGATIONS):
-            return False
-        return normalized in {
+        direct_request = normalized in {
             "оператор",
             "специалист",
             "живой человек",
             "человек",
-        } or any(marker in normalized for marker in _OPERATOR_REQUEST_MARKERS)
+        }
+        has_negation = any(
+            marker in normalized for marker in _OPERATOR_REQUEST_NEGATIONS
+        )
+        positive_text = normalized
+        for marker in _OPERATOR_REQUEST_NEGATIONS:
+            positive_text = positive_text.replace(marker, " ")
+        marker_request = any(
+            marker in positive_text for marker in _OPERATOR_REQUEST_MARKERS
+        )
+        return (direct_request or marker_request) and (
+            marker_request or not has_negation
+        )
 
     @staticmethod
     async def _set_trigger_status(

@@ -209,7 +209,7 @@ export default function UserDialogPage() {
               )}
             </div>
             {visiblePhase === "vision" && <div className="flex items-center gap-2 border-t border-indigo-100 bg-indigo-50 px-4 py-2 text-xs font-semibold text-indigo-800"><ImageIcon className="size-4 animate-pulse" /> Анализирую изображение…</div>}
-            {visiblePhase === "thinking" && pendingTurn && <div className="flex items-center gap-3 border-t border-molvest-100 bg-molvest-50 px-4 py-2 text-xs font-semibold text-molvest-800"><span>Проверяю базу знаний и уверенность ответа…</span></div>}
+            {visiblePhase === "thinking" && pendingTurn && <div className="flex items-center gap-3 border-t border-molvest-100 bg-molvest-50 px-4 py-2 text-xs font-semibold text-molvest-800"><span>Анализирую решение…</span></div>}
             {processingError && <div className="flex items-center gap-2 border-t border-red-100 bg-red-50 px-4 py-2 text-xs font-semibold text-red-800"><XCircle className="size-4" /> {processingError}</div>}
             {blockedByOtherTurn && <div className="flex items-center gap-2 border-t border-amber-100 bg-amber-50 px-4 py-2 text-xs font-semibold text-amber-900"><LockKeyhole className="size-4" /> Дождитесь завершения обработки другого обращения.</div>}
             {detail.data.status === "active" ? (
