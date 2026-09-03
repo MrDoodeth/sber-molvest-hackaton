@@ -6,7 +6,7 @@ BACKEND_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname -- "$BACKEND_DIR")"
 VENV_DIR="$BACKEND_DIR/.venv"
 
-if [[ ! -x "$VENV_DIR/bin/ruff" || ! -x "$VENV_DIR/bin/mypy" ]]; then
+if [[ ! -x "$VENV_DIR/bin/ruff" || ! -x "$VENV_DIR/bin/python" ]]; then
   printf 'Static analysis tools are missing. Create backend/.venv and install the dev dependencies.\n' >&2
   exit 1
 fi
@@ -24,7 +24,7 @@ printf '\nChecking Ruff formatting...\n'
   "$PROJECT_DIR/tests/rag"
 
 printf '\nRunning Mypy...\n'
-MYPYPATH="$BACKEND_DIR" "$VENV_DIR/bin/mypy" \
+MYPYPATH="$BACKEND_DIR" "$VENV_DIR/bin/python" -m mypy \
   --config-file "$BACKEND_DIR/pyproject.toml" \
   "$BACKEND_DIR/app"
 
