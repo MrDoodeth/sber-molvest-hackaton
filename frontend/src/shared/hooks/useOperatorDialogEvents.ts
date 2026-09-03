@@ -49,6 +49,7 @@ export function useOperatorDialogEvents(dialogId?: string, operatorId?: string) 
           void queryClient.invalidateQueries({ queryKey: queryKeys.operator.queues() });
           break;
         case "dialog_closed":
+          setAccessRevoked(true);
           queryClient.setQueryData<OperatorDialogDetailDto>(queryKeys.dialog.detail(dialogId), (current) =>
             current ? { ...current, isProcessing: false, processingError: undefined, status: "closed" } : current,
           );

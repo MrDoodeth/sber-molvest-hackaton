@@ -47,8 +47,12 @@ async def operator_dialog_event_stream(
                 operator = event.payload.get("operator")
                 assigned_id = operator.get("id") if isinstance(operator, dict) else None
                 if assigned_id != operator_id:
+                    yield format_sse(event)
                     return
                 continue
+            if event.payload.get("type") == "dialog_closed":
+                yield format_sse(event)
+                return
             if not await has_access():
                 return
             yield format_sse(event)
