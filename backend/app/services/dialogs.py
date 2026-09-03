@@ -407,6 +407,8 @@ class DialogService:
 
             self._assert_send_access(requester, dialog)
 
+            if requester.role == UserRole.USER and dialog.mode != DialogMode.AI_SUPPORT:
+                await self._assert_no_active_ai_turn(session)
             message_id = uuid.uuid4()
             reserved_turn = (
                 requester.role == UserRole.USER and dialog.mode == DialogMode.AI_SUPPORT
@@ -553,7 +555,10 @@ class DialogService:
     async def _schedule_next_pending_turn(self) -> None:
         """Resume one persisted turn after the global turn becomes available."""
         async with self._session_factory() as session:
-            if await self._find_active_ai_turn(session) is not None:
+            if (
+                await self._find_active_ai_turn(session, include_pending=False)
+                is not None
+            ):
                 return
             triggers = list(
                 await session.scalars(
@@ -955,7 +960,9 @@ class DialogService:
                         return
                     if (
                         await self._find_active_ai_turn(
-                            session, exclude_message_id=message_id
+                            session,
+                            exclude_message_id=message_id,
+                            include_pending=False,
                         )
                         is not None
                     ):
@@ -1353,7 +1360,11 @@ class DialogService:
         session: AsyncSession,
         *,
         exclude_message_id: uuid.UUID | None = None,
+        include_pending: bool = True,
     ) -> tuple[uuid.UUID, uuid.UUID] | None:
+        statuses = [MessageProcessingStatus.PROCESSING]
+        if include_pending:
+            statuses.insert(0, MessageProcessingStatus.PENDING)
         statement = (
             select(Message.dialog_id, Message.id)
             .join(Dialog, Message.dialog_id == Dialog.id)
@@ -1361,12 +1372,7 @@ class DialogService:
                 Dialog.status == DialogStatus.ACTIVE,
                 Dialog.mode == DialogMode.AI_SUPPORT,
                 Message.author_type == MessageAuthor.USER,
-                Message.processing_status.in_(
-                    [
-                        MessageProcessingStatus.PENDING,
-                        MessageProcessingStatus.PROCESSING,
-                    ]
-                ),
+                Message.processing_status.in_(statuses),
             )
             .order_by(Message.created_at, Message.id)
             .limit(1)
