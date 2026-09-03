@@ -66,7 +66,7 @@ export default function AdminDialogsPage() {
                 <Input type="date" value={filters.date ?? ""} onChange={(event) => patchFilters({ date: event.target.value || undefined })} />
               </Field>
               <Field label="Кем решено">
-                <Select value={filters.resolvedBy ?? ""} onChange={(event) => patchFilters({ resolved_by: event.target.value || undefined })}>
+                <Select className="appearance-none" value={filters.resolvedBy ?? ""} onChange={(event) => patchFilters({ resolved_by: event.target.value || undefined })}>
                   <option value="">Все</option><option value="ai">AI</option><option value="operator">Оператор</option>
                 </Select>
               </Field>
