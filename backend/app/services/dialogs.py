@@ -553,6 +553,8 @@ class DialogService:
     async def _schedule_next_pending_turn(self) -> None:
         """Resume one persisted turn after the global turn becomes available."""
         async with self._session_factory() as session:
+            if await self._find_active_ai_turn(session) is not None:
+                return
             triggers = list(
                 await session.scalars(
                     select(Message)
