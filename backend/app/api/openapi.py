@@ -121,8 +121,8 @@ USER_SSE_RESPONSE: dict[str, Any] = {
 
 OPERATOR_QUEUE_SSE_RESPONSE: dict[str, Any] = {
     "description": (
-        "Infinite operator queue stream. Events: ticket_available, ticket_claimed, "
-        "ticket_closed. Reconnect and refetch both queue scopes."
+        "Infinite operator queue stream. Events: ticket_available, ticket_updated, "
+        "ticket_claimed, ticket_closed. Reconnect and refetch both queue scopes."
     ),
     "content": {
         "text/event-stream": {

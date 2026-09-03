@@ -112,6 +112,7 @@ class DialogSummary(ApiModel):
     processing_error: str | None = None
     assigned_operator: UserRef | None = None
     last_message_preview: str | None = None
+    last_message_author: MessageAuthor | None = None
     title: str | None = None
     user: UserRef | None = None
     has_attachment: bool = False

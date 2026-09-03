@@ -67,6 +67,7 @@ export interface DialogSummary {
   processingError?: string | null;
   assignedOperator?: UserRef;
   lastMessagePreview?: string;
+  lastMessageAuthor?: MessageAuthor;
   title?: string;
   user?: UserRef;
   hasAttachment?: boolean;

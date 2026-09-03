@@ -98,6 +98,7 @@ def dialog_summary(
         processing_error=processing_error,
         assigned_operator=user_ref(operator) if operator else None,
         last_message_preview=preview,
+        last_message_author=last_message.author_type if last_message else None,
         title=(
             " ".join(first_user_message.text.split())[:120] or None
             if first_user_message is not None

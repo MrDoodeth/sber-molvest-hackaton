@@ -456,6 +456,21 @@ class DialogService:
                     operator_dialog_channel(dialog_id),
                     {"type": "user_message", "message": payload},
                 )
+                async with self._session_factory() as session:
+                    current_dialog = await session.get(Dialog, dialog_id)
+                    summary = (
+                        await self._summary(session, current_dialog)
+                        if current_dialog is not None
+                        else None
+                    )
+                if summary is not None:
+                    await self._broker.publish(
+                        OPERATOR_QUEUE_CHANNEL,
+                        {
+                            "type": "ticket_updated",
+                            "dialog": summary.model_dump(mode="json"),
+                        },
+                    )
             if not defer_processing and mode == DialogMode.AI_SUPPORT:
                 self._schedule_processing(message.id, dialog_id, mode)
         else:
@@ -496,7 +511,9 @@ class DialogService:
             else:
                 statement = statement.where(Dialog.assigned_operator_id == operator.id)
             dialogs = list(
-                await session.scalars(statement.order_by(Dialog.escalated_at.asc()))
+                await session.scalars(
+                    statement.order_by(Dialog.updated_at.desc(), Dialog.id.desc())
+                )
             )
             return [await self._summary(session, dialog) for dialog in dialogs]
 
@@ -1360,6 +1377,7 @@ class DialogService:
         last = await session.scalar(
             select(Message)
             .where(Message.dialog_id == dialog.id)
+            .where(Message.author_type != MessageAuthor.SYSTEM)
             .order_by(Message.created_at.desc(), Message.id.desc())
             .limit(1)
         )
@@ -1411,6 +1429,7 @@ class DialogService:
             last = await session.scalar(
                 select(Message)
                 .where(Message.dialog_id == dialog.id)
+                .where(Message.author_type != MessageAuthor.SYSTEM)
                 .order_by(Message.created_at.desc(), Message.id.desc())
                 .limit(1)
             )
