@@ -66,6 +66,7 @@ export default function CandidateModeration({ candidateId, dialogId }: { candida
   if (candidate.isPending) return <PageLoader label="Загружаем карточку кандидата" />;
   if (candidate.isError) return <ErrorState description={candidate.error.message} onRetry={() => void candidate.refetch()} />;
   if (!card) return null;
+  const cardComplete = fields.every(({ key }) => card[key].trim().length > 0);
 
   return (
     <Card className="overflow-hidden" >
@@ -78,6 +79,7 @@ export default function CandidateModeration({ candidateId, dialogId }: { candida
         {fields.map((field) => (
           <Field key={field.key} label={field.label}>
             <Textarea rows={field.rows} disabled={candidate.data.status !== "pending"} value={card[field.key]} onChange={(event) => setCard({ ...card, [field.key]: event.target.value })} />
+            {candidate.data.status === "pending" && !card[field.key].trim() && <span className="text-xs font-normal text-red-700">Поле обязательно</span>}
           </Field>
         ))}
         {candidate.data.status === "pending" && (
@@ -85,7 +87,7 @@ export default function CandidateModeration({ candidateId, dialogId }: { candida
             <p className="text-sm leading-6 text-molvest-900">Заполните поля вручную или поручите это GigaChat. Перед публикацией карточка всегда сохраняется в системный раздел «Журнал обращений».</p>
             <div className="mt-4 flex flex-wrap gap-2">
               <Button variant="giga" pending={generate.isPending} disabled={approve.isPending} onClick={() => generate.mutate()}><Sparkles className="size-4" /> Заполнить через GigaChat</Button>
-              <Button pending={approve.isPending} disabled={generate.isPending || !card} onClick={() => approve.mutate()}><BookCheck className="size-4" /> Approve</Button>
+              <Button pending={approve.isPending} disabled={generate.isPending || !cardComplete} onClick={() => approve.mutate()}><BookCheck className="size-4" /> Approve</Button>
               <Button variant="ghost" disabled={approve.isPending || generate.isPending} onClick={() => setRejectOpen(true)}><XCircle className="size-4" /> Reject</Button>
             </div>
           </div>

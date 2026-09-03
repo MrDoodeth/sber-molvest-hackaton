@@ -17,3 +17,4 @@ PROTECTED_SECTION_IDS = frozenset(
 )
 
 ESCALATION_SYSTEM_MESSAGE = "К обращению подключился специалист поддержки."
+CASE_CARD_UNKNOWN = "Не указано в тикете"

@@ -385,9 +385,10 @@ class GigaChatProvider:
             messages = self._messages(request)
             messages[0].content += (
                 "\n\nKNOWLEDGE CARD\nВерни только структурированную карточку с полями "
-                "title, problem и result. Название кейса должно быть кратким. Не "
-                "добавляй Markdown-обёртку, комментарии или поля вне схемы; если "
-                "факт не зафиксирован в диалоге, оставь поле пустым."
+                "title, problem и result. Все три поля обязательны и должны содержать "
+                "непустые строки; если факт не зафиксирован в диалоге, напиши "
+                "«Не указано в тикете». Название кейса должно быть кратким. Не "
+                "добавляй Markdown-обёртку, комментарии или поля вне схемы."
             )
             result = await self._structured(
                 client=self._client(model, max_output_tokens),

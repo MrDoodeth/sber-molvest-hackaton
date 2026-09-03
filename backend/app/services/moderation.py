@@ -17,7 +17,7 @@ from app.contracts.schemas import (
     FeedbackDto,
     KnowledgeCandidateDto,
 )
-from app.core.constants import DEFAULT_CASE_SECTION_ID
+from app.core.constants import CASE_CARD_UNKNOWN, DEFAULT_CASE_SECTION_ID
 from app.core.enums import (
     CandidateSource,
     CandidateStatus,
@@ -226,8 +226,8 @@ class ModerationService:
         title = title or f"Обращение {str(dialog_id)[:8]}"
         return CaseCard(
             title=title,
-            problem="",
-            result="",
+            problem=CASE_CARD_UNKNOWN,
+            result=CASE_CARD_UNKNOWN,
         )
 
     async def create_by_admin(

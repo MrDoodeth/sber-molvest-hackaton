@@ -232,8 +232,8 @@ class CaseCard(ApiModel):
     model_config = ConfigDict(extra="forbid")
 
     title: str = Field(min_length=1, max_length=500)
-    problem: str = ""
-    result: str = ""
+    problem: str = Field(min_length=1)
+    result: str = Field(min_length=1)
 
     @field_validator("title")
     @classmethod
@@ -245,8 +245,11 @@ class CaseCard(ApiModel):
 
     @field_validator("problem", "result")
     @classmethod
-    def strip_optional_card_text(cls, value: str) -> str:
-        return value.strip()
+    def strip_card_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Поле карточки не может быть пустым")
+        return value
 
 
 class CandidatePatch(ApiModel):

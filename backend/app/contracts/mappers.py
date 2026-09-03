@@ -17,7 +17,7 @@ from app.contracts.schemas import (
     PromptDto,
     UserRef,
 )
-from app.core.constants import PROTECTED_SECTION_IDS
+from app.core.constants import CASE_CARD_UNKNOWN, PROTECTED_SECTION_IDS
 from app.models import (
     Attachment,
     Dialog,
@@ -52,7 +52,11 @@ def attachment_dto(attachment: Attachment) -> AttachmentDto:
 
 def normalize_case_card(raw: object) -> CaseCard:
     if not isinstance(raw, dict):
-        return CaseCard(title="Без названия")
+        return CaseCard(
+            title="Без названия",
+            problem=CASE_CARD_UNKNOWN,
+            result=CASE_CARD_UNKNOWN,
+        )
 
     def first_text(*keys: str) -> str:
         for key in keys:
@@ -63,8 +67,14 @@ def normalize_case_card(raw: object) -> CaseCard:
 
     return CaseCard(
         title=first_text("title", "name", "question") or "Без названия",
-        problem=first_text("problem", "symptoms", "context", "description"),
-        result=first_text("result", "solution", "resolution", "answer"),
+        problem=(
+            first_text("problem", "symptoms", "context", "description")
+            or CASE_CARD_UNKNOWN
+        ),
+        result=(
+            first_text("result", "solution", "resolution", "answer")
+            or CASE_CARD_UNKNOWN
+        ),
     )
 
 
