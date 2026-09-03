@@ -1,8 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { MessageCircleMore, Plus } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { dialogsApi } from "../../api/dialogs";
 import { queryKeys } from "../../api/queryKeys";
+import { DialogStatusBadge } from "../../shared/chat";
 import { Button, EmptyState, ErrorState, Skeleton } from "../../shared/ui";
 import { cn, formatRelativeDate, truncateTitle } from "../../shared/utils";
 
@@ -14,6 +16,16 @@ export default function UserDialogsNav({ mobile = false }: { mobile?: boolean })
     refetchInterval: 2500,
     refetchOnMount: "always",
   });
+  const order = dialogs.data?.map((dialog) => dialog.id).join(",") ?? "";
+  const previousOrder = useRef(order);
+  const [orderRevision, setOrderRevision] = useState(0);
+
+  useEffect(() => {
+    if (previousOrder.current && previousOrder.current !== order) {
+      setOrderRevision((current) => current + 1);
+    }
+    previousOrder.current = order;
+  }, [order]);
 
   return (
     <aside className={cn("flex min-h-0 flex-col border-stone-200 bg-white", mobile ? "h-full" : "hidden border-r md:flex md:w-80 md:shrink-0")}>
@@ -34,16 +46,22 @@ export default function UserDialogsNav({ mobile = false }: { mobile?: boolean })
         )}
         {dialogs.data?.map((dialog) => (
           <NavLink
-            key={dialog.id}
+            key={`${dialog.id}-${orderRevision}`}
             to={`/user/dialogs/${dialog.id}`}
             className={({ isActive }) => cn(
-              "mb-1 block rounded-2xl border p-3.5 transition",
+              "dialog-reorder-item mb-1 block rounded-2xl border p-3.5 transition",
               isActive ? "border-molvest-200 bg-molvest-50 shadow-sm" : "border-transparent hover:border-stone-200 hover:bg-stone-50",
             )}
           >
             <div className="flex items-start justify-between gap-2">
               <p className="text-sm font-bold leading-5 text-molvest-950">{truncateTitle(dialog.title || dialog.lastMessagePreview || "Новое обращение")}</p>
               <span className="shrink-0 text-[10px] text-stone-400">{formatRelativeDate(dialog.updatedAt)}</span>
+            </div>
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <DialogStatusBadge dialog={dialog} />
+              {dialog.lastMessagePreview && dialog.title && (
+                <span className="truncate text-[11px] text-stone-400">{truncateTitle(dialog.lastMessagePreview, 34)}</span>
+              )}
             </div>
           </NavLink>
         ))}

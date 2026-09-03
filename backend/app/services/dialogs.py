@@ -8,7 +8,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, case, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -196,7 +196,14 @@ class DialogService:
                             )
                         ),
                     )
-                    .order_by(Dialog.updated_at.desc())
+                    .order_by(
+                        case(
+                            (Dialog.status == DialogStatus.CLOSED, 1),
+                            else_=0,
+                        ),
+                        Dialog.updated_at.desc(),
+                        Dialog.id.desc(),
+                    )
                 )
             ).all()
             return [await self._summary(session, dialog) for dialog in dialogs]
