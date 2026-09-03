@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { dialogsApi } from "../../api/dialogs";
 import { queryKeys } from "../../api/queryKeys";
-import { DialogStatusBadge } from "../../shared/chat";
+import { DialogStatusBadge } from "../../shared/chat/DialogStatusBadge";
 import { Button, EmptyState, ErrorState, Skeleton } from "../../shared/ui";
 import { cn, formatRelativeDate, truncateTitle } from "../../shared/utils";
 

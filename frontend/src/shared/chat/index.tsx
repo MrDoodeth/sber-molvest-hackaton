@@ -37,11 +37,10 @@ import {
   UserRound,
   X,
 } from "lucide-react";
-import type { AttachmentDto, DialogSummary, MessageDto } from "../../api/types";
-import { Badge, Button, IconButton } from "../ui";
+import type { AttachmentDto, MessageDto } from "../../api/types";
+import { Button, IconButton } from "../ui";
 import {
   cn,
-  dialogStatusLabel,
   formatBytes,
   formatDateTime,
   formatPercent,
@@ -211,17 +210,7 @@ export function validateRuntimeAttachments(files: File[]): string | null {
   return null;
 }
 
-export function DialogStatusBadge({ dialog }: { dialog: Pick<DialogSummary, "status" | "mode" | "feedback"> }) {
-  const label = dialogStatusLabel(dialog);
-  const tone = dialog.status === "closed"
-    ? dialog.feedback?.verdict === "helpful"
-      ? "success"
-      : dialog.feedback?.verdict === "ai_error"
-        ? "danger"
-        : "neutral"
-    : dialog.mode === "operator_support" ? "info" : "success";
-  return <Badge tone={tone}>{label}</Badge>;
-}
+export { DialogStatusBadge } from "./DialogStatusBadge";
 
 export function AttachmentCard({ attachment }: { attachment: AttachmentDto }) {
   const url = safeAttachmentUrl(attachment);
