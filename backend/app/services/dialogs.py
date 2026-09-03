@@ -971,6 +971,26 @@ class DialogService:
                     )
                     prompt_content = prompt.content
 
+                if self._explicit_operator_request(trigger_text):
+                    confidence = 0.0
+                    await self._persist_confidence(
+                        dialog_id, message_id, confidence, []
+                    )
+                    await self._broker.publish(
+                        user_dialog_channel(dialog_id),
+                        {"type": "confidence", "value": confidence},
+                    )
+                    await self._escalate(
+                        dialog_id,
+                        confidence,
+                        [],
+                        started,
+                        runtime_settings,
+                        prompt_content,
+                        message_id,
+                    )
+                    return
+
                 async with self._generation_gate.acquire():
                     context = await self._generation_context.build_for_user_message(
                         dialog_id=dialog_id,
@@ -989,29 +1009,6 @@ class DialogService:
                         item.source.model_dump(mode="json")
                         for item in generation_request.evidence
                     ]
-                    explicit_operator_request = self._explicit_operator_request(
-                        trigger_text
-                    )
-                    if explicit_operator_request:
-                        confidence = 0.0
-                        await self._persist_confidence(
-                            dialog_id, message_id, confidence, source_snapshot
-                        )
-                        await self._broker.publish(
-                            user_dialog_channel(dialog_id),
-                            {"type": "confidence", "value": confidence},
-                        )
-                        await self._escalate(
-                            dialog_id,
-                            confidence,
-                            source_snapshot,
-                            started,
-                            runtime_settings,
-                            prompt_content,
-                            message_id,
-                        )
-                        return
-
                     output_filter = ModelOutputStreamFilter()
                     async for chunk in self._llm_provider.stream_text(
                         generation_request,
