@@ -9,7 +9,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
 
-from sqlalchemy import and_, case, func, or_, select, update
+from sqlalchemy import and_, case, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -1283,22 +1283,29 @@ class DialogService:
             trigger = await session.get(Message, message_id)
             if trigger is None:
                 return False
-            prior_uncertain_turns = await session.scalar(
-                select(func.count(Message.id)).where(
-                    Message.dialog_id == dialog_id,
-                    Message.author_type == MessageAuthor.USER,
-                    Message.confidence.is_not(None),
-                    Message.confidence < threshold,
-                    or_(
-                        Message.created_at < trigger.created_at,
-                        and_(
-                            Message.created_at == trigger.created_at,
-                            Message.id < trigger.id,
+            prior_turns = list(
+                await session.scalars(
+                    select(Message.confidence)
+                    .where(
+                        Message.dialog_id == dialog_id,
+                        Message.author_type == MessageAuthor.USER,
+                        or_(
+                            Message.created_at < trigger.created_at,
+                            and_(
+                                Message.created_at == trigger.created_at,
+                                Message.id < trigger.id,
+                            ),
                         ),
-                    ),
+                    )
+                    .order_by(Message.created_at.desc(), Message.id.desc())
                 )
             )
-            return int(prior_uncertain_turns or 0) >= 2
+            consecutive_uncertain_turns = 0
+            for prior_confidence in prior_turns:
+                if prior_confidence is None or prior_confidence >= threshold:
+                    break
+                consecutive_uncertain_turns += 1
+            return consecutive_uncertain_turns >= 2
 
     @staticmethod
     def _explicit_operator_request(text: str) -> bool:
