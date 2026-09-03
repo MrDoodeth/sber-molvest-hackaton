@@ -112,7 +112,7 @@ export default function AdminDialogsPage() {
                          <td className="break-words px-3 py-4 text-xs text-stone-500">{formatDateTime(dialog.closedAt)}</td>
                          <td className="px-3 py-4"><Badge className="max-w-full whitespace-normal break-words text-center" tone={dialog.resolvedBy === "ai" ? "giga" : "info"}>{dialog.resolvedBy === "ai" ? <><Bot className="mr-1 size-3 shrink-0" /> AI</> : <><UserRound className="mr-1 size-3 shrink-0" /> Оператор</>}</Badge></td>
                          <td className="break-words px-3 py-4 font-bold text-stone-700">{dialog.lastConfidence == null ? "—" : formatPercent(dialog.lastConfidence)}</td>
-                         <td className="px-3 py-4 text-center"><Badge className="max-w-full whitespace-normal break-words text-center" tone={moderationTone(dialog.moderationStatus)}>{moderationLabel(dialog.moderationStatus)}</Badge></td>
+                         <td className="px-3 py-4 text-center"><Badge className="w-full justify-center whitespace-normal break-words text-center" tone={moderationTone(dialog.moderationStatus)}>{moderationLabel(dialog.moderationStatus)}</Badge></td>
                          <td className="px-3 py-4 text-right"><Link to={`/admin/dialogs/${dialog.id}`} className="text-sm font-bold text-molvest-700 hover:text-molvest-900">Открыть</Link></td>
                       </tr>
                     ))}
