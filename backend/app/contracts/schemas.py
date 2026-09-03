@@ -172,6 +172,7 @@ class KnowledgeDocumentDto(ApiModel):
     indexed_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+    download_url: str
 
 
 class KnowledgeDocumentsResponse(ApiModel):

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import uuid
 from pathlib import PurePath
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi.responses import Response
 
 from app.api.deps import get_container, get_current_user
 from app.api.openapi import PROTECTED_RESPONSES
@@ -136,6 +138,25 @@ async def document(
 ) -> KnowledgeDocumentDto:
     require_admin(user)
     return await container.knowledge_base.get_document(document_id)
+
+
+@router.get("/documents/{document_id}/download")
+async def download_document(
+    document_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    container: ApplicationContainer = Depends(get_container),
+) -> Response:
+    require_admin(user)
+    data, media_type, file_name = await container.knowledge_base.read_document(
+        document_id
+    )
+    return Response(
+        content=data,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": (f"attachment; filename*=UTF-8''{quote(file_name)}")
+        },
+    )
 
 
 @router.patch("/documents/{document_id}", response_model=KnowledgeDocumentDto)

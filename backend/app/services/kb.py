@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import mimetypes
 import tempfile
 import uuid
 from datetime import UTC, datetime
@@ -32,7 +33,7 @@ from app.providers.interfaces import (
     VectorPoint,
     VectorStore,
 )
-from app.services.attachments import ValidatedUpload
+from app.services.attachments import ValidatedUpload, safe_file_name
 from app.services.tasks import TaskSupervisor
 
 VECTOR_NAMESPACE = uuid.UUID("f72eb19d-0ee1-4f39-924d-7bb9fb8adb76")
@@ -254,6 +255,25 @@ class KnowledgeBaseService:
             if row is None:
                 raise NotFoundError("Документ базы знаний не найден")
             return document_dto(row[0], row[1])
+
+    async def read_document(self, document_id: uuid.UUID) -> tuple[bytes, str, str]:
+        async with self._session_factory() as session:
+            document = await session.get(KnowledgeDocument, document_id)
+            if document is None:
+                raise NotFoundError("Документ базы знаний не найден")
+            storage_key = document.storage_key
+            title = document.title
+
+        try:
+            data = await self._storage.get(storage_key)
+        except StorageError as exc:
+            raise ServiceUnavailableError(
+                "Хранилище документов временно недоступно"
+            ) from exc
+        suffix = Path(storage_key).suffix.lower()
+        file_name = safe_file_name(f"{title}{suffix}")
+        media_type = mimetypes.guess_type(file_name)[0] or "application/octet-stream"
+        return data, media_type, file_name
 
     async def create_document(
         self,

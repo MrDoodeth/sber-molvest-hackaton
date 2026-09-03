@@ -176,6 +176,7 @@ def document_dto(
         indexed_at=document.indexed_at,
         created_at=document.created_at,
         updated_at=document.updated_at,
+        download_url=f"/api/admin/knowledge/documents/{document.id}/download",
     )
 
 

@@ -119,6 +119,7 @@ export interface KnowledgeDocumentDto {
   indexedAt?: string;
   createdAt?: string;
   updatedAt?: string;
+  downloadUrl: string;
 }
 
 export interface KnowledgeDocumentsResponse {

@@ -56,6 +56,7 @@ export const knowledgeApi = {
   },
   document: (id: string, signal?: AbortSignal) =>
     apiRequest<KnowledgeDocumentDto>(`/api/admin/knowledge/documents/${id}`, { signal }),
+  documentDownloadUrl: (id: string) => `/api/admin/knowledge/documents/${id}/download`,
   updateDocument: (
     id: string,
     patch: Pick<KnowledgeDocumentDto, "isEnabled">,
