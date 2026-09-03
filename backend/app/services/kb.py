@@ -521,12 +521,7 @@ class KnowledgeBaseService:
                     )
                     await session.commit()
                 stale_ids = list(set(old_vector_ids) - set(new_vector_ids))
-                try:
-                    await self._vector_store.delete_points(stale_ids)
-                except Exception:
-                    logger.exception(
-                        "Unable to remove stale vectors for document %s", document_id
-                    )
+                await self._delete_stale_vectors(stale_ids, document_id)
             except Exception as exc:
                 introduced = list(set(new_vector_ids) - set(old_vector_ids))
                 if introduced:
@@ -543,6 +538,21 @@ class KnowledgeBaseService:
                         document.index_error = str(exc)[:4000] or type(exc).__name__
                         await session.commit()
                 raise IngestionFailedError(str(exc) or type(exc).__name__) from exc
+
+    async def _delete_stale_vectors(
+        self, vector_ids: list[uuid.UUID], document_id: uuid.UUID
+    ) -> None:
+        for attempt in range(3):
+            try:
+                await self._vector_store.delete_points(vector_ids)
+                return
+            except Exception:
+                if attempt == 2:
+                    logger.exception(
+                        "Unable to remove stale vectors for document %s", document_id
+                    )
+                    return
+                await asyncio.sleep(0.2 * (attempt + 1))
 
     async def delete_document(self, document_id: uuid.UUID) -> None:
         async with self._lock_for(document_id):
