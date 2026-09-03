@@ -273,6 +273,7 @@ class KnowledgeCandidateDto(ApiModel):
 class AdminDialogListItem(DialogSummary):
     resolved_by: Literal["ai", "operator"]
     last_confidence: float | None = None
+    moderation_status: Literal["unmoderated", "approved", "rejected"]
 
 
 class AdminDialogPage(ApiModel):

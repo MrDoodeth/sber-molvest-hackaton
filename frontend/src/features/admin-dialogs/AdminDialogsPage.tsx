@@ -3,11 +3,23 @@ import { Bot, ChevronLeft, ChevronRight, Image as ImageIcon, MessagesSquare, Use
 import { Link, useSearchParams } from "react-router-dom";
 import { adminApi, type AdminDialogFilters } from "../../api/admin";
 import { queryKeys } from "../../api/queryKeys";
-import type { FeedbackVerdict } from "../../api/types";
+import type { FeedbackVerdict, ModerationStatus } from "../../api/types";
 import { Badge, Button, Card, EmptyState, ErrorState, Field, Input, PageLoader, Select, Tabs } from "../../shared/ui";
 import { formatDateTime, formatPercent } from "../../shared/utils";
 
 type JournalTab = FeedbackVerdict | "unrated";
+
+function moderationLabel(status: ModerationStatus): string {
+  if (status === "approved") return "Одобрено";
+  if (status === "rejected") return "Отклонено";
+  return "Не промодерировано";
+}
+
+function moderationTone(status: ModerationStatus): "neutral" | "success" | "danger" {
+  if (status === "approved") return "success";
+  if (status === "rejected") return "danger";
+  return "neutral";
+}
 
 function parseTab(value: string | null): JournalTab {
   return value === "ai_error" || value === "unrated" ? value : "helpful";
@@ -19,12 +31,14 @@ export default function AdminDialogsPage() {
   const rawPage = Number(searchParams.get("page") ?? 1);
   const page = Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1;
   const resolvedBy = searchParams.get("resolved_by");
+  const moderation = searchParams.get("moderation");
   const filters: AdminDialogFilters = {
     feedback,
     page,
     date: searchParams.get("date") || undefined,
     resolvedBy: resolvedBy === "ai" || resolvedBy === "operator" ? resolvedBy : undefined,
     hasAttachment: searchParams.get("has_attachment") === "true" ? true : undefined,
+    moderation: moderation === "moderated" || moderation === "unmoderated" ? moderation : undefined,
   };
   const dialogs = useQuery({
     queryKey: queryKeys.admin.dialogs(filters),
@@ -61,13 +75,18 @@ export default function AdminDialogsPage() {
               ariaLabel="Группы журнала"
               items={[{ value: "helpful", label: "Полезные" }, { value: "ai_error", label: "AI ошибся" }, { value: "unrated", label: "Ожидают оценки" }]}
             />
-            <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <Field label="Дата закрытия">
                 <Input type="date" value={filters.date ?? ""} onChange={(event) => patchFilters({ date: event.target.value || undefined })} />
               </Field>
               <Field label="Кем решено">
                 <Select className="appearance-none" value={filters.resolvedBy ?? ""} onChange={(event) => patchFilters({ resolved_by: event.target.value || undefined })}>
                   <option value="">Все</option><option value="ai">AI</option><option value="operator">Оператор</option>
+                </Select>
+              </Field>
+              <Field label="Модерация">
+                <Select className="appearance-none" value={filters.moderation ?? ""} onChange={(event) => patchFilters({ moderation: event.target.value || undefined })}>
+                  <option value="">Все</option><option value="unmoderated">Не промодерировано</option><option value="moderated">Промодировано</option>
                 </Select>
               </Field>
               <label className="flex min-h-11 items-center gap-2 self-end rounded-xl border border-stone-200 bg-stone-50 px-3.5 text-sm font-semibold text-stone-700">
@@ -84,16 +103,17 @@ export default function AdminDialogsPage() {
               <div className="hidden w-full md:block">
                 <table className="w-full table-fixed border-collapse text-left text-sm">
                    <thead className="bg-stone-50 text-[10px] font-extrabold uppercase tracking-[0.13em] text-stone-500">
-                    <tr><th className="w-[45%] px-5 py-3">Обращение</th><th className="w-[19%] px-4 py-3">Закрыто</th><th className="w-[15%] px-4 py-3">Решено</th><th className="w-[10%] whitespace-nowrap px-4 py-3">Confidence</th><th className="w-[11%] whitespace-nowrap px-5 py-3" /></tr>
+                    <tr><th className="w-[37%] px-3 py-3">Обращение</th><th className="w-[16%] px-3 py-3">Закрыто</th><th className="w-[12%] px-3 py-3">Решено</th><th className="w-[10%] whitespace-nowrap px-3 py-3">Confidence</th><th className="w-[16%] px-3 py-3 text-center">Модерация</th><th className="w-[9%] whitespace-nowrap px-3 py-3" /></tr>
                   </thead>
                   <tbody className="divide-y divide-stone-100">
                     {dialogs.data.items.map((dialog) => (
                       <tr key={dialog.id} className="transition hover:bg-molvest-50/50">
-                        <td className="min-w-0 px-5 py-4"><div className="flex min-w-0 items-start gap-3">{dialog.hasAttachment ? <ImageIcon className="mt-0.5 size-4 shrink-0 text-indigo-500" /> : <MessagesSquare className="mt-0.5 size-4 shrink-0 text-stone-300" />}<div className="min-w-0"><p className="line-clamp-2 break-words font-bold text-stone-900">{dialog.title || dialog.lastMessagePreview || "Завершённое обращение"}</p><p className="mt-1 truncate text-xs text-stone-400">{dialog.user?.displayName || `ID ${dialog.id.slice(0, 8)}`}</p></div></div></td>
-                        <td className="whitespace-nowrap px-4 py-4 text-xs text-stone-500">{formatDateTime(dialog.closedAt)}</td>
-                        <td className="px-4 py-4"><Badge tone={dialog.resolvedBy === "ai" ? "giga" : "info"}>{dialog.resolvedBy === "ai" ? <><Bot className="mr-1 size-3" /> AI</> : <><UserRound className="mr-1 size-3" /> Оператор</>}</Badge></td>
-                        <td className="whitespace-nowrap px-4 py-4 font-bold text-stone-700">{dialog.lastConfidence == null ? "—" : formatPercent(dialog.lastConfidence)}</td>
-                        <td className="whitespace-nowrap px-5 py-4 text-right"><Link to={`/admin/dialogs/${dialog.id}`} className="text-sm font-bold text-molvest-700 hover:text-molvest-900">Открыть</Link></td>
+                         <td className="min-w-0 overflow-hidden px-3 py-4"><div className="flex min-w-0 items-start gap-2"><div className="shrink-0">{dialog.hasAttachment ? <ImageIcon className="mt-0.5 size-4 text-indigo-500" /> : <MessagesSquare className="mt-0.5 size-4 text-stone-300" />}</div><div className="min-w-0"><p className="line-clamp-2 break-words font-bold text-stone-900">{dialog.title || dialog.lastMessagePreview || "Завершённое обращение"}</p><p className="mt-1 truncate text-xs text-stone-400">{dialog.user?.displayName || `ID ${dialog.id.slice(0, 8)}`}</p></div></div></td>
+                         <td className="break-words px-3 py-4 text-xs text-stone-500">{formatDateTime(dialog.closedAt)}</td>
+                         <td className="px-3 py-4"><Badge className="max-w-full whitespace-normal break-words text-center" tone={dialog.resolvedBy === "ai" ? "giga" : "info"}>{dialog.resolvedBy === "ai" ? <><Bot className="mr-1 size-3 shrink-0" /> AI</> : <><UserRound className="mr-1 size-3 shrink-0" /> Оператор</>}</Badge></td>
+                         <td className="break-words px-3 py-4 font-bold text-stone-700">{dialog.lastConfidence == null ? "—" : formatPercent(dialog.lastConfidence)}</td>
+                         <td className="px-3 py-4 text-center"><Badge className="max-w-full whitespace-normal break-words text-center" tone={moderationTone(dialog.moderationStatus)}>{moderationLabel(dialog.moderationStatus)}</Badge></td>
+                         <td className="px-3 py-4 text-right"><Link to={`/admin/dialogs/${dialog.id}`} className="text-sm font-bold text-molvest-700 hover:text-molvest-900">Открыть</Link></td>
                       </tr>
                     ))}
                   </tbody>
@@ -103,7 +123,7 @@ export default function AdminDialogsPage() {
                 {dialogs.data.items.map((dialog) => (
                   <Link key={dialog.id} to={`/admin/dialogs/${dialog.id}`} className="p-4 transition hover:bg-molvest-50">
                     <div className="flex items-start justify-between gap-3"><p className="line-clamp-2 text-sm font-bold text-stone-900">{dialog.title || dialog.lastMessagePreview || "Завершённое обращение"}</p>{dialog.hasAttachment && <ImageIcon className="size-4 shrink-0 text-indigo-500" />}</div>
-                    <div className="mt-3 flex flex-wrap items-center gap-2"><Badge tone={dialog.resolvedBy === "ai" ? "giga" : "info"}>{dialog.resolvedBy === "ai" ? "AI" : "Оператор"}</Badge><span className="ml-auto text-xs text-stone-400">{formatDateTime(dialog.closedAt)}</span></div>
+                     <div className="mt-3 flex flex-wrap items-center gap-2"><Badge tone={dialog.resolvedBy === "ai" ? "giga" : "info"}>{dialog.resolvedBy === "ai" ? "AI" : "Оператор"}</Badge><Badge tone={moderationTone(dialog.moderationStatus)}>{moderationLabel(dialog.moderationStatus)}</Badge><span className="ml-auto text-xs text-stone-400">{formatDateTime(dialog.closedAt)}</span></div>
                   </Link>
                 ))}
               </div>

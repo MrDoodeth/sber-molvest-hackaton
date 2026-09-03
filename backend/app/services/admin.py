@@ -4,7 +4,7 @@ import math
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import exists, func, select
+from sqlalchemy import exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.contracts.mappers import (
@@ -22,6 +22,7 @@ from app.contracts.schemas import (
     MonitoringResponse,
 )
 from app.core.enums import (
+    CandidateStatus,
     DialogMode,
     DialogStatus,
     FeedbackVerdict,
@@ -66,6 +67,7 @@ class AdminService:
         date_to: datetime | None,
         resolved_by: str | None,
         has_attachment: bool | None,
+        moderation: str | None,
     ) -> AdminDialogPage:
         self._require_admin(admin)
         async with self._session_factory() as session:
@@ -84,6 +86,37 @@ class AdminService:
                         select(DialogFeedback.id).where(
                             DialogFeedback.dialog_id == Dialog.id,
                             DialogFeedback.verdict == FeedbackVerdict(feedback),
+                        )
+                    )
+                )
+            candidate_exists = exists(
+                select(KnowledgeCandidate.id).where(
+                    KnowledgeCandidate.dialog_id == Dialog.id
+                )
+            )
+            if moderation == "unmoderated":
+                filters.append(
+                    or_(
+                        ~candidate_exists,
+                        exists(
+                            select(KnowledgeCandidate.id).where(
+                                KnowledgeCandidate.dialog_id == Dialog.id,
+                                KnowledgeCandidate.status == CandidateStatus.PENDING,
+                            )
+                        ),
+                    )
+                )
+            elif moderation == "moderated":
+                filters.append(
+                    exists(
+                        select(KnowledgeCandidate.id).where(
+                            KnowledgeCandidate.dialog_id == Dialog.id,
+                            KnowledgeCandidate.status.in_(
+                                [
+                                    CandidateStatus.APPROVED,
+                                    CandidateStatus.REJECTED,
+                                ]
+                            ),
                         )
                     )
                 )
@@ -178,6 +211,13 @@ class AdminService:
                             else "ai"
                         ),
                         last_confidence=dialog.dialog_confidence,
+                        moderation_status=(
+                            candidate.status.value
+                            if candidate is not None
+                            and candidate.status
+                            in {CandidateStatus.APPROVED, CandidateStatus.REJECTED}
+                            else "unmoderated"
+                        ),
                     )
                 )
             return AdminDialogPage(

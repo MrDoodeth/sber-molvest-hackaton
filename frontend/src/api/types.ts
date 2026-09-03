@@ -4,6 +4,7 @@ export type DialogMode = "ai_support" | "operator_support";
 export type MessageAuthor = "user" | "assistant" | "operator" | "system";
 export type FeedbackVerdict = "helpful" | "ai_error";
 export type CandidateStatus = "pending" | "approved" | "rejected";
+export type ModerationStatus = "unmoderated" | "approved" | "rejected";
 export type CandidateSource = "user_feedback" | "operator" | "admin";
 export type IndexStatus = "uploaded" | "processing" | "indexed" | "failed";
 export type PromptType = "user_support" | "operator_gigachat" | "knowledge_card";
@@ -167,6 +168,7 @@ export type AdminSettingsInput = Omit<AdminSettingsResponse, "capabilities" | "a
 export interface AdminDialogListItem extends DialogSummary {
   resolvedBy: "ai" | "operator";
   lastConfidence?: number | null;
+  moderationStatus: ModerationStatus;
 }
 
 export interface PageResponse<T> {

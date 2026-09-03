@@ -14,6 +14,7 @@ export interface AdminDialogFilters {
   date?: string;
   resolvedBy?: "ai" | "operator" | "";
   hasAttachment?: boolean;
+  moderation?: "moderated" | "unmoderated" | "";
 }
 
 export const adminApi = {
@@ -25,6 +26,7 @@ export const adminApi = {
         date: filters.date,
         resolved_by: filters.resolvedBy,
         has_attachment: filters.hasAttachment,
+        moderation: filters.moderation,
       })}`,
       { signal },
     ),

@@ -91,6 +91,7 @@ async def admin_dialogs(
     date_to: datetime | None = None,
     resolved_by: Literal["ai", "operator"] | None = None,
     has_attachment: bool | None = None,
+    moderation: Literal["moderated", "unmoderated"] | None = None,
     user: User = Depends(get_current_user),
     container: ApplicationContainer = Depends(get_container),
 ) -> AdminDialogPage:
@@ -106,6 +107,7 @@ async def admin_dialogs(
         date_to=date_to,
         resolved_by=resolved_by,
         has_attachment=has_attachment,
+        moderation=moderation,
     )
 
 
