@@ -96,6 +96,15 @@ _OPERATOR_REQUEST_MARKERS = (
     "передайте оператору",
     "хочу поговорить с человеком",
 )
+_OPERATOR_REQUEST_NEGATIONS = (
+    "не нужен оператор",
+    "оператор не нужен",
+    "не хочу оператора",
+    "не нужен специалист",
+    "специалист не нужен",
+    "не подключайте оператора",
+    "не подключайте специалиста",
+)
 
 
 class DialogService:
@@ -917,15 +926,15 @@ class DialogService:
                         user_dialog_channel(dialog_id),
                         {"type": "confidence", "value": confidence},
                     )
-                    should_escalate = (
+                    explicit_operator_request = self._explicit_operator_request(
+                        trigger_text
+                    )
+                    should_escalate = explicit_operator_request or (
                         confidence < runtime_settings.operator_escalation_threshold
-                        and (
-                            self._explicit_operator_request(trigger_text)
-                            or await self._should_escalate_after_clarifications(
-                                dialog_id,
-                                message_id,
-                                runtime_settings.operator_escalation_threshold,
-                            )
+                        and await self._should_escalate_after_clarifications(
+                            dialog_id,
+                            message_id,
+                            runtime_settings.operator_escalation_threshold,
                         )
                     )
                     if should_escalate:
@@ -1294,6 +1303,8 @@ class DialogService:
     @staticmethod
     def _explicit_operator_request(text: str) -> bool:
         normalized = " ".join(text.casefold().split())
+        if any(marker in normalized for marker in _OPERATOR_REQUEST_NEGATIONS):
+            return False
         return normalized in {
             "оператор",
             "специалист",
