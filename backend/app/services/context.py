@@ -111,7 +111,7 @@ class ContextBuilder:
         for item in evidence:
             cost = estimate_tokens(item.text) + estimate_tokens(item.source.title) + 4
             if cost > remaining:
-                break
+                continue
             selected_evidence.append(item)
             remaining -= cost
         selected: list[ChatTurn] = []
