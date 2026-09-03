@@ -50,6 +50,8 @@ class SourceRef(ApiModel):
     document_id: uuid.UUID
     title: str
     label: str
+    page: int | None = None
+    heading_path: list[str] = Field(default_factory=list)
 
 
 class AttachmentDto(ApiModel):

@@ -106,12 +106,22 @@ class RAGService:
             if row is None:
                 continue
             chunk, document = row
+            metadata = chunk.metadata_ if isinstance(chunk.metadata_, dict) else {}
+            raw_heading_path = metadata.get("heading_path")
+            heading_path = (
+                [item for item in raw_heading_path if isinstance(item, str)]
+                if isinstance(raw_heading_path, list)
+                else []
+            )
+            page = metadata.get("page")
             evidence.append(
                 Evidence(
                     source=SourceRef(
                         document_id=document.id,
                         title=document.title,
                         label=f"S{len(evidence) + 1}",
+                        page=page if isinstance(page, int) else None,
+                        heading_path=heading_path,
                     ),
                     text=chunk.text,
                 )

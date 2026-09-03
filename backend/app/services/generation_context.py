@@ -167,16 +167,6 @@ class GenerationContextService:
         settings: RuntimeSettings,
     ) -> PreparedGenerationContext:
         try:
-            prompt_search_context = (
-                self._context_builder.build_prompt_embedding_context(
-                    current_text=current_text,
-                    history=history,
-                    settings=settings,
-                )
-            )
-            query_embeddings = [
-                await self._rag_service.embed_query(prompt_search_context)
-            ]
             attachment_file_ids, attachment_mime_types = await self._upload_attachments(
                 attachments, settings.active_model, dialog_id
             )
@@ -189,6 +179,16 @@ class GenerationContextService:
                 settings.active_model,
                 dialog_id,
             )
+            prompt_search_context = (
+                self._context_builder.build_prompt_embedding_context(
+                    current_text=current_text,
+                    history=history,
+                    settings=settings,
+                )
+            )
+            query_embeddings = [
+                await self._rag_service.embed_query(prompt_search_context)
+            ]
             if screenshot_extracted_text or screenshot_visual_summary:
                 screenshot_search_context = (
                     self._context_builder.build_screenshot_embedding_context(
