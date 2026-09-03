@@ -117,6 +117,10 @@ export default function UserDialogPage() {
   }, [events.eventError, toast]);
 
   useEffect(() => {
+    setFailedAttempt(undefined);
+  }, [dialogId]);
+
+  useEffect(() => {
     if (!initialTurn.current?.pendingTurn) return;
     navigate(location.pathname, { replace: true, state: null });
   }, [location.pathname, navigate]);
