@@ -18,7 +18,6 @@ export function FeedbackPanel({
         <Badge tone={dialog.feedback.verdict === "helpful" ? "success" : "danger"}>
           {dialog.feedback.verdict === "helpful" ? "Отмечено: решение помогло" : "Отмечено: AI ошибся"}
         </Badge>
-        <p className="mt-2 text-xs text-stone-500">Спасибо, оценка сохранена для итогового разбора обращения.</p>
       </div>
     );
   }

@@ -25,10 +25,7 @@ from app.contracts.schemas import (
     MessagePage,
     OperatorTemplateDto,
 )
-from app.core.constants import (
-    CLOSED_SYSTEM_MESSAGE,
-    ESCALATION_SYSTEM_MESSAGE,
-)
+from app.core.constants import ESCALATION_SYSTEM_MESSAGE
 from app.core.enums import (
     DialogChannel,
     DialogMode,
@@ -809,14 +806,6 @@ class DialogService:
         dialog.status = DialogStatus.CLOSED
         dialog.closed_at = closed_at
         dialog.updated_at = closed_at
-        session.add(
-            Message(
-                dialog_id=dialog.id,
-                author_type=MessageAuthor.SYSTEM,
-                text=CLOSED_SYSTEM_MESSAGE,
-                sources=[],
-            )
-        )
         if self._ensure_closed_candidate is not None:
             await self._ensure_closed_candidate(session, dialog.id)
         if remote_ids:

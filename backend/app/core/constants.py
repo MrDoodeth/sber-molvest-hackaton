@@ -17,4 +17,3 @@ PROTECTED_SECTION_IDS = frozenset(
 )
 
 ESCALATION_SYSTEM_MESSAGE = "К обращению подключился специалист поддержки."
-CLOSED_SYSTEM_MESSAGE = "Обращение закрыто."

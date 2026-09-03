@@ -87,7 +87,6 @@ export default function OperatorWorkspace() {
     onSuccess: (claimed) => {
       queryClient.setQueryData(queryKeys.dialog.detail(claimed.id), claimed);
       void queryClient.invalidateQueries({ queryKey: queryKeys.operator.queues() });
-      toast("Тикет назначен вам", "success");
       requestAnimationFrame(() => textareaRef.current?.focus());
     },
     onError: (error) => {
@@ -156,7 +155,6 @@ export default function OperatorWorkspace() {
       queryClient.setQueryData(queryKeys.dialog.detail(closed.id), closed);
       void queryClient.invalidateQueries({ queryKey: queryKeys.operator.queues() });
       setCloseOpen(false);
-      toast("Тикет закрыт", "success");
     },
     onError: (error) => toast(error.message, "error"),
   });

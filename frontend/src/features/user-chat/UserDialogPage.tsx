@@ -81,7 +81,6 @@ export default function UserDialogPage() {
       queryClient.setQueryData(queryKeys.dialog.detail(dialogId), closed);
       void queryClient.invalidateQueries({ queryKey: queryKeys.user.dialogs() });
       setCloseOpen(false);
-      toast("Обращение завершено", "success");
     },
     onError: (error) => toast(error.message, "error"),
   });
@@ -90,7 +89,6 @@ export default function UserDialogPage() {
     onSuccess: (result) => {
       queryClient.setQueryData(queryKeys.dialog.detail(dialogId), (current: typeof detail.data) => current ? { ...current, feedback: result } : current);
       void queryClient.invalidateQueries({ queryKey: queryKeys.user.dialogs() });
-      toast("Спасибо, оценка сохранена", "success");
     },
     onError: (error) => toast(error.message, "error"),
   });
