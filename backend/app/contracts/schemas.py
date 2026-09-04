@@ -231,6 +231,8 @@ class AdminSettingsUpdate(ApiModel):
 
 
 class CaseCard(ApiModel):
+    """A moderation case card generated from a resolved dialog."""
+
     model_config = ConfigDict(extra="forbid")
 
     title: str = Field(min_length=1, max_length=500)

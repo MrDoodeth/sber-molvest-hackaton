@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.contracts.schemas import CaseCard
 from app.core.config import Settings
@@ -38,6 +38,22 @@ _CONFIDENCE_SYSTEM_PROMPT = """
 Оцени только вероятность того, что на основе предоставленного контекста можно
 сформировать корректное, конкретное и практически применимое решение без догадок.
 
+Обычный справочный вопрос о 1С, просьба объяснить термин или описать возможность
+системы считается достаточным контекстом для общего корректного ответа, даже если
+вопрос не содержит текста ошибки и в базе знаний нет статьи. Не снижайте confidence
+только из-за отсутствия RAG evidence в таком вопросе.
+
+Калибруй шкалу так:
+- 0.0 — нет понятного запроса или пользователь просит подключить специалиста;
+- около 0.3 — понятна тема, но для конкретной диагностики не хватает ключевых данных;
+- 0.8–1.0 — понятный общий вопрос о 1С или задача, для которой уже достаточно
+  данных, чтобы дать полезный ответ.
+
+Например, «Что такое 1С?» и «Расскажи что-нибудь о 1С» — понятные общие вопросы с
+высоким confidence. «У меня ошибка» без текста ошибки — низкий confidence. Не
+считай просьбу выбрать стиль ответа («в важной манере», «кратко», «подробно»)
+признаком недостатка контекста.
+
 Высокий confidence ставь только если:
 - проблема понятна;
 - в контексте достаточно данных;
@@ -59,9 +75,8 @@ _CONFIDENCE_SYSTEM_PROMPT = """
 истории и evidence решение однозначно.
 
 Если пользователь прямо просит подключить оператора или специалиста, confidence
-должен быть равен 0.
-
-Текущий порог эскалации: {threshold:.4f}.
+должен быть равен 0. Порог эскалации из CURRENT SETTINGS не является значением
+confidence и не должен использоваться для его искусственного занижения.
 
 Верни только structured confidence от 0 до 1.
 """.strip()
@@ -97,8 +112,14 @@ class _StructuredResult:
 
 
 class _ScreenshotSchema(BaseModel):
-    extracted_text: str
-    visual_summary: str
+    """Structured visual facts extracted from a runtime screenshot."""
+
+    extracted_text: str = Field(
+        description="Текст и коды ошибок, извлечённые со скриншота."
+    )
+    visual_summary: str = Field(
+        description="Краткое описание значимых элементов интерфейса 1С."
+    )
 
 
 class GigaChatProvider:
@@ -106,7 +127,7 @@ class GigaChatProvider:
         self, settings: Settings, generation_gate: GenerationGate | None = None
     ) -> None:
         self._settings = settings
-        self._clients: dict[tuple[str, int], Any] = {}
+        self._clients: dict[tuple[str, int, float | None, float | None], Any] = {}
         self._generation_gate = generation_gate or GenerationGate()
 
     def _require_credentials(self) -> str:
@@ -116,9 +137,16 @@ class GigaChatProvider:
             )
         return self._settings.gigachat_credentials.get_secret_value()
 
-    def _client(self, model: str, max_tokens: int) -> Any:
+    def _client(
+        self,
+        model: str,
+        max_tokens: int,
+        *,
+        temperature: float | None = None,
+        top_p: float | None = None,
+    ) -> Any:
         credentials = self._require_credentials()
-        key = (model, max_tokens)
+        key = (model, max_tokens, temperature, top_p)
         if key in self._clients:
             return self._clients[key]
         try:
@@ -136,6 +164,10 @@ class GigaChatProvider:
             "max_retries": self._settings.gigachat_max_retries,
             "retry_backoff_factor": self._settings.gigachat_retry_backoff_factor,
         }
+        if temperature is not None:
+            options["temperature"] = temperature
+        if top_p is not None:
+            options["top_p"] = top_p
         if self._settings.gigachat_ca_bundle_file is not None:
             options["ca_bundle_file"] = str(self._settings.gigachat_ca_bundle_file)
         self._clients[key] = GigaChat(**options)
@@ -182,16 +214,8 @@ class GigaChatProvider:
             or "Источники не найдены."
         )
         rag_status = {
-            "empty": (
-                "В постоянной базе знаний нет индексированных материалов. "
-                "Попробуй решить вопрос по пользовательскому контексту, "
-                "но не выдавай непроверенные сведения за инструкцию из БЗ."
-            ),
-            "no_match": (
-                "В постоянной базе знаний не найдено релевантных источников. "
-                "Попробуй решить вопрос по пользовательскому контексту, "
-                "а при недостатке данных предложи подключить специалиста."
-            ),
+            "empty": "В постоянной базе знаний нет индексированных материалов.",
+            "no_match": "В постоянной базе знаний не найдено релевантных источников.",
         }.get(
             request.rag_status,
             "Для ответа доступны релевантные источники постоянной базы знаний.",
@@ -280,10 +304,15 @@ class GigaChatProvider:
     ) -> _StructuredResult:
         for method in ("json_schema", "function_calling"):
             try:
+                structured_kwargs: dict[str, Any] = {
+                    "method": method,
+                    "include_raw": True,
+                }
+                if method == "json_schema":
+                    structured_kwargs["strict"] = True
                 runnable = client.with_structured_output(
                     schema,
-                    method=method,
-                    include_raw=True,
+                    **structured_kwargs,
                 )
                 request_id = uuid.uuid4()
                 with self._request_headers(session_id, request_id):
@@ -462,12 +491,10 @@ class GigaChatProvider:
         async with self._generation_gate.acquire():
             messages = self._messages(
                 request,
-                system_prompt=_CONFIDENCE_SYSTEM_PROMPT.format(
-                    threshold=request.threshold
-                ),
+                system_prompt=_CONFIDENCE_SYSTEM_PROMPT,
             )
             result = await self._structured(
-                client=self._client(model, 64),
+                client=self._client(model, 64, temperature=0.0, top_p=0.1),
                 schema=ConfidenceAssessment,
                 messages=messages,
                 session_id=session_id,

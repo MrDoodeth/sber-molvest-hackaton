@@ -547,7 +547,7 @@ dialog_confidence = 1.0
     GenerationGate.acquire()
             ↓
     CALL #1 — structured ConfidenceAssessment
-    hardcoded confidence prompt + current escalation threshold
+    hardcoded confidence prompt (constrained sampling)
             ↓
     confidence event (hidden technical details)
     ├── confidence >= threshold → CALL #2 user answer, stream tokens through SSE
@@ -661,12 +661,24 @@ confidence assessment. Его контракт содержит только con
 
 ```python
 class ConfidenceAssessment(BaseModel):
-    confidence: float = Field(ge=0, le=1)
+    """Structured result of the hidden routing assessment."""
+
+    confidence: float = Field(
+        ge=0,
+        le=1,
+        description="Насколько контекста достаточно для корректного ответа, от 0 до 1.",
+    )
 ```
 
 Технический confidence prompt захардкожен в backend, не хранится в `SystemPrompt` и
 не показывается администратору. Он оценивает вопрос, историю, RAG evidence, screenshot
-analysis и runtime attachments с учётом текущего `operator_escalation_threshold`.
+analysis и runtime attachments. Текущий `operator_escalation_threshold` используется
+только backend decision policy после call и не задаёт значение confidence.
+
+Для общих справочных вопросов о 1С отсутствие текста ошибки или RAG evidence само по
+себе не является основанием для низкого confidence. Structured confidence call
+использует ограниченные параметры sampling для стабильной маршрутизации; пользовательский prompt
+`user_support` в него не передаётся.
 
 Decision policy работает так:
 
@@ -685,6 +697,11 @@ else:
 уточнение не помогает, backend в одной транзакции переводит Dialog в
 `operator_support` и сохраняет system Message с confidence и внутренним snapshot
 `Message.sources`.
+
+Текст уточнения выбирается локально по содержанию текущего сообщения: для ошибки,
+справочного вопроса о 1С, вопроса о конфигурации и общего запроса используются
+разные безопасные формулировки. Это не является третьим GigaChat-call и не создаёт
+новый confidence threshold.
 
 Системное сообщение переживает reload. Пользователь продолжает тот же тикет, а
 эскалированное обращение появляется в панели оператора. Source snapshot хранится
@@ -869,7 +886,7 @@ RAG retrieval
                 GenerationGate.acquire()
                     ↓
                 CALL #1: structured ConfidenceAssessment
-                hardcoded confidence prompt + threshold
+                hardcoded confidence prompt; threshold применяется после call
                     ↓
                 confidence SSE event
                 ┌──────────────────────────────┼─────────────────────┐
@@ -893,12 +910,20 @@ RAG retrieval
 
                 ```python
                 class ConfidenceAssessment(BaseModel):
-                    confidence: float = Field(ge=0, le=1)
+                    """Structured result of the hidden routing assessment."""
+
+                    confidence: float = Field(
+                        ge=0,
+                        le=1,
+                        description="Насколько контекста достаточно для корректного ответа, от 0 до 1.",
+                    )
                 ```
 
                 Confidence получает полный общий контекст, но не получает редактируемый
                 `SystemPrompt(type=user_support)`: используется только hardcoded technical
-                instruction. Если confidence ниже порога, второй call не выполняется.
+                instruction. Для стабильной маршрутизации structured call выполняется с
+                `temperature=0, top_p=0.1`. Если confidence ниже порога, второй call не
+                выполняется.
                 Уточнение разрешено максимум два раза по существующей policy; затем Dialog
                 переводится в `operator_support`.
 
@@ -1184,7 +1209,7 @@ sequenceDiagram
         API-->>U: SSE assistant_token...
         API-->>U: SSE assistant_done
     else confidence < threshold
-        alt clarification is useful and policy allows it
+        alt clarification policy allows it
             API-->>U: SSE assistant_done with clarification question
         else escalation required
             API->>E: switch same Dialog to operator_support
@@ -2002,7 +2027,7 @@ generation-вызов формирует шаблон ответа; он не о
 
 `confidence` оценивается первым отдельным structured-вызовом в `ai_support` до
 формирования ответа и до его публикации пользователю. Этот вызов использует только
-hardcoded технический confidence prompt и текущий порог; редактируемый
+hardcoded технический confidence prompt; порог применяется после call, а редактируемый
 `SystemPrompt(type=user_support)` в него не передаётся. Structured-вызовы также
 используются для screenshot parse и явного заполнения Knowledge Card.
 
@@ -2930,7 +2955,13 @@ Structured Output используется для **Call #1 — confidence те�
 
 ```python
 class ConfidenceAssessment(BaseModel):
-    confidence: float = Field(ge=0, le=1)
+    """Structured result of the hidden routing assessment."""
+
+    confidence: float = Field(
+        ge=0,
+        le=1,
+        description="Насколько контекста достаточно для корректного ответа, от 0 до 1.",
+    )
 
 assessment = llm.with_structured_output(
     ConfidenceAssessment,

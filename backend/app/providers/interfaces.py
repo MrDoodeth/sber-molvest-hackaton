@@ -108,9 +108,15 @@ class ProviderUsage:
 
 
 class ConfidenceAssessment(BaseModel):
+    """Structured confidence returned by the hidden routing assessment."""
+
     model_config = ConfigDict(extra="forbid")
 
-    confidence: float = Field(ge=0, le=1)
+    confidence: float = Field(
+        ge=0,
+        le=1,
+        description="Насколько контекста достаточно для корректного ответа, от 0 до 1.",
+    )
 
     _usage: ProviderUsage | None = PrivateAttr(default=None)
 
