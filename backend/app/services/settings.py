@@ -57,11 +57,7 @@ class SettingsService:
     async def get_runtime(self, session: AsyncSession) -> RuntimeSettings:
         rows = (await session.scalars(select(SystemSetting))).all()
         values: dict[str, Any] = dict(DEFAULT_SETTINGS)
-        threshold = next(
-            (row.value for row in rows if row.key == "operator_escalation_threshold"),
-            DEFAULT_SETTINGS["operator_escalation_threshold"],
-        )
-        values["operator_escalation_threshold"] = threshold
+        values.update({row.key: row.value for row in rows})
         runtime = RuntimeSettings(
             active_model=str(values["active_gigachat_model"]),
             gigachat_context_ratio=float(values["gigachat_context_ratio"]),
@@ -102,32 +98,28 @@ class SettingsService:
         self, session: AsyncSession, payload: AdminSettingsUpdate
     ) -> AdminSettingsResponse:
         runtime = RuntimeSettings(
-            active_model=str(DEFAULT_SETTINGS["active_gigachat_model"]),
-            gigachat_context_ratio=float(
-                str(DEFAULT_SETTINGS["gigachat_context_ratio"])
-            ),
-            gigachat_max_output_tokens=int(
-                str(DEFAULT_SETTINGS["gigachat_max_output_tokens"])
-            ),
-            embedding_context_ratio=float(
-                str(DEFAULT_SETTINGS["embedding_context_ratio"])
-            ),
-            rag_top_k=int(str(DEFAULT_SETTINGS["rag_top_k"])),
+            active_model=payload.active_model,
+            gigachat_context_ratio=payload.gigachat_context_ratio,
+            gigachat_max_output_tokens=payload.gigachat_max_output_tokens,
+            embedding_context_ratio=payload.embedding_context_ratio,
+            rag_top_k=payload.rag_top_k,
             operator_escalation_threshold=payload.operator_escalation_threshold,
         )
         self._validate(runtime)
-        row = await session.get(
-            SystemSetting, "operator_escalation_threshold", with_for_update=True
-        )
-        if row is None:
-            session.add(
-                SystemSetting(
-                    key="operator_escalation_threshold",
-                    value=runtime.operator_escalation_threshold,
-                )
-            )
-        else:
-            row.value = runtime.operator_escalation_threshold
+        values: dict[str, object] = {
+            "active_gigachat_model": runtime.active_model,
+            "gigachat_context_ratio": runtime.gigachat_context_ratio,
+            "gigachat_max_output_tokens": runtime.gigachat_max_output_tokens,
+            "embedding_context_ratio": runtime.embedding_context_ratio,
+            "rag_top_k": runtime.rag_top_k,
+            "operator_escalation_threshold": runtime.operator_escalation_threshold,
+        }
+        for key, value in values.items():
+            row = await session.get(SystemSetting, key, with_for_update=True)
+            if row is None:
+                session.add(SystemSetting(key=key, value=value))
+            else:
+                row.value = value
         await session.commit()
         return await self.get_response(session)
 
