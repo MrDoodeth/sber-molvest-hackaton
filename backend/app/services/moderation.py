@@ -362,9 +362,9 @@ class ModerationService:
                             )
                         document_id = document.id
                     try:
-                        if (
-                            document_created
-                            or document.index_status != IndexStatus.INDEXED
+                        if document_created or (
+                            document is not None
+                            and document.index_status != IndexStatus.INDEXED
                         ):
                             await self._knowledge_base.ingest(document_id)
                     except IngestionFailedError as exc:

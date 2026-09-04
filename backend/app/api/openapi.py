@@ -92,9 +92,11 @@ PROTECTED_RESPONSES: dict[int | str, dict[str, Any]] = {
 
 USER_SSE_RESPONSE: dict[str, Any] = {
     "description": (
-        "Infinite user-safe stream. Events: confidence, operator_connected, "
-        "assistant_token, assistant_done, operator_message, dialog_closed, error. "
-        "Reconnect and refetch REST state."
+        "Infinite user-safe stream. The confidence event is emitted after the hidden "
+        "structured assessment; when the threshold is passed, answer chunks follow "
+        "immediately. Events: confidence, operator_connected, assistant_token, "
+        "assistant_done, operator_message, dialog_closed, error. Reconnect and "
+        "refetch REST state."
     ),
     "content": {
         "text/event-stream": {

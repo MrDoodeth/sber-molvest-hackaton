@@ -58,7 +58,6 @@ from app.models import (
 from app.providers.interfaces import (
     LLMProvider,
     ProviderError,
-    ProviderPolicyError,
     ProviderServerError,
     ProviderUsage,
     StorageError,
@@ -995,6 +994,7 @@ class DialogService:
                         runtime_settings,
                         prompt_content,
                         message_id,
+                        usage=None,
                     )
                     return
 
@@ -1016,29 +1016,14 @@ class DialogService:
                         item.source.model_dump(mode="json")
                         for item in generation_request.evidence
                     ]
-                    output_filter = ModelOutputStreamFilter()
-                    async for chunk in self._llm_provider.stream_text(
-                        generation_request,
-                        runtime_settings.active_model,
-                        runtime_settings.gigachat_max_output_tokens,
-                        dialog_id,
-                    ):
-                        if chunk.usage is not None:
-                            usage = chunk.usage
-                        if not chunk.text:
-                            continue
-                        output_filter.push(chunk.text)
-                    generated_text = output_filter.final()
-                    if not generated_text:
-                        raise ProviderServerError("GigaChat вернул пустой ответ")
 
-                    assessment = await self._llm_provider.assess_answer(
+                    assessment = await self._llm_provider.evaluate_confidence(
                         generation_request,
-                        generated_text,
                         runtime_settings.active_model,
                         dialog_id,
                     )
                     confidence = assessment.confidence
+                    usage = self._combine_usage(getattr(assessment, "usage", None))
                     await self._persist_confidence(
                         dialog_id, message_id, confidence, source_snapshot
                     )
@@ -1046,6 +1031,7 @@ class DialogService:
                         user_dialog_channel(dialog_id),
                         {"type": "confidence", "value": confidence},
                     )
+
                     threshold = runtime_settings.operator_escalation_threshold
                     if confidence < threshold:
                         (
@@ -1054,19 +1040,12 @@ class DialogService:
                         ) = await self._clarification_state(
                             dialog_id, message_id, threshold
                         )
-                        confidence_did_not_grow = (
-                            clarification_count > 0
-                            and previous_confidence is not None
-                            and confidence <= previous_confidence
-                        )
-                        question = (assessment.clarification_question or "").strip()
-                        can_clarify = (
-                            assessment.clarification_useful
-                            and not assessment.escalation_required
-                            and bool(question)
-                            and question.count("?") + question.count("？") <= 1
-                            and clarification_count < 2
-                            and not confidence_did_not_grow
+                        can_clarify = clarification_count < 2 and (
+                            clarification_count == 0
+                            or (
+                                previous_confidence is not None
+                                and confidence > previous_confidence
+                            )
                         )
                         if not can_clarify:
                             await self._escalate(
@@ -1077,11 +1056,14 @@ class DialogService:
                                 runtime_settings,
                                 prompt_content,
                                 message_id,
+                                usage=usage,
                             )
                             return
+
+                        clarification = self._clarification_message(clarification_count)
                         dto = await self._persist_assistant(
                             dialog_id,
-                            question,
+                            clarification,
                             confidence,
                             source_snapshot,
                             trigger_message_id=message_id,
@@ -1104,41 +1086,47 @@ class DialogService:
                         )
                         return
 
-                dto = await self._persist_assistant(
-                    dialog_id,
-                    generated_text,
-                    confidence,
-                    source_snapshot,
-                    trigger_message_id=message_id,
-                )
-                await self._publish_buffered_answer(dialog_id, generated_text)
-                await self._broker.publish(
-                    user_dialog_channel(dialog_id),
-                    {
-                        "type": "assistant_done",
-                        "message": dto.model_dump(mode="json"),
-                    },
-                )
-                await self._record_metric(
-                    dialog_id,
-                    started,
-                    confidence,
-                    False,
-                    usage,
-                    runtime_settings,
-                    prompt_content,
-                )
-        except ProviderPolicyError:
-            if dialog_id is not None:
-                try:
+                    output_filter = ModelOutputStreamFilter()
+                    streamed_text = ""
+                    answer_usage: ProviderUsage | None = None
+                    async for chunk in self._llm_provider.stream_user_answer(
+                        generation_request,
+                        runtime_settings.active_model,
+                        runtime_settings.gigachat_max_output_tokens,
+                        dialog_id,
+                    ):
+                        if chunk.usage is not None:
+                            answer_usage = chunk.usage
+                            usage = self._combine_usage(
+                                getattr(assessment, "usage", None), answer_usage
+                            )
+                        if not chunk.text:
+                            continue
+                        token = output_filter.push(chunk.text)
+                        if not token:
+                            continue
+                        streamed_text += token
+                        await self._broker.publish(
+                            user_dialog_channel(dialog_id),
+                            {"type": "assistant_token", "token": token},
+                        )
+                    answer_text = output_filter.final()
+                    if not answer_text:
+                        raise ProviderServerError("GigaChat вернул пустой ответ")
+                    if answer_text.startswith(streamed_text):
+                        remaining = answer_text[len(streamed_text) :]
+                        if remaining:
+                            await self._broker.publish(
+                                user_dialog_channel(dialog_id),
+                                {"type": "assistant_token", "token": remaining},
+                            )
+                    usage = self._combine_usage(
+                        getattr(assessment, "usage", None), answer_usage
+                    )
                     dto = await self._persist_assistant(
                         dialog_id,
-                        (
-                            "Не могу обработать этот запрос из-за ограничений "
-                            "безопасности. Переформулируйте вопрос в контексте "
-                            "технической поддержки 1С."
-                        ),
-                        None,
+                        answer_text,
+                        confidence,
                         source_snapshot,
                         trigger_message_id=message_id,
                     )
@@ -1154,28 +1142,9 @@ class DialogService:
                         started,
                         confidence,
                         False,
-                        None,
+                        usage,
                         runtime_settings,
                         prompt_content,
-                        success=False,
-                        error_message=(
-                            "GigaChat заблокировал запрос по политике безопасности"
-                        ),
-                    )
-                except Exception:
-                    logger.exception(
-                        "Unable to persist policy-safe response for message %s",
-                        message_id,
-                    )
-                    await self._mark_turn_failed(
-                        message_id, "Не удалось обработать сообщение"
-                    )
-                    await self._broker.publish(
-                        user_dialog_channel(dialog_id),
-                        {
-                            "type": "error",
-                            "message": "Не удалось обработать сообщение",
-                        },
                     )
         except ProviderError as exc:
             await self._mark_turn_failed(message_id, str(exc))
@@ -1391,6 +1360,7 @@ class DialogService:
         runtime_settings: RuntimeSettings,
         prompt_content: str,
         trigger_message_id: uuid.UUID,
+        usage: ProviderUsage | None,
     ) -> None:
         async with self._session_factory() as session:
             dialog = await session.get(Dialog, dialog_id, with_for_update=True)
@@ -1437,7 +1407,7 @@ class DialogService:
             started,
             confidence,
             True,
-            None,
+            usage,
             runtime_settings,
             prompt_content,
         )
@@ -1525,12 +1495,38 @@ class DialogService:
                     previous_confidence = message.confidence
             return clarification_count, previous_confidence
 
-    async def _publish_buffered_answer(self, dialog_id: uuid.UUID, text: str) -> None:
-        for offset in range(0, len(text), 512):
-            await self._broker.publish(
-                user_dialog_channel(dialog_id),
-                {"type": "assistant_token", "token": text[offset : offset + 512]},
+    @staticmethod
+    def _combine_usage(*usages: ProviderUsage | None) -> ProviderUsage | None:
+        if not any(usage is not None for usage in usages):
+            return None
+
+        def total(field: str) -> int | None:
+            values = [
+                value
+                for usage in usages
+                if usage is not None
+                for value in [getattr(usage, field)]
+                if value is not None
+            ]
+            return sum(values) if values else None
+
+        return ProviderUsage(
+            prompt_tokens=total("prompt_tokens"),
+            completion_tokens=total("completion_tokens"),
+            precached_prompt_tokens=total("precached_prompt_tokens"),
+        )
+
+    @staticmethod
+    def _clarification_message(clarification_count: int) -> str:
+        if clarification_count == 0:
+            return (
+                "Уточните, пожалуйста, точный текст ошибки и шаги, после которых "
+                "она появляется."
             )
+        return (
+            "Уточните, пожалуйста, конфигурацию 1С, версию платформы и что уже "
+            "удалось проверить."
+        )
 
     @staticmethod
     def _explicit_operator_request(text: str) -> bool:

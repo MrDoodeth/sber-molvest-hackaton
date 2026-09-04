@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+
 from app.contracts.schemas import CaseCard, SourceRef
 
 
@@ -99,24 +101,29 @@ class GenerationRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class AnswerAssessment:
-    confidence: float
-    clarification_useful: bool
-    clarification_question: str | None = None
-    escalation_required: bool = False
+class ProviderUsage:
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    precached_prompt_tokens: int | None = None
+
+
+class ConfidenceAssessment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    confidence: float = Field(ge=0, le=1)
+
+    _usage: ProviderUsage | None = PrivateAttr(default=None)
+
+    @property
+    def usage(self) -> ProviderUsage | None:
+        """Usage captured alongside the structured provider response."""
+        return self._usage
 
 
 @dataclass(frozen=True, slots=True)
 class ScreenshotAnalysis:
     extracted_text: str
     visual_summary: str
-
-
-@dataclass(frozen=True, slots=True)
-class ProviderUsage:
-    prompt_tokens: int | None = None
-    completion_tokens: int | None = None
-    precached_prompt_tokens: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,13 +156,12 @@ class LLMProvider(Protocol):
         session_id: uuid.UUID,
     ) -> ScreenshotAnalysis: ...
 
-    async def assess_answer(
+    async def evaluate_confidence(
         self,
         request: GenerationRequest,
-        candidate_answer: str,
         model: str,
         session_id: uuid.UUID,
-    ) -> AnswerAssessment: ...
+    ) -> ConfidenceAssessment: ...
 
     async def generate_case_card(
         self,
@@ -166,6 +172,14 @@ class LLMProvider(Protocol):
     ) -> CaseCard: ...
 
     def stream_text(
+        self,
+        request: GenerationRequest,
+        model: str,
+        max_output_tokens: int,
+        session_id: uuid.UUID,
+    ) -> AsyncIterator[StreamChunk]: ...
+
+    def stream_user_answer(
         self,
         request: GenerationRequest,
         model: str,

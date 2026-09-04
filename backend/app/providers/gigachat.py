@@ -3,15 +3,16 @@ from __future__ import annotations
 import contextlib
 import uuid
 from collections.abc import AsyncIterator, Iterator
+from dataclasses import dataclass
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from app.contracts.schemas import CaseCard
 from app.core.config import Settings
 from app.core.generation_gate import GenerationGate
 from app.providers.interfaces import (
-    AnswerAssessment,
+    ConfidenceAssessment,
     GenerationRequest,
     ProviderAuthenticationError,
     ProviderBadRequestError,
@@ -28,12 +29,71 @@ from app.providers.interfaces import (
     StreamChunk,
 )
 
+_CONFIDENCE_SYSTEM_PROMPT = """
+Ты оцениваешь достаточность текущего контекста для ответа специалиста технической
+поддержки 1С.
 
-class _AnswerAssessmentSchema(BaseModel):
-    confidence: float = Field(ge=0, le=1)
-    clarification_useful: bool
-    clarification_question: str | None = None
-    escalation_required: bool
+Не пытайся дать пользователю ответ.
+
+Оцени только вероятность того, что на основе предоставленного контекста можно
+сформировать корректное, конкретное и практически применимое решение без догадок.
+
+Высокий confidence ставь только если:
+- проблема понятна;
+- в контексте достаточно данных;
+- найденные материалы действительно относятся к проблеме;
+- можно предложить конкретные действия;
+- не требуется придумывать неизвестные настройки, версии, причины ошибки или
+  состояние системы.
+
+Снижай confidence если:
+- вопрос неоднозначен;
+- не хватает существенных данных;
+- evidence слабый или не относится к проблеме;
+- есть несколько существенно разных возможных причин;
+- требуется доступ к системе или действия специалиста;
+- необходимо делать предположения.
+
+Не завышай confidence только потому, что найден похожий документ.
+Не занижай confidence только потому, что вопрос сформулирован неидеально, если из
+истории и evidence решение однозначно.
+
+Если пользователь прямо просит подключить оператора или специалиста, confidence
+должен быть равен 0.
+
+Текущий порог эскалации: {threshold:.4f}.
+
+Верни только structured confidence от 0 до 1.
+""".strip()
+
+
+_USER_ANSWER_INSTRUCTION = """
+Верни только обычный текст ответа пользователю.
+Не возвращай JSON и отдельное поле confidence.
+Используй Markdown для заголовков, списков и выделения; код оформляй fenced-блоком
+с языком, если это уместно. Если пользователь просит показать или проверить виды
+Markdown, не заключай заголовки, списки, цитаты, жирный/курсивный/зачёркнутый
+текст, ссылки, изображения и горизонтальные линии в code fence: верни их как
+настоящую Markdown-разметку. Code fence используй только для программного кода,
+SQL или явно запрошенного исходного Markdown; не вкладывай тройные backticks друг
+в друга. Не добавляй служебные статусы интерфейса, таймеры или счётчики времени,
+например «осталось 00:00». Не раскрывай внутренние идентификаторы и список
+источников пользователю.
+""".strip()
+
+
+_OPERATOR_TEMPLATE_INSTRUCTION = """
+Верни только обычный текст шаблона ответа для оператора. Не возвращай JSON и не
+добавляй служебные комментарии, внутренние статусы или метку «шаблон». Используй
+Markdown для заголовков, списков и выделения; код оформляй fenced-блоком с языком,
+если это уместно. Не раскрывай внутренние идентификаторы и список источников.
+""".strip()
+
+
+@dataclass(frozen=True, slots=True)
+class _StructuredResult:
+    parsed: BaseModel
+    usage: ProviderUsage | None = None
 
 
 class _ScreenshotSchema(BaseModel):
@@ -106,7 +166,9 @@ class GigaChatProvider:
             for variable, token in reversed(tokens):
                 variable.reset(token)
 
-    def _messages(self, request: GenerationRequest) -> list[Any]:
+    def _messages(
+        self, request: GenerationRequest, *, system_prompt: str | None = None
+    ) -> list[Any]:
         try:
             from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
         except ImportError as exc:
@@ -141,8 +203,11 @@ class GigaChatProvider:
                 f"Извлечённый текст: {request.screenshot_extracted_text or ''}\n"
                 f"Визуальное описание: {request.screenshot_visual_summary or ''}"
             )
+        selected_system_prompt = (
+            system_prompt if system_prompt is not None else request.system_prompt
+        )
         system = (
-            f"{request.system_prompt}\n\n"
+            f"{selected_system_prompt}\n\n"
             "CURRENT SETTINGS\n"
             f"operator_escalation_threshold = {request.threshold}\n\n"
             f"RAG STATUS\n{rag_status}\n\n"
@@ -212,7 +277,7 @@ class GigaChatProvider:
         messages: list[Any],
         session_id: uuid.UUID,
         auto_file_functions: bool = False,
-    ) -> BaseModel:
+    ) -> _StructuredResult:
         for method in ("json_schema", "function_calling"):
             try:
                 runnable = client.with_structured_output(
@@ -246,8 +311,14 @@ class GigaChatProvider:
                         raise ProviderBadRequestError(
                             "GigaChat не вернул structured result"
                         )
-                    return schema.model_validate(parsed)
-                return schema.model_validate(result)
+                    return _StructuredResult(
+                        parsed=schema.model_validate(parsed),
+                        usage=self._usage_from_message(raw),
+                    )
+                return _StructuredResult(
+                    parsed=schema.model_validate(result),
+                    usage=self._usage_from_message(result),
+                )
             except Exception as exc:
                 if isinstance(exc, ProviderPolicyError):
                     raise
@@ -256,6 +327,44 @@ class GigaChatProvider:
                 raise self._map_error(exc) from exc
         raise ProviderBadRequestError(
             "Structured output недоступен для выбранной модели"
+        )
+
+    @staticmethod
+    def _usage_from_message(message: Any) -> ProviderUsage | None:
+        raw_usage = getattr(message, "usage_metadata", None) or {}
+        if not isinstance(raw_usage, dict):
+            return None
+        input_details = raw_usage.get("input_token_details") or {}
+        if not isinstance(input_details, dict):
+            input_details = {}
+        usage = ProviderUsage(
+            prompt_tokens=(
+                raw_usage.get("input_tokens")
+                if isinstance(raw_usage.get("input_tokens"), int)
+                else None
+            ),
+            completion_tokens=(
+                raw_usage.get("output_tokens")
+                if isinstance(raw_usage.get("output_tokens"), int)
+                else None
+            ),
+            precached_prompt_tokens=(
+                input_details.get("cache_read")
+                if isinstance(input_details.get("cache_read"), int)
+                else None
+            ),
+        )
+        return (
+            usage
+            if any(
+                value is not None
+                for value in (
+                    usage.prompt_tokens,
+                    usage.completion_tokens,
+                    usage.precached_prompt_tokens,
+                )
+            )
+            else None
         )
 
     @staticmethod
@@ -338,52 +447,35 @@ class GigaChatProvider:
                 messages=messages,
                 session_id=session_id,
             )
-            parsed = _ScreenshotSchema.model_validate(result)
+            parsed = _ScreenshotSchema.model_validate(result.parsed)
             return ScreenshotAnalysis(
                 extracted_text=parsed.extracted_text,
                 visual_summary=parsed.visual_summary,
             )
 
-    async def assess_answer(
+    async def evaluate_confidence(
         self,
         request: GenerationRequest,
-        candidate_answer: str,
         model: str,
         session_id: uuid.UUID,
-    ) -> AnswerAssessment:
+    ) -> ConfidenceAssessment:
         async with self._generation_gate.acquire():
-            messages = self._messages(request)
-            messages[0].content += (
-                "\n\nANSWER JUDGE\nПеред тобой готовый CANDIDATE ANSWER. Оцени "
-                "уверенность именно в его корректности и способности решить проблему "
-                "пользователя, а не общую понятность вопроса. Верни confidence от 0 "
-                "до 1. Если confidence ниже порога, укажи, может ли один конкретный "
-                "вопрос существенно повысить уверенность. Если да, заполни "
-                "clarification_question ровно одним вопросом; если дополнительная "
-                "информация не поможет и нужен специалист, установи "
-                "escalation_required=true. Не оценивай ответ, который не приведён "
-                "ниже.\n\nCANDIDATE ANSWER\n"
-                f"{candidate_answer.strip()}"
+            messages = self._messages(
+                request,
+                system_prompt=_CONFIDENCE_SYSTEM_PROMPT.format(
+                    threshold=request.threshold
+                ),
             )
             result = await self._structured(
                 client=self._client(model, 64),
-                schema=_AnswerAssessmentSchema,
+                schema=ConfidenceAssessment,
                 messages=messages,
                 session_id=session_id,
                 auto_file_functions=self._has_text_attachments(request),
             )
-            parsed = _AnswerAssessmentSchema.model_validate(result)
-            question = (
-                parsed.clarification_question.strip()
-                if parsed.clarification_question
-                else None
-            )
-            return AnswerAssessment(
-                confidence=parsed.confidence,
-                clarification_useful=parsed.clarification_useful,
-                clarification_question=question or None,
-                escalation_required=parsed.escalation_required,
-            )
+            assessment = ConfidenceAssessment.model_validate(result.parsed)
+            assessment._usage = result.usage
+            return assessment
 
     async def generate_case_card(
         self,
@@ -408,35 +500,51 @@ class GigaChatProvider:
                 session_id=session_id,
                 auto_file_functions=self._has_text_attachments(request),
             )
-            return CaseCard.model_validate(result)
+            return CaseCard.model_validate(result.parsed)
 
-    async def stream_text(
+    def stream_text(
         self,
         request: GenerationRequest,
         model: str,
         max_output_tokens: int,
         session_id: uuid.UUID,
     ) -> AsyncIterator[StreamChunk]:
+        return self._stream_text(
+            request,
+            model,
+            max_output_tokens,
+            session_id,
+            instruction=_OPERATOR_TEMPLATE_INSTRUCTION,
+        )
+
+    def stream_user_answer(
+        self,
+        request: GenerationRequest,
+        model: str,
+        max_output_tokens: int,
+        session_id: uuid.UUID,
+    ) -> AsyncIterator[StreamChunk]:
+        return self._stream_text(
+            request,
+            model,
+            max_output_tokens,
+            session_id,
+            instruction=_USER_ANSWER_INSTRUCTION,
+        )
+
+    async def _stream_text(
+        self,
+        request: GenerationRequest,
+        model: str,
+        max_output_tokens: int,
+        session_id: uuid.UUID,
+        *,
+        instruction: str,
+    ) -> AsyncIterator[StreamChunk]:
         async with self._generation_gate.acquire():
             client = self._client(model, max_output_tokens)
             messages = self._messages(request)
-            messages[0].content += (
-                "\n\nANSWER OR TEMPLATE\nВерни только обычный текст ответа "
-                "пользователю или шаблона для оператора. Не возвращай JSON и "
-                "отдельное поле confidence. "
-                "Используй Markdown для заголовков, списков и выделения; код "
-                "оформляй fenced-блоком с языком, если это уместно. "
-                "Если пользователь просит показать или проверить виды Markdown, "
-                "не заключай заголовки, списки, цитаты, жирный/курсивный/"
-                "зачёркнутый текст, ссылки, изображения и горизонтальные линии "
-                "в code fence: верни их как настоящую Markdown-разметку. "
-                "Code fence используй только для программного кода, SQL или "
-                "явно запрошенного исходного Markdown; не вкладывай тройные "
-                "backticks друг в друга. "
-                "Не добавляй служебные статусы интерфейса, таймеры или счётчики "
-                "времени, например «осталось 00:00». Не раскрывай внутренние "
-                "идентификаторы и список источников пользователю."
-            )
+            messages[0].content += f"\n\n{instruction}"
             usage: ProviderUsage | None = None
             try:
                 request_id = uuid.uuid4()
