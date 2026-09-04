@@ -168,7 +168,7 @@
 
     ### ADR-3 · GigaChat как основная интеллектуальная модель + локальные embeddings
 
-    - **GigaChat используется в основном пользовательском сценарии:** отдельным structured-вызовом анализирует приложенный screenshot до retrieval, затем формирует candidate answer, отдельным structured-вызовом оценивает именно этот candidate и только после decision policy публикует ответ или задаёт уточнение/эскалирует. Загруженные file ID переиспользуются в generation-вызовах. Конкретная модель GigaChat зафиксирована backend-политикой и показывается в админке только для справки.
+    - **GigaChat используется в основном пользовательском сценарии:** отдельным structured-вызовом анализирует приложенный screenshot до retrieval, затем формирует candidate answer, отдельным structured-вызовом оценивает именно этот candidate и только после decision policy публикует ответ или задаёт уточнение/эскалирует. Загруженные file ID переиспользуются в generation-вызовах. Конкретная модель GigaChat и runtime-бюджеты выбираются администратором из валидируемых настроек.
     - **Embeddings API GigaChat в MVP не используем:** он оплачивается отдельно от Freemium-генерации, поэтому retrieval должен работать полностью локально и не зависеть от платной услуги.
     - **Единственная embedding-модель MVP:** `BAAI/bge-m3`.
     - **Почему `BGE-M3`:** мультиязычность (>100 языков), 1024-мерные dense-вектора, контекст до 8192 токенов, MIT-лицензия и возможность получать dense + sparse representations для hybrid retrieval.
@@ -232,6 +232,10 @@
     - `MetricEvent` хранит тип операции, success/error, модель, полный prompt,
     retrieval-настройки и usage generation-call; RAG source snapshot сохраняется во
     внутреннем поле `Message.sources`, но не отдаётся через текущий `MessageDto`;
+    - admin settings позволяют одной atomic mutation менять `active_model`, оба context
+    ratios, `gigachat_max_output_tokens`, `rag_top_k` и
+    `operator_escalation_threshold`; backend валидирует модель, диапазоны и общий
+    GigaChat budget;
     - фоновый sweeper каждые `DIALOG_IDLE_SCAN_SECONDS` закрывает неактивные Dialog в
     режиме `ai_support` после `DIALOG_IDLE_TIMEOUT_HOURS` без новых user/assistant
     сообщений; такие тикеты остаются `unrated` и отображаются как решённые AI.
@@ -401,10 +405,10 @@
     | Автоподключение к чату | **Не реализуем как обязательный MVP** | Listener Bitrix24/Redmine + режимы `suggest/auto` |
     | База знаний | **Секции + CRUD документов + human-in-the-loop candidate approval + индексация** | Версионирование, массовый импорт |
     | Минимальные данные | Документы загружаются через KB API; автоматический seed реальной документации 1С не выполняется | Полный массив источников заказчика и автоматическая стартовая загрузка |
-    | Админ-настройки | **Один изменяемый ползунок `operator_escalation_threshold`**; модель, context ratios, max output tokens и `rag_top_k` показываются read-only | Продвинутые политики эскалации, RBAC, SLA |
+    | Админ-настройки | **Модель, context ratios, max output tokens, `rag_top_k` и `operator_escalation_threshold`** редактируются одной atomic mutation | Продвинутые политики эскалации, RBAC, SLA |
     | Метрики | % успешных ответов, среднее время ответа, число эскалаций | Prometheus/Grafana, алерты, расширенная аналитика |
     | Очереди/фоновые задачи | FastAPI `BackgroundTasks` / простой worker | Redis + Celery/RQ при росте объёма индексации и параллельных задач |
-    | Контекст моделей | Значения GigaChat/BGE-M3 и `rag_top_k` зафиксированы backend-политикой и отображаются для справки; история сообщений обрезается первой | Более сложная memory/summarization логика только при измеримой необходимости |
+    | Контекст моделей | GigaChat/BGE-M3 ratios, max output tokens и `rag_top_k` задаются через admin settings; история сообщений обрезается первой | Более сложная memory/summarization логика только при измеримой необходимости |
 
     ### Проверка ожидаемого результата по ТЗ
 
@@ -893,8 +897,8 @@
     ```
 
     Она передаётся в candidate/judge context и используется backend decision policy.
-    Остальные runtime AI/RAG settings зафиксированы backend-политикой и в UI доступны
-    только для просмотра.
+    Остальные runtime AI/RAG settings также редактируются в этой форме и сохраняются
+    одной atomic mutation; backend валидирует их перед commit.
 
     Явная просьба пользователя о специалисте определяется детерминированно по набору
     операторских маркеров. В этом случае LLM pipeline обходится: backend сохраняет
@@ -1033,7 +1037,7 @@
 
     После анализа администратор может:
 
-    - исправить БЗ, System Prompt или единственный изменяемый threshold;
+    - исправить БЗ, System Prompt или runtime AI/RAG settings;
     - **удалить разобранный ошибочный чат**, чтобы не засорять рабочую БД.
 
     В карточке ошибочного тикета доступны действия:
@@ -1595,7 +1599,7 @@
 
     Параметр `max_tokens` передаётся непосредственно в запрос `chat/completions` и задаёт **максимальное количество токенов, которое модель может потратить на генерацию ответа**.
 
-    Параметр фиксирован backend-политикой и только передаётся provider-у:
+    Параметр редактируется в админ-панели и передаётся provider-у:
 
     ```text
     gigachat_max_output_tokens
@@ -1634,7 +1638,7 @@
         = 10752 tokens
     ```
 
-    То есть фиксированный `gigachat_max_output_tokens` напрямую определяет, сколько места мы заранее оставляем модели под ответ.
+    То есть `gigachat_max_output_tokens` напрямую определяет, сколько места мы заранее оставляем модели под ответ.
 
     Формула:
 
@@ -1650,9 +1654,11 @@
     0 < gigachat_max_output_tokens < gigachat_total_budget
     ```
 
-    Эти значения не редактируются через admin API в текущем MVP; изменение требует
-    обновления backend policy. При изменении `gigachat_max_output_tokens` больше budget
-    остаётся под историю/RAG, а при увеличении модель может дать более длинный ответ.
+    Эти значения редактируются через admin API в текущем MVP; backend проверяет, что
+    выбранная модель существует, ratios находятся в диапазоне `[0, 1]`, а
+    `gigachat_max_output_tokens` положителен и меньше общего budget. При уменьшении
+    `gigachat_max_output_tokens` больше budget остаётся под историю/RAG, а при увеличении
+    модель может дать более длинный ответ.
 
     ##### Что обрезается при нехватке места
 
@@ -1747,7 +1753,7 @@
         Qdrant
     ```
 
-    Если значение policy слишком мало даже для текущего пользовательского сообщения,
+    Если заданное значение слишком мало даже для текущего пользовательского сообщения,
     backend всегда сохраняет текущий запрос целиком и не добавляет историю.
 
     Для MVP разумное стартовое значение:
@@ -1760,18 +1766,17 @@
 
     #### Как выглядят настройки администратора
 
-    В UI эти параметры показываются как read-only значения. Изменяемым остаётся только
-    `operator_escalation_threshold`:
+    В UI доступны следующие controls:
 
     ```text
     Размер скользящего окна GigaChat
     [────●────────────] 10%
 
-    Максимальный размер ответа (read-only)
-    2048 tokens
+    Максимальный размер ответа
+    [ numeric input ] 2048 tokens
 
-    Контекст Embeddings (read-only)
-    25%
+    Контекст Embeddings
+    [──────●──────────] 25%
     ```
 
     В backend они хранятся как числа:
@@ -1782,8 +1787,8 @@
     embedding_context_ratio    = 0.25
     ```
 
-    Это позволяет backend рассчитать preview budget относительно активной модели. В
-    текущем UI модель и эти ratios не редактируются администратором.
+    Preview budget пересчитывается сразу при изменении модели или ratios; перед сохранением
+    frontend проверяет значения, а backend повторяет всю валидацию.
 
     Например:
 
@@ -1795,7 +1800,7 @@
     ```
 
     Таким образом администратору не нужно вручную пересчитывать токены; model options
-    возвращаются backend только для typed capabilities/preview.
+    возвращаются backend для Select и typed capabilities/preview.
 
     #### Шаг 2. Hybrid retrieval
 
@@ -1894,7 +1899,7 @@
     при необходимости увеличивает candidate limit до трёх раз, чтобы отфильтрованные
     SQL-строки не оставили меньше `top_k` evidence.
 
-    Backend policy задаёт отдельный параметр, а UI показывает его read-only:
+    Администратор задаёт отдельный параметр в UI:
 
     ```text
     rag_top_k
@@ -1922,7 +1927,7 @@
     rag_top_k = 6
     ```
 
-    В UI `rag_top_k` показывается read-only; backend policy задаёт нижнюю границу:
+    В UI `rag_top_k` редактируется; backend policy задаёт нижнюю границу:
 
     ```text
     rag_top_k >= 1
@@ -2153,7 +2158,7 @@
     Модель **всегда указываем явно** в запросе через `model`.
 
     Это важно, потому что SDK по умолчанию может направлять запрос в базовую модель, а
-    backend явно выбирает модель из своей policy.
+    backend явно передаёт выбранную администратором модель.
 
     Актуальное соответствие UI → API identifier:
 
@@ -2166,14 +2171,14 @@
 
     `GigaChat-2` ориентирована на максимальную скорость и более простые задачи; `Pro` лучше следует сложным инструкциям; `Max` предназначена для более сложных задач высокого качества; `GigaChat-3-Ultra` доступна физлицам в Freemium.
 
-    В текущей backend policy:
+    В PostgreSQL:
 
     ```text
     active_gigachat_model = "GigaChat-2-Pro"
     ```
 
-    `available_models` возвращается в typed settings response для capability/preview, но
-    модель не изменяется через admin API и не является пользовательским Select.
+    `available_models` возвращается в typed settings response и используется frontend
+    для выбора модели.
 
     `GigaChatProvider` получает model capabilities из отдельной конфигурации:
 
@@ -2185,7 +2190,7 @@
     - supports_structured_output
     ```
 
-    Так context budget можно автоматически пересчитать при изменении backend policy.
+    Так context budget автоматически пересчитывается при смене модели.
 
     Документация:
     - https://developers.sber.ru/docs/ru/gigachat/guides/selecting-a-model?lang=sh
@@ -2210,7 +2215,7 @@
 
     GigaChat не является серверным persistent-memory store нашего диалога.
 
-    Историю храним полностью в PostgreSQL, а перед каждым запросом backend формирует только актуальное окно согласно фиксированной policy из раздела 5.5.
+    Историю храним полностью в PostgreSQL, а перед каждым запросом backend формирует только актуальное окно согласно настройкам из раздела 5.5.
 
     Текст сообщений передаём в UTF-8.
 
@@ -2834,9 +2839,9 @@
     GIGACHAT_CA_BUNDLE_FILE
     ```
 
-    Модель (`model`) и `max_tokens` берутся из фиксированной backend policy. В PostgreSQL
-    через admin API сохраняется только `operator_escalation_threshold`; остальные значения
-    response используются для read-only preview и capability information.
+    Модель (`model`) и `max_tokens` берутся из runtime settings PostgreSQL. Администратор
+    сохраняет через один PUT модель, context ratios, `max_tokens`, `rag_top_k` и threshold;
+    backend валидирует их и применяет к следующим generation-вызовам.
 
     #### Синхронный и асинхронный API
 
@@ -3930,7 +3935,7 @@
     | GET | `/api/admin/prompts` | три системных prompt |
     | PUT | `/api/admin/prompts/{type}` | обновить prompt целиком |
     | GET | `/api/admin/settings` | typed AI/RAG settings + model capabilities |
-    | PUT | `/api/admin/settings` | сохранить единственный изменяемый threshold |
+    | PUT | `/api/admin/settings` | атомарно сохранить модель, context/RAG settings и threshold |
 
     `GET /api/admin/settings` должен вернуть не только values, но и вычислительные limits:
 
@@ -3954,9 +3959,9 @@
     }
     ```
 
-    Frontend не хардкодит model context limit. Из перечисленных values только
-    `operatorEscalationThreshold` принимается PUT-контрактом; остальные поля и
-    `availableModels` read-only.
+    Frontend не хардкодит model context limit. PUT принимает все runtime values кроме
+    вычисляемых `capabilities` и списка `availableModels`; backend сохраняет их в
+    `SystemSetting` одной транзакцией.
 
     ### 20.5 Admin — Dialog Journal / Moderation
 
@@ -4728,9 +4733,10 @@
     Controls:
 
     ```text
-    operator_escalation_threshold → Slider 0–100% (editable)
-    ratios / max tokens / rag_top_k → read-only values
-    model                          → read-only value
+    ratio / threshold → Slider 0–100%
+    max tokens        → numeric input
+    rag_top_k         → integer input >= 1
+    model             → Select
     ```
 
     Рядом вычисленный preview:
@@ -4741,9 +4747,9 @@
     Порог оператора:   80%
     ```
 
-    Числовые limits и `available_models` приходят от backend `capabilities`. В текущем
-    MVP PUT принимает только `operator_escalation_threshold`; backend сохраняет его
-    атомарно. Остальные поля не являются настройками, редактируемыми администратором.
+    Числовые limits и `available_models` приходят от backend. Save всех AI settings —
+    одна atomic mutation; backend валидирует модель, ratios, max tokens, `rag_top_k` и
+    threshold, затем сохраняет их в `SystemSetting`.
 
     ---
 
