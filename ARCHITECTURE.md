@@ -53,7 +53,7 @@
 
 ## 1. TL;DR
 
-- **Фронтенд собственный** (не 1С/Bitrix24 UI): одно SPA с тремя панелями — `user`, `operator`, `admin`. Backend остаётся channel-agnostic, поэтому Bitrix24/Redmine позже подключаются через адаптеры без переписывания ядра.
+- **Фронтенд собственный** (не 1С/Bitrix24 UI): одно SPA с тремя панелями — `user`, `operator`, `admin`. Backend-сервисы не зависят от SPA, но формальный adapter boundary для внешних каналов пока не реализован; Bitrix24/Redmine остаются roadmap.
 - **Backend — модульный монолит на FastAPI**, не микросервисы: меньше DevOps-расходов на хакатон, модули (RAG, Vision, Escalation, KB) изолированы и готовы к выносу в отдельные сервисы позже.
 - **GigaChat — центральная генеративная модель:** используем API для формирования финального ответа и анализа приложенных скриншотов. Для MVP основной кандидат — `GigaChat (активная модель)`.
 - **Embeddings делаем локально:** Freemium предоставляет бесплатные токены генерации, но векторное представление текста оплачивается отдельно. Поэтому retrieval не зависит от платного Embeddings API; основной локальный кандидат — `BAAI/bge-m3`.
@@ -86,12 +86,12 @@
 
 На хакатоне **основным интерфейсом является собственный frontend**, потому что так быстрее реализовать и качественно продемонстрировать основной пользовательский сценарий.
 
-При этом backend проектируется **channel-agnostic**: бизнес-логика не зависит от UI. Входящее сообщение нормализуется в единый контракт `IncomingMessage`, а ответ — в `OutgoingMessage`.
+При этом backend-сервисы проектируются независимо от UI, но в текущем коде ещё нет отдельного нормализующего контракта `IncomingMessage`/`OutgoingMessage` и интерфейса `IChannelAdapter`.
 
-- сейчас источником сообщений является наш веб-frontend;
-- позже Bitrix24 и Redmine подключаются через адаптеры без изменения RAG, Vision, Dialog и Escalation-логики;
+- сейчас источником сообщений является наш веб-frontend, а REST endpoint напрямую вызывает `DialogService`;
+- позже Bitrix24 и Redmine должны подключаться через адаптеры без изменения RAG, Vision, Dialog и Escalation-логики;
 - REST/SSE API backend остаётся единым ядром системы;
-- особенности конкретного канала изолируются в `IChannelAdapter`.
+- изоляция особенностей канала через `IChannelAdapter` пока является проектным контрактом, а не существующим модулем.
 
 Цель: после хакатона интеграция с Bitrix24/Redmine должна быть **подключением нового интерфейсного адаптера, а не переписыванием backend**.
 
@@ -151,7 +151,7 @@ Message.sources = <internal snapshot RAG evidence>
 - внутренние руководства;
 - памятки и типовые решения.
 
-Поддерживаемые форматы исходных документов: **Word, PDF, HTML, Markdown**.
+Поддерживаемые форматы исходных документов для KB ingestion: **DOCX, PDF, HTML, Markdown**. Старый бинарный `.doc` в permanent KB не принимается; он разрешён только для runtime-вложений.
 
 Изображения и скриншоты пользователей являются runtime-источником контекста: извлечённый из них текст и визуальное описание участвуют в поиске по БЗ и генерации ответа.
 
@@ -180,8 +180,8 @@ seed не скачивает внешний массив документов.
 - **Embeddings API GigaChat в MVP не используем:** он оплачивается отдельно от Freemium-генерации, поэтому retrieval должен работать полностью локально и не зависеть от платной услуги.
 - **Единственная embedding-модель MVP:** `BAAI/bge-m3`.
 - **Почему `BGE-M3`:** мультиязычность (>100 языков), 1024-мерные dense-вектора, контекст до 8192 токенов, MIT-лицензия и возможность получать dense + sparse representations для hybrid retrieval.
-- **Runtime BGE-M3:** зафиксированный snapshot модели скачивается на этапе сборки backend-образа, загружается через `BGEM3FlagModel` в FastAPI lifespan и прогревается до readiness. Во время обработки запросов сеть для Hugging Face не используется.
-- **Runtime Docling:** layout, TableFormer и EasyOCR artifacts скачиваются на этапе сборки backend-образа в `/opt/models/docling`, передаются в `DocumentConverter` через `DOCLING_ARTIFACTS_PATH` и прогреваются в FastAPI lifespan. Во время ingestion сеть для Hugging Face и EasyOCR не используется.
+- **Runtime BGE-M3:** зафиксированный snapshot модели скачивается на этапе сборки backend-образа, загружается через `BGEM3FlagModel` в FastAPI lifespan и прогревается до выдачи lifespan приложения. Во время обработки запросов сеть для Hugging Face не используется.
+- **Runtime Docling:** layout, TableFormer и EasyOCR artifacts скачиваются на этапе сборки backend-образа в `/opt/models/docling`, передаются в `DocumentConverter` через `DOCLING_ARTIFACTS_PATH` и загружаются в FastAPI lifespan. Во время ingestion сеть для Hugging Face и EasyOCR не используется.
 - **Интерфейсы разделяем:** `GigaChatProvider` отвечает за generation/multimodal input, `EmbeddingProvider` — за локальную векторизацию. Это не смешивает платёжные/сетевые ограничения GigaChat с индексом БЗ.
 - **Ограничение Freemium:** один поток generation-запросов. Единый re-entrant `GenerationGate` находится в `app/core/generation_gate.py`; provider защищает каждый GigaChat/file/vision вызов, а сервис удерживает тот же gate на всём атомарном user turn. Дополнительно `TurnCoordinator` защищает admission внутри процесса, а PostgreSQL `pg_advisory_xact_lock(712031043)` и проверка `pending/processing` user triggers не допускают параллельные AI user turns между workers. Embeddings/retrieval выполняются локально.
 - **Не делаем в MVP:** self-hosted генеративную LLM и альтернативные embedding-модели «на всякий случай». Если BGE-M3 не проходит наш golden dataset, модель меняется через `EmbeddingProvider`, но до измерений не усложняем архитектуру.
@@ -209,8 +209,11 @@ seed не скачивает внешний массив документов.
   пересоздаётся PostgreSQL volume. Создание схемы идемпотентно для уже
   существующего актуального volume.
 - **Конфигурация Docker:** runtime-переменные хранятся в единственном корневом
-  `.env`; оба Compose-файла передают его backend через `env_file`, а
-  Docker-specific hostnames, ports и TLS paths задаются только в Compose.
+  `.env`; оба Compose-файла передают его backend через `env_file`, а Compose
+  переопределяет service-specific database/Qdrant hostnames и режимы запуска.
+  Шаблон `.env.example` также содержит локальные host ports и dev-значения,
+  поэтому правило «все Docker-specific значения только в Compose» фактически не
+  соблюдается.
 
 ### 3.1. Текущее состояние реализации
 
@@ -233,8 +236,9 @@ seed не скачивает внешний массив документов.
 - после restart восстанавливаются user turns со статусом `processing`, а документы
   `uploaded/processing` снова ставятся в ingestion; в RAG участвуют только
   документы со статусом `indexed`, включённые секция и документ;
-- BGE-M3 и Docling PDF pipeline прогреваются до readiness; runtime image содержит
-  все необходимые model artifacts и не скачивает модели во время обработки запроса;
+- BGE-M3 и Docling PDF pipeline загружаются в lifespan до обработки запросов; runtime
+  image содержит необходимые model artifacts и не скачивает модели во время запроса,
+  но `/health` не является полной readiness-проверкой;
 - operator Dialog SSE публикует `operator_access_revoked` после назначения тикета
   другому оператору и закрывает доступ к дальнейшим событиям;
 - `MetricEvent` хранит один aggregate на `user_turn`: полную latency цепочки,
@@ -251,6 +255,31 @@ seed не скачивает внешний массив документов.
   сообщений; такие тикеты остаются `unrated` и отображаются как решённые AI.
 - demo-auth/seed-пользователи остаются намеренным MVP-режимом для демонстрации и не
   являются текущей P0-задачей; production identity provider — отдельный roadmap.
+- формального `IChannelAdapter`, `IncomingMessage`/`OutgoingMessage` и каталогов
+  `backend/app/channels` в текущем репозитории нет; все создаваемые через API Dialog
+  имеют `channel=web`.
+- `EventBroker` для SSE хранит подписчиков только в памяти текущего процесса. Нет
+  replay по `Last-Event-ID`, межworker-доставки или внешнего pub/sub; при переполнении
+  очереди на 256 событий старые события отбрасываются.
+- `/health` является liveness endpoint и всегда возвращает `ok`; он не проверяет
+  PostgreSQL, Qdrant, GigaChat или object storage. Qdrant в Compose ожидается только
+  по `service_started`, а коллекция создаётся лениво при первом обращении.
+- remote GigaChat files удаляются при закрытии Dialog или hard delete, а для явной
+  Knowledge Card generation — после вызова. Пока Dialog активен, загруженный remote
+  file может жить дольше одного generation-call; компенсация после частичного upload
+  не является полной.
+- hard delete закрытого Dialog проверяет статус candidate (`pending`/`approved`), но
+  текущий backend не проверяет `DialogFeedback.verdict == ai_error`; endpoint поэтому
+  шире заявленной moderation policy.
+- monitoring API возвращает `failed_requests` и среднюю latency, но не p50/p95; текущий
+  frontend не показывает `failed_requests`. Latency user-turn начинается в background
+  worker, а не в момент persist user message.
+- context budget учитывает текст, history, evidence и screenshot analysis, но не
+  оценивает фактический размер содержимого Files API; при overflow возможна ошибка
+  GigaChat без автоматического fallback в Docling/RAG.
+- backend имеет пять unit-тестов для confidence/policy helper-ов, но не имеет
+  API/integration/SSE/ingestion тестов; frontend test runner отсутствует. Golden RAG
+  evaluator требует заранее загруженных indexed documents и не поднимает fixture сам.
 
 В этой версии `knowledge_card` prompt остаётся для явного legacy/admin backfill;
 обычный candidate создаётся без дополнительного LLM-вызова и редактируется
@@ -289,7 +318,7 @@ flowchart TB
     subgraph DATA["Хранилища"]
         PG[("PostgreSQL")]
         VDB[("Qdrant")]
-        S3[("MinIO / local storage")]
+        S3[("Local / optional S3-compatible storage")]
     end
 
     subgraph EXT["Внешние каналы (Roadmap)"]
@@ -333,7 +362,7 @@ flowchart TB
         - **Dialog decision flow** — `DialogService` один раз собирает `GenerationContext`, вызывает hardcoded confidence assessment, сравнивает его с `operator_escalation_threshold` и запускает streaming answer либо существующую clarification/escalation policy.
   - **Moderation flow** — `ModerationService` показывает администратору завершённые тикеты с `DialogFeedback.verdict=ai_error`, управляет candidate и выполняет подтверждённое каскадное удаление разобранных ошибочных чатов.
 - **KB Service** — CRUD документов, чанкинг, (ре)индексация.
-- **Channel Adapters** (roadmap) — Bitrix24 Open Lines и Redmine HelpDesk через `IChannelAdapter`. Адаптер преобразует сообщения конкретной платформы в единый внутренний контракт backend и обратно.
+  - **Channel Adapters** (roadmap) — Bitrix24 Open Lines и Redmine HelpDesk через будущий `IChannelAdapter`. Такой адаптер должен преобразовывать сообщения конкретной платформы в единый внутренний контракт backend; в текущем коде этого слоя нет.
 
 ## 5. Технологический стек и LangChain-first
 
@@ -342,14 +371,14 @@ flowchart TB
 | Frontend            | **React 18 + TypeScript + Vite + Tailwind + React Router v7 + React Query** | Один SPA для user/operator/admin; Router — маршрутизация, React Query — server state, Tailwind — UI                                     |
 | Realtime            | **SSE + REST**                                                              | REST отправляет команды/сообщения; SSE доставляет токены GigaChat и события состояния тикета                                            |
 | Backend             | Python 3.11 + FastAPI (async)                                               | REST/SSE API, приём сообщений и файлов                                                                                                  |
-| Каналы              | `IChannelAdapter` + REST/webhooks                                           | MVP — собственный frontend; Bitrix24/Redmine адаптеры остаются Roadmap, но backend-контракт уже совместим                               |
+| Каналы              | REST для web MVP; `IChannelAdapter` + webhooks — Roadmap                    | MVP использует только собственный frontend; adapter-контракт и webhooks Bitrix24/Redmine ещё не реализованы                              |
 | Генерация + Vision  | GigaChat API: Lite / Pro / Max / Ultra через `langchain-gigachat`           | Активная модель задаётся backend-политикой и отображается в админке; единый `GigaChatProvider` скрывает различия моделей от RAG/backend |
 | Embeddings          | **Локально `BAAI/bge-m3`** через `FlagEmbedding` / `sentence-transformers`  | Бесплатно локально; RU/multilingual; dense+sparse representations для hybrid retrieval                                                  |
 | Оркестрация         | LangChain Core / LCEL + `langchain-gigachat`                                | Простые последовательные/параллельные Runnable-цепочки без agent executor; прозрачный контроль latency и числа GigaChat-вызовов         |
 | Векторная БД        | Qdrant                                                                      | Hybrid search, payload-фильтры, Docker-friendly                                                                                         |
 | РСУБД               | PostgreSQL                                                                  | Диалоги, тикеты, метаданные БЗ, логи, метрики                                                                                           |
 | Фоновые задачи      | FastAPI `BackgroundTasks` / простой in-process worker                       | Для MVP достаточно для переиндексации небольшого объёма документов без отдельной очереди                                                |
-| Объектное хранилище | MinIO (S3-совместимо)                                                       | Скриншоты, исходные документы                                                                                                           | Быстро извлекает текст/коды ошибки локально перед retrieval; GigaChat всё равно получает исходное изображение и выполняет смысловой Vision-анализ |
+| Объектное хранилище | LocalObjectStorage по умолчанию; опционально S3 через `aioboto3`            | Скриншоты, исходные документы; MinIO не входит в текущий Compose                                                                        | Быстро извлекает текст/коды ошибки локально перед retrieval; GigaChat всё равно получает исходное изображение и выполняет смысловой Vision-анализ |
 | Наблюдаемость       | Application logs + базовые метрики backend                                  | Latency, ошибки, confidence, источники ответа и эскалации без внешнего SaaS                                                             |
 | Проверка RAG        | `tests/rag/evaluate_rag.py` + `tests/rag/rag_golden.json`                   | Скрипт прогоняет тестовые вопросы через retrieval и показывает, попал ли ожидаемый источник в top-k                                     |
 | Деплой              | Docker Compose (демо) → Kubernetes (прод)                                   | Скорость на хакатоне, понятный путь роста                                                                                               |
@@ -387,16 +416,16 @@ flowchart TB
 
 _Открытый вопрос для приёмки: считать SLA «<5 сек» как время до первого токена (со стримингом) или до полного ответа — уточнить у В.В. Донцовой._
 
-**Безопасность и данные:** self-hosted Qdrant/хранилище/Postgres; JWT + роли user/operator/admin. GigaChat credentials находятся только на backend. В Docker/Linux устанавливаем доверенный сертификат НУЦ Минцифры или задаём `ca_bundle_file`; SSL verification не отключаем. Runtime-файлы после использования удаляются из GigaChat File Storage. PII не пишем в технические логи без необходимости.
+**Безопасность и данные:** self-hosted Qdrant/Postgres и local storage по умолчанию (либо внешний S3 через provider); JWT + роли user/operator/admin. В текущем MVP единственный login — demo endpoint, доступный при `DEMO_AUTH_ENABLED=true`; production identity provider и отзыв уже выданных JWT отсутствуют. GigaChat credentials находятся только на backend. В Docker/Linux устанавливаем доверенный сертификат НУЦ Минцифры или задаём `ca_bundle_file`; SSL verification не отключаем. Runtime-файлы удаляются из GigaChat File Storage при close/hard delete, а не обязательно сразу после каждого generation-call. PII не пишем в технические логи без необходимости.
 
-**Масштабирование:** на MVP отдельная очередь задач не нужна. Индексация запускается через FastAPI `BackgroundTasks` / простой worker, а документы в `uploaded/processing` восстанавливаются при старте. Один пользовательский AI-turn глобально защищён PostgreSQL advisory admission lock, а локальный `TurnCoordinator` добавляет process-local guard. `GenerationGate` сериализует provider work только внутри одного процесса; распределённая очередь для всех generation/file/vision вызовов при нескольких replicas остаётся Roadmap.
+**Масштабирование:** на MVP отдельная очередь задач не нужна. Индексация запускается через FastAPI `BackgroundTasks` / простой in-process worker, а документы в `uploaded/processing` восстанавливаются при старте. Один пользовательский AI-turn глобально защищён PostgreSQL advisory admission lock, а локальный `TurnCoordinator` добавляет process-local guard. `GenerationGate` сериализует provider work только внутри одного процесса; `EventBroker` и SSE также работают только внутри процесса. Распределённая очередь для всех generation/file/vision вызовов и внешний broker для SSE при нескольких replicas остаются Roadmap.
 
 ## 7. Метрики эффективности
 
 | Метрика                      | Как считаем                                                                           | Целевой показатель                                    |
 | ---------------------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------- |
 | % обработанных без эскалации | count(escalated=false) / total                                                        | Снижение обращений к операторам на 30–40%             |
-| Среднее время ответа         | `MetricEvent.latency_ms` для полного user turn: от начала обработки persisted message до answer/clarification/escalation/error; агрегаты p50/p95 | <5 сек                                                |
+| Среднее время ответа         | `MetricEvent.latency_ms` для полного user turn: от начала background processing до answer/clarification/escalation/error; текущий API считает только average, p50/p95 не реализованы | <5 сек                                                |
 | Количество эскалаций         | count(escalated=true) / период                                                        | Тренд к снижению                                      |
 | Проверка retrieval           | `tests/rag/evaluate_rag.py`: сколько golden-вопросов нашли ожидаемый источник в top-3 | Используем как внутреннюю проверку при изменениях RAG |
 
@@ -405,11 +434,12 @@ _Открытый вопрос для приёмки: считать SLA «<5 с
 шаблоны и служебный backfill не искажали пользовательские показатели. Ошибки
 обработки считаются по `success=false`.
 
-Один `user_turn` начинается, когда backend принимает persisted user message в
-обработку, и завершается после полного `assistant_done`, решения clarification /
-escalation или ошибки. Поэтому `latency_ms`, среднее время и p50/p95 включают всю
-цепочку `screenshot parse + RAG + confidence + answer stream`, а не отдельный
-GigaChat call. В этот же `MetricEvent` складываются `prompt_tokens`,
+Один `user_turn` стартует в background worker после persist user message и завершается
+после полного `assistant_done`, решения clarification/escalation или ошибки. Поэтому
+`latency_ms` и среднее время включают цепочку `screenshot parse + RAG + confidence +
+answer stream`, а не отдельный GigaChat call, но ожидание запуска worker/очереди в
+текущей реализации не гарантированно входит в latency. p50/p95 не вычисляются.
+В этот же `MetricEvent` складываются `prompt_tokens`,
 `completion_tokens` и `precached_prompt_tokens` confidence и answer calls; если
 answer не запускался, сохраняется usage только confidence call.
 
@@ -418,7 +448,7 @@ answer не запускался, сохраняется usage только conf
 | Функция ТЗ             | Хакатон (MVP)                                                                                                                    | Прод (Roadmap)                                                               |
 | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
 | Q&A чат-бот            | **Свой веб-чат + RAG на GigaChat API**                                                                                           | Bitrix24 Open Lines и Redmine HelpDesk через адаптеры                        |
-| Совместимость каналов  | Единые backend-контракты `IncomingMessage/OutgoingMessage`, channel-agnostic ядро                                                | Реальные webhooks/API конкретных платформ                                    |
+| Совместимость каналов  | Web REST является единственным реализованным каналом; нормализующие контракты и adapters спроектированы как Roadmap                   | Реальные webhooks/API конкретных платформ                                    |
 | Автоподключение к чату | **Не реализуем как обязательный MVP**                                                                                            | Listener Bitrix24/Redmine + режимы `suggest/auto`                            |
 | База знаний            | **Секции + CRUD документов + human-in-the-loop candidate approval + индексация**                                                 | Версионирование, массовый импорт                                             |
 | Минимальные данные     | Документы загружаются через KB API; автоматический seed реальной документации 1С не выполняется                                  | Полный массив источников заказчика и автоматическая стартовая загрузка       |
@@ -466,7 +496,7 @@ Confidence-событие отправляется в user-safe SSE без те�
 | Риск                                                  | Влияние                                | Митигация                                                                                                                                         |
 | ----------------------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Нестабильное распознавание мелкого/рукописного текста | Ошибочная диагностика скриншота        | Vision + regex по кодам ошибок + запрос переснять крупнее                                                                                         |
-| Нет доступа к реальному Bitrix24/Redmine на хакатоне  | Нельзя показать «настоящую» интеграцию | На MVP показываем собственный frontend; совместимость доказываем едиными контрактами и `IChannelAdapter`, реальную интеграцию оставляем в Roadmap |
+| Нет доступа к реальному Bitrix24/Redmine на хакатоне  | Нельзя показать «настоящую» интеграцию | На MVP показываем собственный frontend; adapter boundary пока не реализован, реальную интеграцию оставляем в Roadmap |
 | Долгая индексация полной БЗ 1С                        | Не успеть до дедлайна                  | На демо — ограниченный, но реальный срез БЗ (ключевые документы + история обращений)                                                              |
 
 # Часть II — Backend
@@ -476,18 +506,22 @@ Backend — модульный монолит FastAPI. Он владеет со�
 ## 10. Границы backend
 
 ```text
-FastAPI / channel adapters
+FastAPI REST + SSE (сейчас только web API)
         ↓
     DialogService
-    ├── ContextBuilder
+    ├── ContextBuilder / GenerationContextService
     ├── RAGService
-    ├── GigaChatProvider
+    ├── GigaChatProvider (confidence, answer, vision, files)
     ├── AttachmentService
-    ├── EscalationService
     └── Feedback / Moderation
         ↓
-PostgreSQL / Qdrant / file storage
+PostgreSQL / Qdrant / local or S3-compatible storage
 ```
+
+Отдельных `EscalationService` и `VisionService` в текущем репозитории нет: routing
+и clarification/escalation policy находятся в `DialogService`, а screenshot parse —
+в `GenerationContextService` и `GigaChatProvider`. `channel adapters` являются
+будущей границей, а не текущим слоем.
 
 Главный принцип: бизнес-логика не знает о raw GigaChat HTTP. Вся LLM-разработка идёт LangChain-first через `langchain-gigachat`, а низкоуровневый SDK остаётся внутри `GigaChatProvider`.
 
@@ -692,9 +726,10 @@ else:
     switch_to_operator_mode()
 ```
 
-При низком confidence второй GigaChat call не выполняется. Уточнение остаётся
-ограниченным двумя раундами и использует существующую детерминированную policy; если
-уточнение не помогает, backend в одной транзакции переводит Dialog в
+При низком confidence второй GigaChat call не выполняется. Policy допускает не более
+двух раундов уточнения, но второй раунд запускается только если новый confidence
+строго выше предыдущего; поэтому два раунда не гарантируются. Если уточнение не
+помогает, backend в одной транзакции переводит Dialog в
 `operator_support` и сохраняет system Message с confidence и внутренним snapshot
 `Message.sources`.
 
@@ -924,8 +959,8 @@ RAG retrieval
                 instruction. Для стабильной маршрутизации structured call выполняется с
                 `temperature=0, top_p=0.1`. Если confidence ниже порога, второй call не
                 выполняется.
-                Уточнение разрешено максимум два раза по существующей policy; затем Dialog
-                переводится в `operator_support`.
+                Уточнение разрешено максимум два раза по существующей policy и требует роста
+                confidence после первого уточнения; затем Dialog переводится в `operator_support`.
 
 #### Поведение после подключения оператора
 
@@ -1087,7 +1122,9 @@ DialogFeedback
 После анализа администратор может:
 
 - исправить БЗ, System Prompt или runtime AI/RAG settings;
-- **удалить разобранный ошибочный чат**, чтобы не засорять рабочую БД.
+- **удалить разобранный ошибочный чат**, чтобы не засорять рабочую БД. Фактический
+  текущий endpoint разрешает hard delete для любого закрытого Dialog с отсутствующим
+  или `rejected` candidate; наличие `ai_error` feedback пока не проверяется.
 
 В карточке ошибочного тикета доступны действия:
 
@@ -1096,13 +1133,18 @@ DialogFeedback
 [ Удалить чат ]
 ```
 
-Удаление разрешено только для уже завершённого ошибочного тикета:
+Проектная moderation policy предполагает удаление только для уже завершённого
+ошибочного тикета:
 
 ```text
 Dialog.status = closed
 AND
 DialogFeedback.verdict = ai_error
 ```
+
+Фактический код текущего MVP проверяет только `Dialog.status == closed` и то, что
+candidate не находится в `pending` или `approved`. Проверки `DialogFeedback` нет, поэтому
+это известное расхождение контракта, которое требуется закрыть до production.
 
 Перед hard delete `DialogService` проверяет связанный `KnowledgeCandidate`:
 
@@ -1355,14 +1397,11 @@ structured document
 
 #### Этап 3. Нормализация
 
-Перед chunking:
-
-- убираем повторяющиеся headers/footers и мусор;
-- нормализуем пробелы и переносы;
-- **не удаляем** технические символы, коды ошибок, названия объектов 1С и номера версий;
-- сохраняем заголовочную цепочку (`heading_path`);
-- таблицы сериализуем так, чтобы названия колонок оставались рядом со строками;
-- добавляем источник и business metadata.
+В текущей реализации отдельного post-processing слоя для headers/footers, таблиц и
+переносов нет: структурирование и contextualization выполняются Docling. Backend
+сохраняет `heading_path`/страницу, не удаляет технические символы и дополнительно
+добавляет к тексту chunk заголовок документа, путь раздела и `one_c_version`, если она
+задана. Более сложная нормализация остаётся улучшением после golden evaluation.
 
 Пример metadata:
 
@@ -1532,23 +1571,24 @@ resolved_case
 
 Используем **Docling `HybridChunker`**, настроенный на tokenizer BGE-M3. Docling сначала учитывает структуру документа, а затем подгоняет chunks под token budget.
 
-Стартовые параметры для MVP:
+Фактические параметры текущего parser-а:
 
 ```text
-target chunk: примерно 400–700 tokens
-hard max:     примерно 800 tokens
-overlap:      небольшой / только там, где нужен контекст
+hard max:     800 tokens
 merge peers:  true
+target/overlap: отдельно не настраиваются
 ```
 
-Параметры являются стартовыми и должны проверяться на нашей документации 1С.
+Значение `800` передаётся в `HybridChunker`; заявленные target 400–700 и overlap
+являются желаемыми параметрами, но не отдельными runtime-настройками.
 
 Правила:
 
 - короткий раздел стараемся сохранить целиком;
 - шаги одной инструкции не разрываем без необходимости;
-- заголовок/путь раздела добавляется к chunk перед embedding;
-- таблица сохраняет header;
+- Docling возвращает contextualized chunk и structural metadata;
+- сервис KB дополнительно добавляет document/heading/version prefix перед embedding;
+- таблицы и headers зависят от результата Docling, отдельной сериализации в сервисе нет;
 - если процедура разрезана, chunks связываются `document_id + chunk_index`;
 - каждый chunk хранит ссылку на исходный документ/страницу.
 
@@ -1629,7 +1669,7 @@ gigachat_total_budget =
 = 12800 tokens
 ```
 
-В этот budget должны уложиться:
+В расчётный budget backend закладывает:
 
 ```text
 GigaChat request budget
@@ -1638,7 +1678,7 @@ GigaChat request budget
 ├── текущий запрос пользователя
 ├── RAG evidence
 ├── предыдущие сообщения диалога
-├── attachments / их контекст
+├── screenshot analysis и текстовый контекст вложений
 └── генерируемый ответ
 ```
 
@@ -1719,7 +1759,7 @@ Backend валидирует настройку:
 1. system prompt                    обязательный
 2. текущий запрос пользователя      обязательный
 3. актуальный RAG evidence          приоритетный
-4. attachments                      при наличии
+4. attachment-derived text          если уже извлечён
 5. предыдущие сообщения диалога     заполняют остаток и обрезаются первыми
 ```
 
@@ -1736,7 +1776,12 @@ Backend:
 
 1. `history = 0`;
 2. уменьшаем количество RAG chunks;
-3. если проблема в слишком большом runtime-файле — не пытаемся отправить его целиком обычным attachment.
+3. runtime file ID всё равно передаётся в GigaChat; фактический размер содержимого
+   Files API в локальную оценку не входит.
+
+В текущем коде нет preflight оценки содержимого runtime-файлов и fallback «файл не
+отправлять». Допустимый по MB файл может привести к provider error/HTTP 422 при
+переполнении context window; автоматического перехода в Docling/RAG нет.
 
 `gigachat_context_ratio = 1.0` означает, что приложение может использовать почти всё контекстное окно модели, но backend всё равно вычитает `gigachat_max_output_tokens` под ответ.
 
@@ -2472,7 +2517,9 @@ storage** и запускать обычный permanent ingestion.
 
 Runtime attachment не становится частью постоянной БЗ автоматически.
 
-Локальный OCR не нужен.
+Для runtime screenshot отдельный локальный OCR не используется: parse выполняет
+GigaChat Vision. Docling/EasyOCR artifacts при этом остаются частью permanent KB
+ingestion pipeline.
 
 Разовые пользовательские файлы сначала загружаются:
 
@@ -2605,8 +2652,11 @@ gigachat_file_id
 Перед закрытием тикета backend удаляет remote runtime-файлы из GigaChat File Storage;
 локальный оригинал остаётся в собственном storage для истории/админской проверки.
 Если remote cleanup не удался, закрытие не выполняется и пользователь получает ошибку.
+Для явной Knowledge Card generation remote files удаляются после generation. В обычном
+user/operator generation remote file остаётся до close или hard delete; при ошибке после
+частичного upload отдельная компенсация не гарантирована.
 
-Если администратор выполняет hard delete ошибочного чата, удаляем:
+Если администратор выполняет разрешённый hard delete закрытого чата, удаляем:
 
 ```text
 local attachment
@@ -2847,7 +2897,9 @@ langchain-gigachat >= 0.5.1,<0.6
 
 Ветка `0.5.x` использует `gigachat >= 0.2,<0.3` как underlying SDK и Pydantic V2.
 
-Версии фиксируем в lock-файле проекта, чтобы поведение интеграции не менялось во время хакатона.
+Direct dependencies backend зафиксированы в `pyproject.toml`, но отдельного backend
+lock-файла в репозитории сейчас нет. Frontend имеет `package-lock.json`; полная
+воспроизводимость Python dependency graph остаётся операционным улучшением.
 
 #### Что используем из LangChain Core
 
@@ -3244,7 +3296,7 @@ tests/rag/rag_golden.json
 tests/rag/evaluate_rag.py
 ```
 
-Минимум 10–20 вопросов с ожидаемым документом.
+В репозитории сейчас 12 golden-вопросов с ожидаемым документом.
 
 Скрипт выполняет тот же retrieval, что production-код, и показывает:
 
@@ -3254,6 +3306,8 @@ expected document in top-3
 ```
 
 Без LangSmith/RAGAS и отдельной evaluation-инфраструктуры в MVP.
+Evaluator не создаёт fixture-документы: для непустого результата нужны запущенные
+PostgreSQL/Qdrant и заранее загруженные документы со статусом `indexed`.
 
 ## 14. Скриншоты и runtime attachments
 
@@ -3306,7 +3360,8 @@ AI GigaChat оператора в собственном web-интерфейс�
 После хакатона:
 
 - `Integration Gateway` подписывается на события Bitrix24 Open Lines или получает сообщения Redmine HelpDesk;
-- входящие данные нормализуются в тот же `IncomingMessage`, который использует собственный frontend;
+- входящие данные должны нормализоваться в будущий `IncomingMessage`, эквивалентный
+  внутреннему web message flow;
 - сообщение проходит существующий `Dialog Service` → `RAG/Vision` → `Escalation`;
 - `suggest` — AI генерирует черновик ответа для оператора;
 - `auto` — при достаточной уверенности ответ отправляется автоматически;
@@ -3549,6 +3604,7 @@ Server data остаётся в React Query; не дублируем REST-fetch 
 /
 ├── /user
 │   ├── index
+│   ├── /new
 │   └── /dialogs/:dialogId
 │
 ├── /operator
@@ -3559,7 +3615,6 @@ Server data остаётся в React Query; не дублируем REST-fetch 
     ├── /dialogs
     │   └── /:dialogId
     ├── /knowledge
-    │   └── /documents/:documentId
     ├── /prompts
     ├── /settings
     └── /monitoring
@@ -3587,7 +3642,12 @@ type CurrentUser = {
 
 Role guard отвечает только за UX/navigation. Backend повторно проверяет role на каждом endpoint.
 
-Для SPA + native `EventSource` предпочтительно same-origin auth через **HttpOnly Secure cookie**. GigaChat credentials никогда не попадают в browser.
+Для SPA + native `EventSource` используется same-origin auth через HttpOnly cookie.
+В dev Compose `AUTH_COOKIE_SECURE=false`, в production settings требуют secure cookie,
+но текущий production Compose публикует nginx только по HTTP на порту 80 и требует
+внешний TLS reverse proxy. Единственный реализованный login —
+`POST /api/auth/demo-login` при `DEMO_AUTH_ENABLED=true`; production identity provider
+не входит в текущий код. GigaChat credentials никогда не попадают в browser.
 
 Dev:
 
@@ -3747,6 +3807,11 @@ type MessageDto = {
 `SourceRef` и `Message.sources` остаются внутренними полями retrieval/audit; отдельный
 source list/citation component в текущем frontend не реализован.
 
+Backend `AdminDialogDetail` возвращает полный `KnowledgeCandidateDto`, тогда как
+текущий frontend type `AdminDialogDetailDto.candidate` сужен до `CandidateRef`; UI
+использует только `id`, поэтому это пока не ломает демонстрационный flow, но типовой
+контракт frontend не полностью отражает JSON response.
+
 После стабилизации FastAPI OpenAPI желательно генерировать TS-types/client, чтобы не дублировать enum вручную.
 
 ### 18.7 Общие UI primitives
@@ -3783,7 +3848,10 @@ SystemMessage
 DialogStatusBadge
 ```
 
-Базовые UI-компоненты не содержат domain logic.
+Это логический перечень primitives, а не точный file/component inventory. В текущем
+коде часть controls реализована native HTML или inline внутри feature-компонентов;
+отдельных `Slider`, `Table`, `AttachmentPreview` и `SystemMessage` файлов нет.
+Базовые переиспользуемые UI-компоненты не содержат domain logic.
 
 ### 18.8 Общие UX-правила
 
@@ -3857,17 +3925,20 @@ type UserDialogEvent =
 ```ts
 type OperatorQueueEvent =
   | { type: "ticket_available"; dialog: DialogSummary }
+  | { type: "ticket_updated"; dialog: DialogSummary }
   | { type: "ticket_claimed"; dialogId: string; operator: UserRef }
   | { type: "ticket_closed"; dialogId: string };
 ```
 
-Queue обновляется сразу, без постоянного polling.
+Frontend использует SSE для быстрых обновлений и одновременно refetch очереди каждые
+2.5 секунды; это intentional MVP fallback на случай пропущенного события.
 
 ### 19.4 Operator dialog SSE
 
 ```ts
 type OperatorDialogEvent =
   | { type: "user_message"; message: MessageDto }
+  | { type: "operator_access_revoked"; operator: UserRef }
   | { type: "dialog_closed" }
   | { type: "error"; message: string };
 ```
@@ -3901,7 +3972,10 @@ operator_message
 
 ### 19.6 SSE reconnect
 
-Backend присваивает каждому событию SSE `id:`.
+Backend присваивает каждому событию SSE `id:`, но текущий `EventBroker` является
+in-process broker без event log/replay. `Last-Event-ID` не обрабатывается, счётчик
+событий сбрасывается при restart, а очередь подписчика ограничена 256 событиями и
+при переполнении отбрасывает старейшее.
 
 Frontend:
 
@@ -3909,6 +3983,9 @@ Frontend:
 - после reconnect refetch текущего Dialog/queue;
 - backend остаётся source of truth;
 - финальные persisted `message.id` предотвращают duplicate rendering.
+
+Такой reconnect надёжен только в пределах одного процесса и благодаря последующему
+refetch; межworker/replica доставка и replay остаются Roadmap.
 
 ---
 
@@ -3921,6 +3998,8 @@ OpenAPI-схема FastAPI и Swagger UI `/docs` — источник истин
 | Method | Endpoint                                            | Назначение                                                    |
 | ------ | --------------------------------------------------- | ------------------------------------------------------------- |
 | GET    | `/api/me`                                           | текущий пользователь + role                                   |
+| POST   | `/api/auth/demo-login`                              | demo login по роли; доступен только при `DEMO_AUTH_ENABLED=true` |
+| POST   | `/api/auth/logout`                                  | удалить HttpOnly session cookie; JWT server-side не отзывается |
 | GET    | `/api/dialogs`                                      | dialogs текущего user                                         |
 | POST   | `/api/dialogs`                                      | создать новый Dialog                                          |
 | GET    | `/api/dialogs/{dialogId}`                           | metadata Dialog, включая `is_processing` и `processing_error` |
@@ -3929,6 +4008,7 @@ OpenAPI-схема FastAPI и Swagger UI `/docs` — источник истин
 | POST   | `/api/dialogs/{dialogId}/close`                     | пользователь закрывает AI-resolved тикет                      |
 | POST   | `/api/dialogs/{dialogId}/feedback`                  | `helpful / ai_error` после close                              |
 | GET    | `/api/dialogs/{dialogId}/events`                    | user-safe SSE                                                 |
+| GET    | `/api/attachments/{attachmentId}`                   | скачать attachment при наличии доступа к Dialog               |
 
 Message send:
 
@@ -3955,9 +4035,9 @@ polling-запросами.
 
 ### 20.2 Operator
 
-| Method | Endpoint                                    | Назначение                                        |
-| ------ | ------------------------------------------- | ------------------------------------------------- | ----------------------- |
-| GET    | `/api/operator/dialogs?scope=unassigned     | mine`                                             | активная operator queue |
+| Method | Endpoint                                      | Назначение                         |
+| ------ | --------------------------------------------- | ---------------------------------- |
+| GET    | `/api/operator/dialogs?scope=unassigned\|mine` | активная operator queue            |
 | POST   | `/api/operator/dialogs/{dialogId}/claim`    | атомарно назначить тикет текущему operator        |
 | GET    | `/api/operator/events`                      | realtime queue SSE                                |
 | GET    | `/api/operator/dialogs/{dialogId}/events`   | operator-only user/dialog state SSE               |
@@ -3988,7 +4068,7 @@ Frontend не решает concurrency самостоятельно.
 | GET    | `/api/admin/knowledge/documents?section_id=`           | documents, sorted by newest first |
 | POST   | `/api/admin/knowledge/sections/{section_id}/documents` | upload one permanent KB file      |
 | GET    | `/api/admin/knowledge/documents/{id}`                  | document detail                   |
-| PATCH  | `/api/admin/knowledge/documents/{id}`                  | enable-disable / metadata         |
+| PATCH  | `/api/admin/knowledge/documents/{id}`                  | enable-disable only in current MVP |
 | POST   | `/api/admin/knowledge/documents/{id}/reindex`          | повторный ingestion               |
 | DELETE | `/api/admin/knowledge/documents/{id}`                  | удалить документ + index          |
 
@@ -4039,7 +4119,7 @@ Frontend не хардкодит model context limit. PUT принимает в�
 | POST   | `/api/admin/candidates/{id}/generate-card` | заполнить case card через GigaChat                                                                         |
 | POST   | `/api/admin/candidates/{id}/approve`       | retryable approve: сохранить card, переиспользовать deterministic document и выполнить permanent ingestion |
 | POST   | `/api/admin/candidates/{id}/reject`        | reject                                                                                                     |
-| DELETE | `/api/admin/dialogs/{dialogId}`            | hard delete разобранного `ai_error` Dialog                                                                 |
+| DELETE | `/api/admin/dialogs/{dialogId}`            | hard delete closed Dialog after candidate review; current endpoint does not enforce `ai_error` feedback    |
 
 ### 20.6 Admin — Monitoring
 
@@ -4127,8 +4207,12 @@ System message:
 
 ```text
 К обращению подключился специалист поддержки.
-Обращение закрыто.
 ```
+
+Сообщение о подключении оператора сохраняется в PostgreSQL. Закрытие Dialog в
+текущем backend меняет status и публикует `dialog_closed`, но отдельное системное
+сообщение «Обращение закрыто» не создаёт; UI показывает закрытое состояние и feedback
+panel.
 
 ### 21.4 Sources
 
@@ -4213,9 +4297,10 @@ user message также отклоняется backend, если в другом
 
 При network error:
 
-- message показывает retry;
-- повтор используется с тем же `client_message_id`;
-- backend не создаёт duplicate Message.
+- frontend сохраняет failed attempt и повторно использует тот же `client_message_id`;
+- backend не создаёт duplicate Message;
+- в user panel отдельная видимая retry-кнопка пока не отображается: повтор возможен
+  повторным Submit, тогда как operator panel имеет явный Retry block.
 
 ### 21.8 Operator connected
 
@@ -4255,6 +4340,12 @@ Feedback отправляется один раз. Pending `KnowledgeCandidate` 
 24 часа, этот же close-flow запускается sweeper-ом без участия пользователя.
 
 Если тикет закрыл operator, user получает `dialog_closed` и видит тот же feedback block.
+
+Текущий user header показывает CTA закрытия, если в истории есть хотя бы одно
+assistant-сообщение, а не только если последнее сообщение действительно является
+терминальным ответом текущего turn. Backend всё равно проверяет последнее
+conversation-сообщение и может вернуть `409`, поэтому UI и backend policy здесь ещё
+не полностью совпадают.
 
 ---
 
@@ -4306,9 +4397,9 @@ problem preview
 user
 escalated time
 confidence
-attachment indicator
 ```
 
+`has_attachment` присутствует в DTO, но текущая карточка очереди его не отображает.
 Queue обновляется через `/api/operator/events` и периодический 2.5-секундный refetch.
 
 ### 22.3 Claim
@@ -4441,7 +4532,6 @@ Routes:
 /admin/dialogs
 /admin/dialogs/:dialogId
 /admin/knowledge
-/admin/knowledge/documents/:documentId
 /admin/prompts
 /admin/settings
 /admin/monitoring
@@ -4496,6 +4586,10 @@ attachment indicator
 moderation status (after confidence)
 ```
 
+Backend DTO также возвращает feedback и attachment flag. В текущем frontend feedback
+отдельно в строке не показывается (он задаётся выбранной вкладкой), а attachment flag
+показывается иконкой.
+
 Server-side pagination.
 
 Минимальные filters:
@@ -4521,13 +4615,17 @@ screenshot/document attachment metadata (extracted vision fields остаютс�
 RAG source snapshot (backend-only; не входит в текущий `MessageDto`)
 confidence history
 GigaChat model snapshot
-full SystemPrompt snapshot
+один выбранный SystemPrompt snapshot
 escalation threshold snapshot, if escalated
 feedback
 KnowledgeCandidate status
 ```
 
 Не показываем raw vector embeddings.
+
+Для operator Dialog backend detail сейчас выбирает `system_prompt` из первого
+`user_turn` metric, если он есть; это обычно `user_support`, а не последний
+`operator_gigachat` call. Полная история prompt snapshots в API не возвращается.
 
 ### 23.3 Candidate для любого closed Dialog
 
@@ -4551,7 +4649,9 @@ Knowledge candidate
 ```
 
 Для legacy-данных backend endpoint выполняет idempotent backfill; обычная форма
-создаётся сразу для любого закрытого Dialog.
+создаётся сразу для любого закрытого Dialog. Startup также backfill-ит закрытые Dialog
+без candidate. Frontend имеет метод backfill, но текущий detail UI его автоматически
+не вызывает и только показывает сообщение о legacy candidate.
 
 Это одинаково работает для:
 
@@ -4581,6 +4681,10 @@ Actions:
 [ Reject ]
 ```
 
+Редактирование полей в текущем UI хранится локально и отправляется вместе с `Approve`;
+отдельный save-кнопочный вызов candidate PATCH в UI не используется, хотя backend
+endpoint PATCH существует.
+
 Approve:
 
 ```text
@@ -4596,7 +4700,7 @@ ingestion не запускается; если предыдущая попыт�
 
 ### 23.5 AI error
 
-Для:
+Проектная policy предназначает удаление для:
 
 ```text
 DialogFeedback.verdict = ai_error
@@ -4617,9 +4721,13 @@ Hard delete только через confirm:
 После success:
 
 ```text
-navigate /admin/dialogs?feedback=ai_error
+navigate /admin/dialogs?feedback=<текущая категория>
 invalidate journal query
 ```
+
+Фактическое условие frontend — `closed` и candidate со статусом `rejected`; feedback
+`ai_error` не проверяется. Backend также не проверяет verdict и допускает closed Dialog
+без candidate или с rejected candidate. Это P1 расхождение с policy выше.
 
 ### 23.6 Unrated
 
@@ -4742,7 +4850,7 @@ operator_gigachat
 knowledge_card
 ```
 
-UI:
+Backend DTO:
 
 ```text
 multiline editor
@@ -4750,6 +4858,9 @@ updated_at
 updated_by
 [ Save ]
 ```
+
+Текущий UI показывает editor, dirty state и save/pending/error, но не выводит `updated_at`
+и `updated_by`, хотя backend DTO их возвращает.
 
 Monaco/IDE editor не нужен.
 
@@ -4848,8 +4959,10 @@ Backend возвращает агрегаты.
 
 Frontend не загружает все Dialog ради подсчёта KPI.
 
-Дополнительно показывается число ошибок обработки (`failed_requests`), не смешанное
-с эскалациями.
+Backend response также содержит `failed_requests`, но текущий MonitoringPage его не
+показывает отдельной карточкой. В API есть только `average_response_time_ms`; p50/p95
+не реализованы. Settings page показывает dirty state, но отдельного `beforeunload` или
+route blocker для несохранённых настроек пока нет.
 
 ---
 
@@ -4880,7 +4993,8 @@ frontend/
 │   │   ├── knowledge.ts
 │   │   ├── admin.ts
 │   │   ├── settings.ts
-│   │   └── monitoring.ts
+│   │   ├── monitoring.ts
+│   │   └── types.ts
 │   │
 │   ├── features/
 │   │   ├── user-chat/
@@ -4898,7 +5012,7 @@ frontend/
 │   │   │   ├── useUserDialogEvents.ts
 │   │   │   ├── useOperatorQueueEvents.ts
 │   │   │   └── useOperatorDialogEvents.ts
-│   │   └── types/
+│   │   └── utils.ts
 │   │
 │   ├── main.tsx
 │   └── index.css
@@ -4946,6 +5060,10 @@ API client должен прокидывать `AbortSignal` из React Query в
 
 Backend остаётся источником истины по порядку Message. Frontend сортирует только по server `created_at`, а не по времени локальной машины.
 
+User/operator detail и queue queries дополнительно делают refetch примерно каждые
+2.5 секунды. SSE остаётся transport для streaming и быстрых событий, а polling
+закрывает потерянные события в текущем single-process MVP.
+
 ---
 
 ## 30. Frontend security
@@ -4957,6 +5075,8 @@ Backend остаётся источником истины по порядку M
 - Admin destructive endpoints недоступны user/operator.
 - Attachment URL выдаётся backend только авторизованному пользователю с доступом к Dialog.
 - Markdown/LLM answer рендерится без небезопасного raw HTML.
+- В dev cookie не `Secure`; production требует `Secure`, но TLS termination не входит
+  в текущий nginx/Compose и должен быть предоставлен внешним reverse proxy.
 
 # Часть IV — План разработки и справка
 
@@ -4989,11 +5109,14 @@ Upload, Files API lifecycle, screenshot/document, cleanup.
 
 ### Backend B7 — feedback и модерация
 
-`helpful | ai_error`, automatic candidate on every close, KnowledgeCandidate, Approve/Reject, очередь ошибок AI, hard delete.
+`helpful | ai_error`, automatic candidate on every close, KnowledgeCandidate, Approve/Reject,
+очередь ошибок AI. Hard delete реализован, но текущий endpoint не ограничен verdict
+`ai_error` и требует отдельного исправления.
 
 ### Frontend F1 — app shell + auth
 
-React Router layouts, `/api/me`, role guards, API client, QueryClient, shared UI.
+React Router layouts, `/api/me`, demo-auth flow, role guards, API client, QueryClient,
+shared UI.
 
 ### Frontend F2 — user panel
 
@@ -5006,7 +5129,7 @@ Realtime queue, claim, dialog, operator-only SSE, manual AI GigaChat template, s
 ### Frontend F4 — admin journal
 
 Helpful / ai_error / unrated groups, 10-item pagination, Dialog detail, automatic
-candidate card edit/fill/approve/reject, hard delete error chat.
+candidate card edit/fill/approve/reject, hard delete after candidate review.
 
 ### Frontend F5 — admin KB
 
@@ -5029,7 +5152,7 @@ System Prompts, AI Settings, Monitoring.
 │       ├── app/                  # router, providers, guards, layouts
 │       ├── api/                  # typed REST client + query keys
 │       ├── features/             # user/operator/admin feature modules
-│       └── shared/               # UI/chat/hooks/types
+│       └── shared/               # UI/chat/hooks/utils
 │
 ├── backend/
 │   ├── app/
@@ -5037,19 +5160,45 @@ System Prompts, AI Settings, Monitoring.
 │   │   ├── core/
 │   │   ├── services/
 │   │   ├── providers/
-│   │   ├── channels/
 │   │   ├── contracts/
 │   │   └── models/
 ├── tests/
+│   ├── test_confidence_policy.py  # 5 unit tests
 │   └── rag/
-│       ├── evaluate_rag.py
-│       └── rag_golden.json
+│       ├── evaluate_rag.py        # requires running stack + indexed KB
+│       └── rag_golden.json        # 12 retrieval cases
 ├── docker-compose.yml            # production
 ├── docker-compose.dev.yml        # hot reload development
 ├── .env.example                  # common root runtime configuration template
 ├── ARCHITECTURE.md
-└── Problems                      # current product backlog
+├── README.md
+└── Makefile
 ```
+
+Каталоги `backend/app/channels` и `frontend/src/shared/types` в текущем репозитории
+отсутствуют: adapters являются Roadmap, а DTO-типы находятся в `frontend/src/api/types.ts`.
+`Problems` и `files/` сейчас являются untracked workspace artifacts и не участвуют в
+startup, Compose, seed или тестах; они не являются частью tracked архитектурного
+контракта.
+
+### 32.1 Реальные проверки и ограничения запуска
+
+- `make check-backend` запускает Ruff lint/format и Mypy, но требует заранее созданный
+  `backend/.venv` и не запускает unit-тесты.
+- `make check-frontend` запускает ESLint и TypeScript typecheck; отдельного frontend
+  test runner и coverage нет.
+- `make rag-check` требует уже работающих PostgreSQL/Qdrant и заранее загруженных
+  indexed documents; seed по умолчанию документы не создаёт.
+- `docker-compose.dev.yml` предназначен для демо/hot reload. Production Compose
+  использует `AUTH_COOKIE_SECURE=true`, nginx слушает только HTTP :80, поэтому для
+  browser session нужен внешний TLS reverse proxy. Опубликованный `.env.example`
+  является development-шаблоном (`DEMO_AUTH_ENABLED=true` и development JWT), поэтому
+  production Compose требует отдельные значения `DEMO_AUTH_ENABLED=false` и сильного
+  `JWT_SECRET`. Backend `/health` не является dependency-aware readiness.
+- S3-compatible storage provider присутствует в коде, но MinIO service и S3-параметры
+  не входят в текущие Compose/env templates; демо использует named local volume.
+- Python contract проекта — `>=3.11,<3.12`; Docker использует Python 3.11. Локальный
+  ignored virtualenv должен соответствовать этому ограничению.
 
 ## 33. Источники
 
