@@ -11,7 +11,7 @@ import {
   useState,
 } from "react";
 import { AlertCircle, CheckCircle2, LoaderCircle, X } from "lucide-react";
-import { cn } from "../utils";
+import { cn, createClientId } from "../utils";
 
 type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "giga";
 
@@ -423,7 +423,7 @@ const ToastContext = createContext<ToastContextValue | null>(null);
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<ToastItem[]>([]);
   const toast = useCallback((message: string, tone: ToastTone = "info") => {
-    const id = crypto.randomUUID();
+    const id = createClientId();
     setItems((current) => [...current, { id, message, tone }]);
     window.setTimeout(() => setItems((current) => current.filter((item) => item.id !== id)), 4200);
   }, []);

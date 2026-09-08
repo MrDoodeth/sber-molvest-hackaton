@@ -279,7 +279,9 @@ class DialogService:
         limit: int,
     ) -> MessagePage:
         async with self._session_factory() as session:
-            dialog = await session.get(Dialog, dialog_id)
+            # Hold the dialog row lock through attachment storage and commit so
+            # another worker cannot close the dialog between validation and save.
+            dialog = await session.get(Dialog, dialog_id, with_for_update=True)
             if dialog is None:
                 raise NotFoundError("Диалог не найден")
             self._assert_read_access(requester, dialog)

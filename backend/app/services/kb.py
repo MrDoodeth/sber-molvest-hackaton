@@ -22,9 +22,9 @@ from app.contracts.schemas import (
     KnowledgeSectionPatch,
 )
 from app.core.constants import PROTECTED_SECTION_IDS
-from app.core.enums import DocumentSourceType, IndexStatus
+from app.core.enums import CandidateStatus, DocumentSourceType, IndexStatus
 from app.core.errors import ConflictError, NotFoundError, ServiceUnavailableError
-from app.models import Chunk, KnowledgeDocument, KnowledgeSection
+from app.models import Chunk, KnowledgeCandidate, KnowledgeDocument, KnowledgeSection
 from app.providers.interfaces import (
     EmbeddingProvider,
     ObjectStorage,
@@ -582,6 +582,21 @@ class KnowledgeBaseService:
                     KnowledgeDocument, document_id, with_for_update=True
                 )
                 if document is not None:
+                    candidates = list(
+                        await session.scalars(
+                            select(KnowledgeCandidate)
+                            .where(
+                                KnowledgeCandidate.resulting_document_id == document_id
+                            )
+                            .with_for_update()
+                        )
+                    )
+                    # Removing a published document revokes its publication. Do
+                    # not leave a candidate claiming that a missing document is
+                    # still approved.
+                    for candidate in candidates:
+                        candidate.status = CandidateStatus.REJECTED
+                        candidate.resulting_document_id = None
                     await session.delete(document)
                     await session.commit()
 

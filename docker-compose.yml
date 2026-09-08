@@ -41,8 +41,8 @@ services:
       GIGACHAT_CA_BUNDLE_FILE: /etc/ssl/certs/ca-certificates.crt
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set for production}
       JWT_TTL_MINUTES: ${JWT_TTL_MINUTES:-480}
-      AUTH_COOKIE_SECURE: "true"
-      DEMO_AUTH_ENABLED: ${DEMO_AUTH_ENABLED:-false}
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
+      DEMO_AUTH_ENABLED: ${DEMO_AUTH_ENABLED:-true}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
       EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-cpu}

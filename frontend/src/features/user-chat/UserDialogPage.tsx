@@ -156,6 +156,7 @@ export default function UserDialogPage() {
         && !hasPersistedTerminalMessage
       )
     ) return;
+    setAwaitingTerminal(false);
     processing.end(dialogId);
   }, [
     detail.data,
@@ -191,7 +192,7 @@ export default function UserDialogPage() {
   const blockedByOtherTurn = processing.isBlocked(dialogId);
   const pendingTurn = detail.data?.mode === "ai_support"
     && !processingError
-    && (detail.data.isProcessing || (awaitingTerminal && !initialTurnCompleted));
+    && (detail.data.isProcessing || (awaitingTerminal && !initialTurnCompleted && !hasPersistedTerminalMessage));
   const visiblePhase = !pendingTurn
     ? "idle"
     : events.phase === "idle"

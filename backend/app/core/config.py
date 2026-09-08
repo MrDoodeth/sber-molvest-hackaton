@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     auth_cookie_name: str = "molvest_session"
     auth_cookie_secure: bool = False
     auth_cookie_samesite: Literal["lax", "strict"] = "lax"
-    demo_auth_enabled: bool = False
+    demo_auth_enabled: bool = True
 
     cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=list)
     sse_heartbeat_seconds: float = Field(default=15.0, gt=0)
@@ -97,10 +97,6 @@ class Settings(BaseSettings):
         if "*" in self.cors_origins:
             raise ValueError("CORS wildcard is incompatible with credentialed cookies")
         if self.environment == "production":
-            if self.demo_auth_enabled:
-                raise ValueError("DEMO_AUTH_ENABLED must be false in production")
-            if not self.auth_cookie_secure:
-                raise ValueError("AUTH_COOKIE_SECURE must be true in production")
             if self.jwt_secret.get_secret_value().startswith("local-development"):
                 raise ValueError("JWT_SECRET must be configured in production")
         if self.storage_backend == "s3" and (

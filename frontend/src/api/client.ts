@@ -20,6 +20,7 @@ interface ErrorShape {
 }
 
 const PAYLOAD_TOO_LARGE_MESSAGE = "Файл слишком большой. Изображение — до 15 МБ, документ — до 40 МБ.";
+export const AUTH_EXPIRED_EVENT = "molvest:auth-expired";
 
 function isHtmlError(value: string): boolean {
   return /<\/?(?:html|head|body|title|h1)\b/i.test(value);
@@ -97,6 +98,9 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
   }
 
   if (!response.ok) {
+    if (response.status === 401 && typeof window !== "undefined") {
+      window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
+    }
     throw normalizeApiError(payload, response.status, response.statusText);
   }
 

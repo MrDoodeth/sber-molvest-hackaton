@@ -321,7 +321,7 @@ export function MessageList({
   const hasStreamingMessage = streamingText !== undefined && streamingText !== null;
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
-  }, [messages.length, hasStreamingMessage]);
+  }, [messages.length, hasStreamingMessage, streamingText]);
   if (!messages.length && !streamingText && empty) return <>{empty}</>;
   return (
     <div className="grid gap-3 bg-cream px-4 py-5 sm:px-6">

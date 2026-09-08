@@ -1,0 +1,202 @@
+# Problems
+
+Проверка проведена 2026-09-08. Ниже перечислены подтверждённые дефекты и
+эксплуатационные риски текущей реализации. Стилистические замечания и roadmap-
+функции без влияния на текущий код не включены.
+
+Пункты про demo-доступ, Secure-cookie для HTTP MVP, конкурентную отправку в
+закрытый диалог, восстановление после потери SSE, обработку 401, UUID fallback
+и lifecycle approved KB-документа исправлены в текущей рабочей ветке. Пункт про
+отсутствие миграций принят как осознанное ограничение разработки: volumes
+пересоздаются вручную.
+
+## Critical
+
+### Production-конфигурация отключает единственный реализованный вход
+
+**Файлы:** `docker-compose.yml:37,42-45`, `backend/app/api/routes/auth.py:30-48`.
+
+`docker-compose.yml` задаёт `ENVIRONMENT=production` и по умолчанию
+`DEMO_AUTH_ENABLED=false`. При этом `POST /api/auth/demo-login` — единственный
+реализованный способ создать сессию, а интеграции с IdP/SSO нет. В чистом
+production-развёртывании все защищённые endpoint остаются недоступны: login
+возвращает `404`, `/api/me` — `401`.
+
+**Воспроизведение:** запустить production Compose с обязательным `JWT_SECRET` и
+значением по умолчанию `DEMO_AUTH_ENABLED`; вызвать `POST /api/auth/demo-login`.
+
+## High
+
+### Secure session cookie несовместима с опубликованным HTTP endpoint
+
+**Файлы:** `docker-compose.yml:42-45,80-84`, `frontend/nginx.conf:1-2`,
+`backend/app/api/routes/auth.py:59-67`.
+
+Compose публикует только `80:80` и не настраивает TLS, но принудительно задаёт
+`AUTH_COOKIE_SECURE=true`. На обычном `http://<host>` браузер не сохраняет и не
+отправляет Secure-cookie, поэтому даже будущий login не сможет поддерживать
+сессию. Трафик также остаётся незащищённым, если внешний reverse proxy не
+добавлен вручную.
+
+**Воспроизведение:** развернуть Compose на не-localhost хосте по HTTP, получить
+cookie через login и запросить `/api/me`: браузер не приложит session cookie,
+endpoint вернёт `401`.
+
+### Обновление persistent PostgreSQL schema ломает приложение
+
+**Файлы:** `backend/app/main.py:29-33`, `docker-compose.yml:11-12,88-91`,
+`backend/app/models/entities.py:181-182`.
+
+Startup вызывает только `Base.metadata.create_all()`. Этот вызов создаёт
+отсутствующие таблицы, но не применяет изменения колонок, индексов, ограничений
+или enum к существующему persistent volume. После изменения ORM схема старой БД
+остаётся устаревшей и запросы падают с PostgreSQL `undefined column`/type errors.
+Требование пересоздать volume приводит к потере production-данных.
+
+**Воспроизведение:** создать БД по старой схеме `messages` без
+`processing_status`, затем запустить текущий backend с тем же volume.
+`create_all()` не добавит колонку, а recovery/query этого поля завершится ошибкой.
+
+### Отправка может сохранить сообщение в уже закрытый диалог
+
+**Файлы:** `backend/app/services/dialogs.py:343-351,371-422,485-503,751-796`.
+
+`persist_message()` удерживает только process-local `asyncio.Lock` и читает
+`Dialog` без `FOR UPDATE`; загрузка вложений выполняется до commit. Другой
+backend worker может закрыть этот же Dialog между чтением статуса и commit
+сообщения. В результате user message добавляется после `closed_at`, а обработка
+не запускается, потому что закрытый Dialog не допускает processing.
+
+**Воспроизведение:** запустить два backend worker с одной PostgreSQL; остановить
+worker A в `store_runtime()` после чтения активного Dialog, закрыть Dialog через
+worker B и продолжить worker A.
+
+## Medium
+
+### Потеря terminal SSE event навсегда блокирует AI-чат
+
+**Файлы:** `frontend/src/features/user-chat/UserDialogPage.tsx:147-165,192-199`,
+`frontend/src/shared/hooks/useEventSource.ts:39-62`.
+
+Если соединение оборвано после успешного POST, но до `assistant_done`, polling
+подтянет сохранённый assistant message и завершит global processing. Однако
+локальный `awaitingTerminal` не сбрасывается. Для существующего Dialog
+`initialTurnCompleted` всегда `false`, поэтому `pendingTurn` остаётся `true`, а
+composer навсегда disabled до полного reload страницы.
+
+**Воспроизведение:** в существующем AI-диалоге отправить сообщение, отключить
+сеть до terminal SSE event, дождаться завершения backend и восстановить сеть.
+Ответ появится, но поле ввода останется заблокированным.
+
+### Истечение сессии не перенаправляет пользователя на login
+
+**Файлы:** `frontend/src/app/guards/RoleGuard.tsx:13-36`,
+`frontend/src/api/client.ts:99-100`,
+`frontend/src/features/user-chat/UserDialogPage.tsx:74-84`.
+
+`RoleGuard` перенаправляет на `/` только когда его собственный cached query
+`/api/me` получает `401`. Ошибки `401` других queries и mutations показывают
+toast, но не очищают query cache и не выполняют navigation. При отключённом
+refetch на focus защищённая панель остаётся видимой после expiry/удаления cookie.
+
+**Воспроизведение:** войти, удалить или дождаться expiry session cookie на
+странице диалога, затем отправить сообщение. Запрос завершится `401`, но UI не
+вернёт пользователя на экран входа.
+
+### Длинный streaming-ответ перестаёт прокручиваться за новыми токенами
+
+**Файлы:** `frontend/src/shared/chat/index.tsx:320-324`.
+
+Эффект автопрокрутки зависит от числа сообщений и наличия streaming-сообщения,
+но не от `streamingText`. После появления первого токена последующие обновления
+текста не вызывают `scrollIntoView`, и текущий конец длинного ответа уходит ниже
+видимой области.
+
+**Воспроизведение:** запросить ответ длиннее высоты chat viewport. После первого
+автоскролла новые токены перестанут быть видимы без ручной прокрутки.
+
+### Клиентские UUID не работают в части поддерживаемых браузеров и по HTTP
+
+**Файлы:** `frontend/src/shared/utils.ts:76-81`,
+`frontend/src/shared/ui/index.tsx:423-429`.
+
+Отправка сообщений и создание toast без fallback используют `crypto.randomUUID()`.
+API отсутствует в Safari до 15.4 и недоступен в non-secure context, включая
+обычный HTTP на не-localhost хосте. Vite не добавляет polyfill, поэтому mutation
+даже не начнётся; попытка показать ошибку также может упасть.
+
+**Воспроизведение:** открыть приложение в Safari 15.3 или через
+`http://<host>`, затем отправить сообщение; браузер выдаст
+`crypto.randomUUID is not a function`.
+
+### Удаление published KB-документа оставляет candidate в ложном approved status
+
+**Файлы:** `backend/app/api/routes/knowledge.py:183-190`,
+`backend/app/services/kb.py:560-586`,
+`backend/app/models/entities.py:285-286`,
+`backend/app/services/moderation.py:383-399,482-488`.
+
+Endpoint удаления KB document не проверяет approved `KnowledgeCandidate`.
+Foreign key обнуляет `resulting_document_id`, но оставляет candidate в статусе
+`approved`. Карточка утверждает, что публикация состоялась, хотя её документ
+удалён; связанный Dialog также нельзя удалить, потому что moderation видит
+approved candidate.
+
+**Воспроизведение:** approve candidate, удалить его `resulting_document_id` через
+`DELETE /api/admin/knowledge/documents/{id}`, затем запросить candidate или
+попытаться удалить Dialog.
+
+### Healthcheck показывает healthy при недоступных зависимостях
+
+**Файлы:** `backend/app/main.py:75-77`, `docker-compose.yml:60-69,82-84`,
+`backend/app/providers/vector.py:36-71`.
+
+`/health` всегда возвращает `200` и не проверяет PostgreSQL, Qdrant или object
+storage. Qdrant не проверяется и не инициализируется до первого retrieval/ingest
+запроса. Docker запускает frontend после такого liveness check, хотя API-операции
+уже неработоспособны.
+
+**Воспроизведение:** после запуска остановить PostgreSQL или Qdrant; `/health`
+останется `{"status":"ok"}`, но DB endpoint или retrieval завершится ошибкой.
+
+### Production Compose использует известный пароль PostgreSQL по умолчанию
+
+**Файлы:** `docker-compose.yml:8-10,38`, `.env.example:5-7`.
+
+Для `POSTGRES_PASSWORD` указан fallback `molvest`; обязательным объявлен только
+`JWT_SECRET`. Развёртывание по documented minimum configuration создаёт БД с
+публично известными credentials. БД не опубликована наружу, но компрометация
+контейнера или Docker network сразу даёт полный доступ к данным.
+
+**Воспроизведение:** запустить production Compose, задав только `JWT_SECRET`, и
+подключиться к `postgres` в Docker network как `molvest/molvest`.
+
+### Сборка backend не воспроизводима на уровне Python-зависимостей и base images
+
+**Файлы:** `backend/Dockerfile:1-10,34-37`, `backend/pyproject.toml:10-28`,
+`frontend/Dockerfile:1,25`, `docker-compose.yml:5,22`.
+
+Для backend нет lock file, а `pip install .` разрешает transitive dependencies во
+время build. Base images заданы mutable tags, не digest. Cacheless rebuild может
+получить другие или несовместимые зависимости и содержимое образа, чем прошедшая
+проверки сборка.
+
+**Воспроизведение:** выполнить cacheless builds в разное время после обновления
+transitive dependency или tag base image и сравнить установленные версии/image
+digest.
+
+## Low
+
+### Нет integration/API/SSE тестов и frontend test runner
+
+**Файлы:** `tests/test_confidence_policy.py:16-80`, `frontend/package.json:6-10`,
+`backend/check.sh:14-29`, `Makefile:18-28`.
+
+Найдены только шесть backend unit-тестов confidence-policy. Нет автоматических
+проверок cookie RBAC, API, uploads, ingestion, persistence/recovery, миграций,
+SSE reconnection, concurrent close/send и role routing; frontend не содержит ни
+test script, ни test runner. Перечисленные выше regressions проходят текущие
+`lint`, `typecheck` и build.
+
+**Воспроизведение:** выполнить текущий test suite: он не создаёт БД, не вызывает
+API и не открывает frontend.

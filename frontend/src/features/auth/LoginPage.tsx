@@ -1,12 +1,11 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, Bot, Headphones, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { authApi } from "../../api/auth";
-import { ApiError } from "../../api/client";
 import { queryKeys } from "../../api/queryKeys";
 import type { Role } from "../../api/types";
-import { Button, ErrorState } from "../../shared/ui";
+import { Button } from "../../shared/ui";
 import { cn } from "../../shared/utils";
 import { MolvestMark } from "../../app/layouts/RoleHeader";
 
@@ -21,7 +20,6 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [selectedRole, setSelectedRole] = useState<Role>();
-  const me = useQuery({ queryKey: queryKeys.me(), queryFn: ({ signal }) => authApi.me(signal), retry: false });
   const login = useMutation({
     mutationFn: async (role: Role) => {
       await authApi.demoLogin(role);
@@ -35,7 +33,7 @@ export default function LoginPage() {
     },
     onSettled: () => setSelectedRole(undefined),
   });
-  const unauthenticated = me.error instanceof ApiError && me.error.status === 401;
+  const me = queryClient.getQueryData<{ role: Role; displayName: string }>(queryKeys.me());
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#f7f9fd] px-4 py-6 sm:px-8 sm:py-10">
@@ -63,12 +61,10 @@ export default function LoginPage() {
                 <p className="text-xs font-extrabold uppercase tracking-[0.18em] text-molvest-700">Вход без пароля</p>
                 <h2 className="mt-1 text-2xl font-bold text-black">Выберите роль</h2>
               </div>
-              {me.data && <Button size="sm" onClick={() => navigate(rolePath[me.data.role])}>Продолжить <ArrowRight className="size-4" /></Button>}
+              {me && <Button size="sm" onClick={() => navigate(rolePath[me.role])}>Продолжить <ArrowRight className="size-4" /></Button>}
             </div>
-            {me.isError && !unauthenticated && <ErrorState description={me.error.message} onRetry={() => void me.refetch()} />}
-            {(me.isPending || unauthenticated || me.isSuccess) && (
-              <div className="grid gap-3">
-                {roleCards.map(({ role, title, description, icon: Icon, accent }) => (
+            <div className="grid gap-3">
+              {roleCards.map(({ role, title, description, icon: Icon, accent }) => (
                   <button
                     key={role}
                     type="button"
@@ -83,9 +79,8 @@ export default function LoginPage() {
                     </span>
                     {login.isPending && selectedRole === role ? <span className="text-xs font-bold text-molvest-700">Входим…</span> : <ArrowRight className="size-5 text-slate-300 transition group-hover:translate-x-1 group-hover:text-molvest-700" />}
                   </button>
-                ))}
-              </div>
-            )}
+              ))}
+            </div>
             {login.isError && <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-800" role="alert">{login.error.message}</p>}
             <p className="mt-5 px-1 text-xs leading-5 text-slate-400">Сессия хранится в защищённой HttpOnly cookie. Токены и ключи GigaChat не передаются браузеру.</p>
           </div>
