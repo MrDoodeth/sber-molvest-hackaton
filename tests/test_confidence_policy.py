@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import unittest
 
+from pydantic import SecretStr
+
 from app.core.config import Settings
 from app.providers.gigachat import (
     _CONFIDENCE_SYSTEM_PROMPT,
@@ -9,7 +11,6 @@ from app.providers.gigachat import (
 )
 from app.providers.interfaces import ConfidenceAssessment, GenerationRequest
 from app.services.dialogs import DialogService
-from pydantic import SecretStr
 
 
 class ConfidencePolicyTests(unittest.TestCase):
@@ -61,19 +62,22 @@ class ConfidencePolicyTests(unittest.TestCase):
         )
         self.assertFalse(DialogService._explicit_operator_request("Оператор не нужен"))
 
-    def test_clarification_matches_the_user_message(self) -> None:
-        self.assertIn(
-            "точный текст ошибки",
-            DialogService._clarification_message("У меня ошибка при запуске 1С", 0),
+    def test_low_confidence_streak_requires_three_consecutive_turns(self) -> None:
+        self.assertEqual(DialogService._count_low_confidence_streak([0.2, 0.3], 0.8), 2)
+        self.assertEqual(
+            DialogService._count_low_confidence_streak([0.2, 0.3, 0.4], 0.8), 3
         )
-        self.assertIn(
-            "что именно хотите узнать о 1С",
-            DialogService._clarification_message("Что такое 1C", 0),
+
+    def test_low_confidence_streak_resets_after_high_or_unknown_turn(self) -> None:
+        self.assertEqual(
+            DialogService._count_low_confidence_streak([0.2, 0.9, 0.3, 0.4], 0.8),
+            2,
         )
-        self.assertIn(
-            "сделать в 1С",
-            DialogService._clarification_message("Привте", 0),
+        self.assertEqual(
+            DialogService._count_low_confidence_streak([0.2, None, 0.4], 0.8),
+            1,
         )
+        self.assertEqual(DialogService._count_low_confidence_streak([0.8], 0.8), 0)
 
 
 if __name__ == "__main__":

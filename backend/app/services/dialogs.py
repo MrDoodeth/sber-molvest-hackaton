@@ -78,6 +78,7 @@ from app.services.settings import PromptService, RuntimeSettings, SettingsServic
 from app.services.tasks import TaskSupervisor
 
 logger = logging.getLogger(__name__)
+LOW_CONFIDENCE_ESCALATION_STREAK = 3
 _OPERATOR_REQUEST_MARKERS = (
     "подключите оператора",
     "подключите живого оператора",
@@ -1046,59 +1047,23 @@ class DialogService:
                         {"type": "confidence", "value": confidence},
                     )
 
-                    threshold = runtime_settings.operator_escalation_threshold
-                    if confidence < threshold:
-                        (
-                            clarification_count,
-                            previous_confidence,
-                        ) = await self._clarification_state(
-                            dialog_id, message_id, threshold
-                        )
-                        can_clarify = clarification_count < 2 and (
-                            clarification_count == 0
-                            or (
-                                previous_confidence is not None
-                                and confidence > previous_confidence
-                            )
-                        )
-                        if not can_clarify:
-                            await self._escalate(
-                                dialog_id,
-                                confidence,
-                                source_snapshot,
-                                started,
-                                runtime_settings,
-                                prompt_content,
-                                message_id,
-                                usage=usage,
-                            )
-                            return
-
-                        clarification = self._clarification_message(
-                            trigger_text, clarification_count
-                        )
-                        dto = await self._persist_assistant(
+                    if (
+                        await self._low_confidence_streak(
                             dialog_id,
-                            clarification,
+                            message_id,
+                            runtime_settings.operator_escalation_threshold,
+                        )
+                        >= LOW_CONFIDENCE_ESCALATION_STREAK
+                    ):
+                        await self._escalate(
+                            dialog_id,
                             confidence,
                             source_snapshot,
-                            trigger_message_id=message_id,
-                        )
-                        await self._broker.publish(
-                            user_dialog_channel(dialog_id),
-                            {
-                                "type": "assistant_done",
-                                "message": dto.model_dump(mode="json"),
-                            },
-                        )
-                        await self._record_metric(
-                            dialog_id,
                             started,
-                            confidence,
-                            False,
-                            usage,
                             runtime_settings,
                             prompt_content,
+                            message_id,
+                            usage=usage,
                         )
                         return
 
@@ -1459,57 +1424,47 @@ class DialogService:
             await session.commit()
             return message_dto(message)
 
-    async def _clarification_state(
+    async def _low_confidence_streak(
         self,
         dialog_id: uuid.UUID,
         message_id: uuid.UUID,
         threshold: float,
-    ) -> tuple[int, float | None]:
+    ) -> int:
         async with self._session_factory() as session:
             trigger = await session.get(Message, message_id)
             if trigger is None:
-                return 0, None
-            prior_messages = list(
+                return 0
+            user_messages = list(
                 await session.scalars(
                     select(Message)
                     .where(
                         Message.dialog_id == dialog_id,
+                        Message.author_type == MessageAuthor.USER,
                         or_(
                             Message.created_at < trigger.created_at,
                             and_(
                                 Message.created_at == trigger.created_at,
-                                Message.id < trigger.id,
+                                Message.id <= trigger.id,
                             ),
                         ),
                     )
                     .order_by(Message.created_at, Message.id)
                 )
             )
-            clarification_count = 0
-            previous_confidence: float | None = None
-            for index in range(len(prior_messages) - 1, -1, -1):
-                message = prior_messages[index]
-                if message.author_type != MessageAuthor.USER:
-                    continue
-                if message.confidence is None or message.confidence >= threshold:
-                    break
-                next_user_index = next(
-                    (
-                        next_index
-                        for next_index in range(index + 1, len(prior_messages))
-                        if prior_messages[next_index].author_type == MessageAuthor.USER
-                    ),
-                    len(prior_messages),
-                )
-                if not any(
-                    item.author_type == MessageAuthor.ASSISTANT
-                    for item in prior_messages[index + 1 : next_user_index]
-                ):
-                    break
-                clarification_count += 1
-                if previous_confidence is None:
-                    previous_confidence = message.confidence
-            return clarification_count, previous_confidence
+            return self._count_low_confidence_streak(
+                [message.confidence for message in user_messages], threshold
+            )
+
+    @staticmethod
+    def _count_low_confidence_streak(
+        confidences: list[float | None], threshold: float
+    ) -> int:
+        streak = 0
+        for confidence in reversed(confidences):
+            if confidence is None or confidence >= threshold:
+                break
+            streak += 1
+        return streak
 
     @staticmethod
     def _combine_usage(*usages: ProviderUsage | None) -> ProviderUsage | None:
@@ -1530,83 +1485,6 @@ class DialogService:
             prompt_tokens=total("prompt_tokens"),
             completion_tokens=total("completion_tokens"),
             precached_prompt_tokens=total("precached_prompt_tokens"),
-        )
-
-    @staticmethod
-    def _clarification_message(text: str, clarification_count: int) -> str:
-        normalized = " ".join(text.casefold().split())
-        is_error_question = any(
-            marker in normalized
-            for marker in (
-                "ошиб",
-                "не работает",
-                "не запуска",
-                "сбой",
-                "код ",
-                "проблем",
-            )
-        )
-        is_information_question = any(
-            marker in normalized
-            for marker in (
-                "что такое",
-                "расскаж",
-                "объясн",
-                "как работает",
-                "для чего",
-                "что значит",
-            )
-        )
-        is_configuration_question = any(
-            marker in normalized
-            for marker in (
-                "конфигурац",
-                "верси",
-                "настрой",
-                "баз",
-                "документ",
-                "отчет",
-                "отчёт",
-            )
-        )
-        if is_error_question:
-            if clarification_count == 0:
-                return (
-                    "Уточните, пожалуйста, точный текст ошибки и шаг, на котором "
-                    "она появляется."
-                )
-            return (
-                "Уточните, пожалуйста, версию платформы 1С, конфигурацию и что "
-                "уже удалось проверить."
-            )
-        if is_information_question or "1с" in normalized or "1c" in normalized:
-            if clarification_count == 0:
-                return (
-                    "Уточните, пожалуйста, что именно хотите узнать о 1С: "
-                    "платформу, конфигурации или конкретную возможность."
-                )
-            return (
-                "Уточните, пожалуйста, какая часть 1С вас интересует: платформа, "
-                "конфигурация или конкретная задача."
-            )
-        if is_configuration_question:
-            if clarification_count == 0:
-                return (
-                    "Уточните, пожалуйста, название конфигурации 1С, версию "
-                    "платформы и ожидаемый результат."
-                )
-            return (
-                "Уточните, пожалуйста, конфигурацию 1С, версию платформы и что "
-                "уже удалось проверить."
-            )
-        if clarification_count == 0:
-            return (
-                "Опишите, пожалуйста, что именно нужно сделать в 1С и какой "
-                "результат вы ожидаете."
-            )
-        return (
-            "Уточните, пожалуйста, исходные данные, ожидаемый результат и что "
-            "уже удалось проверить."
         )
 
     @staticmethod

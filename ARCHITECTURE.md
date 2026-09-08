@@ -57,7 +57,7 @@
 - **Backend — модульный монолит на FastAPI**, не микросервисы: меньше DevOps-расходов на хакатон, модули (RAG, Vision, Escalation, KB) изолированы и готовы к выносу в отдельные сервисы позже.
 - **GigaChat — центральная генеративная модель:** используем API для формирования финального ответа и анализа приложенных скриншотов. Для MVP основной кандидат — `GigaChat (активная модель)`.
 - **Embeddings делаем локально:** Freemium предоставляет бесплатные токены генерации, но векторное представление текста оплачивается отдельно. Поэтому retrieval не зависит от платного Embeddings API; основной локальный кандидат — `BAAI/bge-m3`.
-- **Критичное ограничение Freemium — 1 поток генерации.** Все GigaChat generation, vision и Files API операции проходят через единый re-entrant `GenerationGate` внутри процесса. Обычный пользовательский turn использует два последовательных GigaChat generation-call с одним `GenerationContext`: structured `confidence` и streaming user answer. При screenshot его parse выполняется до retrieval в том же атомарном turn. Confidence публикуется скрытым от пользователя SSE-событием; при достаточном значении запускается streaming answer, при низком выполняется существующая clarification/escalation policy без второго call. Ручной шаблон оператора выполняется отдельным generation-call.
+- **Критичное ограничение Freemium — 1 поток генерации.** Все GigaChat generation, vision и Files API операции проходят через единый re-entrant `GenerationGate` внутри процесса. Обычный пользовательский turn использует два последовательных GigaChat generation-call с одним `GenerationContext`: structured `confidence` и streaming user answer. При screenshot его parse выполняется до retrieval в том же атомарном turn. Confidence публикуется скрытым от пользователя SSE-событием; первый и второй подряд низкий confidence всё равно запускают streaming answer, а третий подряд ниже порога эскалирует без второго call. Ручной шаблон оператора выполняется отдельным generation-call.
 - **GigaChain используем точечно**, где он ускоряет интеграцию с GigaChat/LangChain, но не строим многошаговую agent-chain, которая последовательно занимает единственный поток.
 
 ## 2. Контекст, цели и требования
@@ -97,9 +97,11 @@
 
 #### 1.2.2 Эскалация и настраиваемый порог уверенности
 
-    Если confidence ниже порога, второй user-answer call не запускается: backend либо
-    задаёт детерминированный уточняющий вопрос (не более двух раундов), либо переводит
-    обращение оператору.
+    Confidence ниже порога увеличивает персистентную серию низких оценок Dialog.
+    На первом и втором подряд низком значении backend всё равно запускает user-answer
+    call; на третьем подряд значении эскалирует обращение оператору без второго call.
+    Любое значение confidence >= порога или user turn без оценки сбрасывает серию.
+    Явная просьба подключить оператора обрабатывается локально и эскалирует сразу.
 
 Порог уверенности:
 
@@ -359,7 +361,7 @@ flowchart TB
 - **Dialog Service** — состояние диалога/история, роутинг в RAG/Vision/Escalation.
         - **RAG Engine** — локальная векторизация (`EmbeddingProvider`) → hybrid retrieval из Qdrant → evidence для единого user `GenerationContext`.
         - **Vision / Attachments Handler** — хранит runtime attachment, для screenshot выполняет отдельный GigaChat parse (`extracted_text + visual_summary`) до RAG, затем переиспользует тот же `file_id` в confidence и answer calls. Text attachments также передаются в generation-вызовы с `function_call="auto"`.
-        - **Dialog decision flow** — `DialogService` один раз собирает `GenerationContext`, вызывает hardcoded confidence assessment, сравнивает его с `operator_escalation_threshold` и запускает streaming answer либо существующую clarification/escalation policy.
+        - **Dialog decision flow** — `DialogService` один раз собирает `GenerationContext`, вызывает hardcoded confidence assessment, считает персистентную серию низких оценок и запускает streaming answer, пока серия меньше трёх; третий подряд низкий confidence эскалирует Dialog.
   - **Moderation flow** — `ModerationService` показывает администратору завершённые тикеты с `DialogFeedback.verdict=ai_error`, управляет candidate и выполняет подтверждённое каскадное удаление разобранных ошибочных чатов.
 - **KB Service** — CRUD документов, чанкинг, (ре)индексация.
   - **Channel Adapters** (roadmap) — Bitrix24 Open Lines и Redmine HelpDesk через будущий `IChannelAdapter`. Такой адаптер должен преобразовывать сообщения конкретной платформы в единый внутренний контракт backend; в текущем коде этого слоя нет.
@@ -425,7 +427,7 @@ _Открытый вопрос для приёмки: считать SLA «<5 с
 | Метрика                      | Как считаем                                                                           | Целевой показатель                                    |
 | ---------------------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------- |
 | % обработанных без эскалации | count(escalated=false) / total                                                        | Снижение обращений к операторам на 30–40%             |
-| Среднее время ответа         | `MetricEvent.latency_ms` для полного user turn: от начала background processing до answer/clarification/escalation/error; текущий API считает только average, p50/p95 не реализованы | <5 сек                                                |
+| Среднее время ответа         | `MetricEvent.latency_ms` для полного user turn: от начала background processing до answer/escalation/error; текущий API считает только average, p50/p95 не реализованы | <5 сек                                                |
 | Количество эскалаций         | count(escalated=true) / период                                                        | Тренд к снижению                                      |
 | Проверка retrieval           | `tests/rag/evaluate_rag.py`: сколько golden-вопросов нашли ожидаемый источник в top-3 | Используем как внутреннюю проверку при изменениях RAG |
 
@@ -435,7 +437,7 @@ _Открытый вопрос для приёмки: считать SLA «<5 с
 обработки считаются по `success=false`.
 
 Один `user_turn` стартует в background worker после persist user message и завершается
-после полного `assistant_done`, решения clarification/escalation или ошибки. Поэтому
+после полного `assistant_done`, решения escalation или ошибки. Поэтому
 `latency_ms` и среднее время включают цепочку `screenshot parse + RAG + confidence +
 answer stream`, а не отдельный GigaChat call, но ожидание запуска worker/очереди в
 текущей реализации не гарантированно входит в latency. p50/p95 не вычисляются.
@@ -480,9 +482,10 @@ answer не запускался, сохраняется usage только conf
 GenerationContext → structured confidence → threshold → streaming user answer
 ```
 
-Confidence-событие отправляется в user-safe SSE без технического prompt. Если порог
-пройден, первый chunk второго call сразу отправляется в SSE; backend не буферизует
-ответ целиком. При низком confidence второй call не выполняется.
+Confidence-событие отправляется в user-safe SSE без технического prompt. Пока серия
+низких confidence меньше трёх, первый chunk второго call сразу отправляется в SSE;
+backend не буферизует ответ целиком. Третий подряд низкий confidence не запускает
+второй call и эскалирует Dialog.
 
 - confidence возвращает маленький structured `ConfidenceAssessment`;
 - confidence использует отдельный hardcoded backend prompt и `max_tokens=64`;
@@ -519,7 +522,7 @@ PostgreSQL / Qdrant / local or S3-compatible storage
 ```
 
 Отдельных `EscalationService` и `VisionService` в текущем репозитории нет: routing
-и clarification/escalation policy находятся в `DialogService`, а screenshot parse —
+и policy трёх последовательных низких confidence находятся в `DialogService`, а screenshot parse —
 в `GenerationContextService` и `GigaChatProvider`. `channel adapters` являются
 будущей границей, а не текущим слоем.
 
@@ -584,8 +587,8 @@ dialog_confidence = 1.0
     hardcoded confidence prompt (constrained sampling)
             ↓
     confidence event (hidden technical details)
-    ├── confidence >= threshold → CALL #2 user answer, stream tokens through SSE
-    └── confidence < threshold → no CALL #2; clarification or operator_support
+    ├── low-confidence streak < 3 → CALL #2 user answer, stream tokens through SSE
+    └── low-confidence streak = 3 → no CALL #2; operator_support
 ```
 
 Второй call использует тот же `GenerationContext` и только редактируемый
@@ -714,29 +717,28 @@ analysis и runtime attachments. Текущий `operator_escalation_threshold` 
 использует ограниченные параметры sampling для стабильной маршрутизации; пользовательский prompt
 `user_support` в него не передаётся.
 
-Decision policy работает так:
+Decision policy работает так. Серия считается по сохранённым `Message.confidence`
+последовательных user turns, поэтому переживает restart и не требует отдельного Redis:
 
 ```python
 confidence = assessment.confidence
-if confidence >= operator_escalation_threshold:
-    stream_user_answer_with_same_context()
-elif clarification_is_allowed:
-    persist_clarification_message()
-else:
+low_streak = consecutive_user_confidences_below_threshold()
+if low_streak >= 3:
     switch_to_operator_mode()
+else:
+    stream_user_answer_with_same_context()
 ```
 
-При низком confidence второй GigaChat call не выполняется. Policy допускает не более
-двух раундов уточнения, но второй раунд запускается только если новый confidence
-строго выше предыдущего; поэтому два раунда не гарантируются. Если уточнение не
-помогает, backend в одной транзакции переводит Dialog в
+При первом и втором подряд низком confidence второй GigaChat call выполняется: модель
+даёт ответ и при необходимости запрашивает уточняющие данные в обычном user answer.
+На третьем подряд низком confidence второй call не выполняется. Backend в одной
+транзакции переводит Dialog в
 `operator_support` и сохраняет system Message с confidence и внутренним snapshot
 `Message.sources`.
 
-Текст уточнения выбирается локально по содержанию текущего сообщения: для ошибки,
-справочного вопроса о 1С, вопроса о конфигурации и общего запроса используются
-разные безопасные формулировки. Это не является третьим GigaChat-call и не создаёт
-новый confidence threshold.
+Высокий confidence либо user turn без сохранённой оценки обрывает серию. Прямой запрос
+оператора не зависит от счётчика: backend выставляет confidence `0`, не вызывает
+GigaChat и сразу переводит Dialog в `operator_support`.
 
 Системное сообщение переживает reload. Пользователь продолжает тот же тикет, а
 эскалированное обращение появляется в панели оператора. Source snapshot хранится
@@ -821,7 +823,7 @@ SystemPrompt(type=knowledge_card)
 
 ```text
 ai_support
-    ↓ confidence < threshold
+    ↓ третий подряд confidence < threshold
 operator_support
 ```
 
@@ -874,7 +876,7 @@ AI SUPPORT
 │
 ├── ошибся → closed → ai_error → очередь «Ошибки AI»
 │
-└── confidence < threshold
+└── третий подряд confidence < threshold
             ↓
         OPERATOR SUPPORT
             ↓
@@ -926,11 +928,11 @@ RAG retrieval
                 confidence SSE event
                 ┌──────────────────────────────┼─────────────────────┐
                 │                              │
-                confidence >= threshold        confidence < threshold
+                low-confidence streak < 3      low-confidence streak = 3
                 │                              │
                 ↓                              ↓
                 CALL #2: user answer stream     no CALL #2
-                → assistant_token SSE           clarification/operator
+                → assistant_token SSE           operator_support
                 → assistant_done
                 ```
 
@@ -957,10 +959,9 @@ RAG retrieval
                 Confidence получает полный общий контекст, но не получает редактируемый
                 `SystemPrompt(type=user_support)`: используется только hardcoded technical
                 instruction. Для стабильной маршрутизации structured call выполняется с
-                `temperature=0, top_p=0.1`. Если confidence ниже порога, второй call не
-                выполняется.
-                Уточнение разрешено максимум два раза по существующей policy и требует роста
-                confidence после первого уточнения; затем Dialog переводится в `operator_support`.
+                `temperature=0, top_p=0.1`. Первый и второй подряд низкий confidence
+                всё равно запускают второй call; третий подряд ниже порога переводит
+                Dialog в `operator_support` без user-answer generation.
 
 #### Поведение после подключения оператора
 
@@ -1245,18 +1246,14 @@ sequenceDiagram
     G-->>API: {confidence}
     API-->>U: SSE confidence event
 
-    alt confidence >= threshold
+    alt consecutive low-confidence turns < 3
         API->>G: Call #2 user answer with same context
         G-->>API: answer chunks
         API-->>U: SSE assistant_token...
         API-->>U: SSE assistant_done
-    else confidence < threshold
-        alt clarification policy allows it
-            API-->>U: SSE assistant_done with clarification question
-        else escalation required
-            API->>E: switch same Dialog to operator_support
-            API-->>U: SSE operator_connected
-        end
+    else third consecutive low confidence
+        API->>E: switch same Dialog to operator_support
+        API-->>U: SSE operator_connected
     end
 ```
 
@@ -2062,11 +2059,11 @@ GigaChat — **основная интеллектуальная модель п
 - runtime attachments: screenshot / документ, если приложены.
 
 В user `ai_support` pipeline backend один раз собирает `GenerationContext`, затем
-выполняет hardcoded structured confidence call. Если confidence проходит порог,
-второй последовательный call с `SystemPrompt(type=user_support)` формирует ответ и
-стримится пользователю. При низком confidence второй call не запускается: применяется
-существующая clarification/escalation policy. В operator pipeline отдельный
-generation-вызов формирует шаблон ответа; он не отправляется пользователю автоматически.
+выполняет hardcoded structured confidence call. Второй последовательный call с
+`SystemPrompt(type=user_support)` формирует ответ и стримится пользователю, пока это
+не третий подряд confidence ниже порога. Третий низкий turn эскалируется без второго
+call. В operator pipeline отдельный generation-вызов формирует шаблон ответа; он не
+отправляется пользователю автоматически.
 
 Анализ screenshot выполняется отдельным structured vision-вызовом до retrieval.
 
@@ -2233,10 +2230,10 @@ classify → rewrite → vision → rerank → answer
 ```
 
 Единственное осознанное разделение user generation-логики — короткий structured
-confidence call, затем streaming user answer с тем же `GenerationContext`. При
-достаточной уверенности answer chunks сразу публикуются через SSE; при низкой
-уверенности второй call не запускается и применяется clarification/escalation policy.
-Ручной operator template выполняется отдельным вызовом и не участвует в user turn.
+confidence call, затем streaming user answer с тем же `GenerationContext`. Answer
+chunks публикуются через SSE на всех turns, кроме третьего подряд ниже threshold;
+он эскалируется без второго call. Ручной operator template выполняется отдельным
+вызовом и не участвует в user turn.
 
 #### Тематические ограничения
 
@@ -2703,9 +2700,9 @@ rag_top_k evidence
         ↓
     CALL #1 — structured ConfidenceAssessment
         ↓
-    threshold / clarification policy
-        ├── confidence >= threshold → CALL #2 user answer stream → SSE
-        └── confidence < threshold → clarification или operator_support
+    consecutive low-confidence policy
+        ├── streak < 3 → CALL #2 user answer stream → SSE
+        └── streak = 3 → operator_support
 ```
 
 Для screenshot parsing используем отдельный structured contract, например:
@@ -3025,9 +3022,9 @@ confidence = await assessment.ainvoke(confidence_messages)
 
 Confidence call выполняется до **Call #2** обычным `llm.astream(...)`. Он получает
 hardcoded technical prompt, а не редактируемый `SystemPrompt(type=user_support)`.
-Если threshold достаточный, chunks user answer сразу отправляются через SSE; иначе
-Call #2 не запускается, а decision policy выбирает clarification или
-`operator_support`.
+Если серия низких confidence меньше трёх, chunks user answer сразу отправляются через
+SSE. На третьем подряд значении ниже threshold Call #2 не запускается, а Dialog
+переходит в `operator_support`.
 
 Screenshot parse и явное заполнение Knowledge Card также используют отдельные
 structured schemas внутри `GigaChatProvider`.
@@ -3340,7 +3337,7 @@ INPUT:
 - [S1], [S2]
         ↓
 OUTPUT:
-confidence → threshold → streaming answer или clarification/operator
+confidence → серия низких оценок → streaming answer или operator
 ```
 
 Screenshot preprocessing нужен для того, чтобы до confidence/answer generation найти
@@ -4271,8 +4268,8 @@ confidence / threshold policy
 ↓
 ┌──────────────┼────────────────┐
 │              │                │
-answer         clarification    operator_connected
-(streamed SSE)  (assistant_done)  wait operator
+answer                          operator_connected
+(streamed SSE)                  wait operator
 ```
 
 В `ai_support` composer блокируется до:
