@@ -31,7 +31,7 @@ function RangeField({
 }) {
   return (
     <Field label={label} hint={preview}>
-      <div className="flex items-center gap-4 rounded-xl border border-stone-200 bg-white px-3 py-3">
+      <div className="flex items-center gap-4 rounded-xl border border-[#dbe3f0] bg-white px-3 py-3">
         <input
           type="range"
           min="0"
@@ -39,9 +39,9 @@ function RangeField({
           step="0.01"
           value={value}
           onChange={(event) => onChange(Number(event.target.value))}
-          className="h-2 min-w-0 flex-1 cursor-pointer accent-molvest-700"
+          className="h-2 min-w-0 flex-1 cursor-pointer accent-molvest-400"
         />
-        <span className="w-12 text-right text-sm font-black text-molvest-900">
+        <span className="w-12 text-right text-sm font-black text-black">
           {formatPercent(value)}
         </span>
       </div>
@@ -171,8 +171,8 @@ export default function SettingsPage() {
         </header>
         <div className="mt-6 grid gap-5 lg:grid-cols-2">
           <Card className="overflow-hidden">
-            <div className="flex items-center gap-3 border-b border-stone-100 bg-stone-50 px-5 py-4">
-              <span className="flex size-10 items-center justify-center rounded-2xl bg-indigo-100 text-indigo-700">
+            <div className="flex items-center gap-3 border-b border-[#dbe3f0] bg-[#f7f9fd] px-5 py-4">
+              <span className="flex size-10 items-center justify-center rounded-xl bg-molvest-100 text-molvest-700">
                 <BrainCircuit className="size-5" />
               </span>
               <div>
@@ -236,8 +236,8 @@ export default function SettingsPage() {
             </div>
           </Card>
           <Card className="overflow-hidden">
-            <div className="flex items-center gap-3 border-b border-stone-100 bg-stone-50 px-5 py-4">
-              <span className="flex size-10 items-center justify-center rounded-2xl bg-molvest-100 text-molvest-700">
+            <div className="flex items-center gap-3 border-b border-[#dbe3f0] bg-[#f7f9fd] px-5 py-4">
+              <span className="flex size-10 items-center justify-center rounded-xl bg-[#fcc67f]/45 text-[#9a5600]">
                 <Database className="size-5" />
               </span>
               <div>
@@ -270,7 +270,7 @@ export default function SettingsPage() {
                   }
                 />
               </Field>
-              <div className="rounded-2xl border border-molvest-100 bg-molvest-50 p-4">
+              <div className="rounded-2xl border border-molvest-200 bg-molvest-50 p-4">
                 <div className="flex items-center gap-2 text-sm font-bold text-molvest-900">
                   <Sigma className="size-4" /> Расчёт budget
                 </div>

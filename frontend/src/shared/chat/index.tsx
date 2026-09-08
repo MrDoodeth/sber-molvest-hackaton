@@ -134,13 +134,13 @@ function normalizeCodeLanguage(className?: string): string | undefined {
 const markdownComponents: Components = {
   a({ children, node, ...props }) {
     void node;
-    return <a {...props} target="_blank" rel="noreferrer" className="font-semibold text-indigo-700 underline decoration-indigo-200 underline-offset-2 hover:decoration-indigo-700">{children}</a>;
+    return <a {...props} target="_blank" rel="noreferrer" className="font-semibold text-molvest-700 underline decoration-molvest-200 underline-offset-2 hover:decoration-molvest-700">{children}</a>;
   },
   code({ children, className, node, ...props }) {
     void node;
     const language = normalizeCodeLanguage(className);
     if (!language) {
-      return <code {...props} className={cn("rounded-md bg-stone-100 px-1.5 py-0.5 font-mono text-[0.9em]", className)}>{children}</code>;
+      return <code {...props} className={cn("rounded-md bg-[#eef2fa] px-1.5 py-0.5 font-mono text-[0.9em]", className)}>{children}</code>;
     }
     return (
       <SyntaxHighlighter
@@ -156,7 +156,7 @@ const markdownComponents: Components = {
   },
   input({ node, ...props }) {
     void node;
-    return <input {...props} disabled className="mr-1.5 align-middle accent-indigo-600" />;
+    return <input {...props} disabled className="mr-1.5 align-middle accent-molvest-400" />;
   },
 };
 
@@ -221,7 +221,7 @@ export function AttachmentCard({ attachment }: { attachment: AttachmentDto }) {
         <a
           href={url}
           download={attachment.fileName}
-          className="group relative flex aspect-square w-24 items-center justify-center overflow-hidden rounded-xl border border-black/10 bg-black/5 transition hover:border-molvest-300 hover:bg-black/10"
+          className="group relative flex aspect-square w-24 items-center justify-center overflow-hidden rounded-xl border border-[#dbe3f0] bg-[#eef2fa] transition hover:border-molvest-400 hover:bg-molvest-50"
           title={`Скачать ${attachment.fileName}`}
           aria-label={`Скачать ${attachment.fileName}`}
         >
@@ -232,7 +232,7 @@ export function AttachmentCard({ attachment }: { attachment: AttachmentDto }) {
           </span>
         </a>
       ) : (
-        <div className="relative flex aspect-square w-24 items-center justify-center overflow-hidden rounded-xl border border-black/10 bg-black/5" title={attachment.fileName}>
+        <div className="relative flex aspect-square w-24 items-center justify-center overflow-hidden rounded-xl border border-[#dbe3f0] bg-[#eef2fa]" title={attachment.fileName}>
           {isImage ? <ImageIcon className="size-7 text-molvest-700" /> : <FileText className="size-7 text-molvest-700" />}
           <span className="absolute inset-x-0 bottom-0 truncate bg-black/65 px-1.5 py-1 text-[10px] font-bold text-white">{attachment.fileName}</span>
         </div>
@@ -243,12 +243,12 @@ export function AttachmentCard({ attachment }: { attachment: AttachmentDto }) {
 }
 
 function authorMeta(message: MessageDto) {
-  if (message.authorType === "assistant") return { label: "GigaChat", icon: Sparkles, bubble: "border border-indigo-100 bg-white text-stone-800 shadow-sm", align: "justify-start" };
-  if (message.authorType === "operator") return { label: "ОПЕРАТОР", icon: ShieldCheck, bubble: "border border-sky-100 bg-sky-50 text-slate-800", align: "justify-start" };
+  if (message.authorType === "assistant") return { label: "GigaChat", icon: Sparkles, bubble: "border border-[#dbe3f0] bg-white text-slate-800 shadow-sm", align: "justify-start" };
+  if (message.authorType === "operator") return { label: "ОПЕРАТОР", icon: ShieldCheck, bubble: "border border-[#fbc4fb] bg-[#fdf5fd] text-slate-800", align: "justify-start" };
   return {
     label: "КЛИЕНТ",
     icon: UserRound,
-    bubble: "bg-molvest-800 text-white",
+    bubble: "bg-molvest-400 text-white",
     align: "justify-end",
   };
 }
@@ -257,9 +257,9 @@ export const MessageBubble = memo(function MessageBubble({ message, showConfiden
   if (message.authorType === "system") {
     return (
       <div className="message-enter my-3 flex justify-center">
-        <div className="max-w-xl rounded-full border border-dashed border-stone-300 bg-stone-50 px-4 py-2 text-center text-xs font-semibold text-stone-600">
+        <div className="max-w-xl rounded-full border border-dashed border-[#dbe3f0] bg-white px-4 py-2 text-center text-xs font-semibold text-slate-600">
           {message.text}
-          {showConfidence && message.confidence !== undefined && <span className="ml-2 text-stone-400">Confidence {formatPercent(message.confidence)}</span>}
+          {showConfidence && message.confidence !== undefined && <span className="ml-2 text-slate-400">Confidence {formatPercent(message.confidence)}</span>}
         </div>
       </div>
     );
@@ -292,11 +292,11 @@ export const MessageBubble = memo(function MessageBubble({ message, showConfiden
 export const StreamingMessage = memo(function StreamingMessage({ text, label = "GigaChat формирует ответ" }: { text: string; label?: string }) {
   return (
     <div className="message-enter flex justify-start" aria-live="polite">
-      <div className="max-w-[88%] rounded-2xl rounded-bl-md border border-indigo-100 bg-white px-4 py-3 text-stone-800 shadow-sm sm:max-w-[74%]">
-        <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-[0.08em] text-indigo-600">
+      <div className="max-w-[88%] rounded-2xl rounded-bl-md border border-[#dbe3f0] bg-white px-4 py-3 text-slate-800 shadow-sm sm:max-w-[74%]">
+        <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-[0.08em] text-molvest-700">
           <Bot className="size-3.5" /> {label}
         </div>
-        {text ? <><MarkdownContent text={text} /><span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-indigo-500 align-middle" aria-hidden="true" /></> : <div className="flex gap-1 py-2"><i className="size-1.5 animate-bounce rounded-full bg-indigo-400" /><i className="size-1.5 animate-bounce rounded-full bg-indigo-400 [animation-delay:120ms]" /><i className="size-1.5 animate-bounce rounded-full bg-indigo-400 [animation-delay:240ms]" /></div>}
+        {text ? <><MarkdownContent text={text} /><span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-molvest-400 align-middle" aria-hidden="true" /></> : <div className="flex gap-1 py-2"><i className="size-1.5 animate-bounce rounded-full bg-molvest-300" /><i className="size-1.5 animate-bounce rounded-full bg-molvest-300 [animation-delay:120ms]" /><i className="size-1.5 animate-bounce rounded-full bg-molvest-300 [animation-delay:240ms]" /></div>}
       </div>
     </div>
   );
@@ -324,7 +324,7 @@ export function MessageList({
   }, [messages.length, hasStreamingMessage]);
   if (!messages.length && !streamingText && empty) return <>{empty}</>;
   return (
-    <div className="grid gap-3 px-4 py-5 sm:px-6">
+    <div className="grid gap-3 bg-cream px-4 py-5 sm:px-6">
       {topAction}
       {messages.map((message) => (
         <MessageBubble key={message.id} message={message} showConfidence={showConfidence} />
@@ -406,11 +406,11 @@ export const ChatComposer = forwardRef<HTMLTextAreaElement, ChatComposerProps>(f
   };
 
   return (
-    <div className="border-t border-stone-200 bg-white p-3 sm:p-4">
+    <div className="border-t border-[#dbe3f0] bg-white p-3 sm:p-4">
       {attachments.length > 0 && (
         <div className="mb-3 flex flex-wrap gap-2">
           {attachments.map((file, index) => (
-            <div key={`${file.name}-${file.lastModified}-${index}`} className="group relative size-20 overflow-hidden rounded-xl border border-molvest-100 bg-molvest-50">
+            <div key={`${file.name}-${file.lastModified}-${index}`} className="group relative size-20 overflow-hidden rounded-xl border border-[#dbe3f0] bg-molvest-50">
               {previews[index] ? <img src={previews[index]} alt={`Предпросмотр ${file.name}`} className="size-full object-cover" /> : <div className="flex size-full items-center justify-center"><FileText className="size-7 text-molvest-600" /></div>}
               <span className="absolute inset-x-0 bottom-0 truncate bg-black/65 px-1.5 py-1 text-[10px] font-bold text-white" title={file.name}>{file.name}</span>
               <button type="button" className="absolute right-1 top-1 inline-flex size-6 items-center justify-center rounded-md bg-black/55 text-white opacity-100 transition hover:bg-black/75 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100" aria-label={`Удалить ${file.name}`} onClick={() => removeAttachment(index)}>
@@ -421,7 +421,7 @@ export const ChatComposer = forwardRef<HTMLTextAreaElement, ChatComposerProps>(f
         </div>
       )}
       {attachmentError && <p className="mb-2 text-xs font-medium text-red-700" role="alert">{attachmentError}</p>}
-      <div className="flex items-end gap-2 rounded-2xl border border-stone-200 bg-stone-50 p-2 focus-within:border-molvest-400 focus-within:ring-3 focus-within:ring-molvest-100">
+      <div className="flex items-end gap-2 rounded-2xl border border-[#dbe3f0] bg-white p-2 focus-within:border-molvest-400 focus-within:ring-3 focus-within:ring-molvest-100">
         {onAttachmentChange && (
           <>
             <input ref={inputRef} name="attachments" type="file" className="sr-only" accept={RUNTIME_ATTACHMENT_ACCEPT} multiple onChange={onFile} disabled={disabled || pending || attachments.length >= MAX_RUNTIME_ATTACHMENTS} aria-label="Выбрать файлы: одно изображение и документы" />
@@ -439,13 +439,13 @@ export const ChatComposer = forwardRef<HTMLTextAreaElement, ChatComposerProps>(f
           placeholder={placeholder}
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={onKeyDown}
-          className="max-h-40 min-h-10 flex-1 resize-none bg-transparent px-1 py-2 text-sm leading-6 outline-none placeholder:text-stone-400 disabled:cursor-not-allowed"
+          className="max-h-40 min-h-10 flex-1 resize-none bg-transparent px-1 py-2 text-sm leading-6 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed"
         />
         <Button type="button" size="sm" className="size-10 shrink-0 px-0" aria-label="Отправить сообщение" disabled={disabled || (!value.trim() && !attachments.length)} pending={pending} onClick={submit}>
           <Send className="size-4" />
         </Button>
       </div>
-      <div className="mt-2 flex items-center justify-between gap-3 text-[11px] text-stone-400">
+      <div className="mt-2 flex items-center justify-between gap-3 text-[11px] text-slate-400">
         <span>Enter — отправить · Shift+Enter — новая строка</span>
         {footer}
       </div>

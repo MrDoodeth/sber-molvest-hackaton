@@ -33,8 +33,8 @@ export default function UserDialogsNav({ mobile = false }: { mobile?: boolean })
   }, []);
 
   return (
-    <aside className={cn("flex min-h-0 flex-col border-stone-200 bg-white", mobile ? "h-full" : "hidden border-r md:flex md:w-80 md:shrink-0")}>
-      <div className="border-b border-stone-100 p-4">
+    <aside className={cn("flex min-h-0 flex-col border-[#dbe3f0] bg-white", mobile ? "h-full" : "hidden border-r md:flex md:w-80 md:shrink-0")}>
+      <div className="border-b border-[#dbe3f0] p-4">
           <Button
             className="w-full"
             disabled={isBusy}
@@ -47,8 +47,8 @@ export default function UserDialogsNav({ mobile = false }: { mobile?: boolean })
         </Button>
       </div>
       <div className="flex items-center justify-between px-4 pb-2 pt-4">
-        <h2 className="text-xs font-extrabold uppercase tracking-[0.16em] text-stone-500">Мои обращения</h2>
-        {dialogs.data && <span className="text-xs font-bold text-stone-400">{dialogs.data.length}</span>}
+        <h2 className="text-xs font-extrabold uppercase tracking-[0.16em] text-slate-500">Мои обращения</h2>
+        {dialogs.data && <span className="rounded-full bg-[#fcc67f]/45 px-2 py-0.5 text-xs font-bold text-[#9a5600]">{dialogs.data.length}</span>}
       </div>
       <nav ref={listRef} aria-label="Мои обращения" className="min-h-0 flex-1 overflow-y-auto p-2">
         {dialogs.isPending && <div className="grid gap-2 p-2"><Skeleton className="h-24" /><Skeleton className="h-24" /><Skeleton className="h-24" /></div>}
@@ -67,19 +67,19 @@ export default function UserDialogsNav({ mobile = false }: { mobile?: boolean })
               if (isBusy && busyDialogId !== dialog.id) event.preventDefault();
             }}
             className={({ isActive }) => cn(
-              "mb-1 block rounded-2xl border p-3.5 transition",
+              "mb-1 block rounded-xl border p-3.5 transition",
               isBusy && busyDialogId !== dialog.id && "pointer-events-none opacity-55",
-              isActive ? "border-molvest-200 bg-molvest-50 shadow-sm" : "border-transparent hover:border-stone-200 hover:bg-stone-50",
+              isActive ? "border-molvest-200 bg-molvest-50 shadow-sm" : "border-transparent hover:border-[#dbe3f0] hover:bg-[#f1f4fb]",
             )}
           >
             <div className="flex items-start justify-between gap-2">
-              <p className="text-sm font-bold leading-5 text-molvest-950">{truncateTitle(dialog.title || dialog.lastMessagePreview || "Новое обращение")}</p>
-              <span className="shrink-0 text-[10px] text-stone-400">{formatRelativeDate(dialog.updatedAt)}</span>
+              <p className="text-sm font-bold leading-5 text-black">{truncateTitle(dialog.title || dialog.lastMessagePreview || "Новое обращение")}</p>
+              <span className="shrink-0 text-[10px] text-slate-400">{formatRelativeDate(dialog.updatedAt)}</span>
             </div>
             <div className="mt-2 flex items-center justify-between gap-2">
               <DialogStatusBadge dialog={dialog} />
               {dialog.lastMessagePreview && dialog.title && (
-                <span className="truncate text-[11px] text-stone-400">{truncateTitle(dialog.lastMessagePreview, 34)}</span>
+                <span className="truncate text-[11px] text-slate-400">{truncateTitle(dialog.lastMessagePreview, 34)}</span>
               )}
             </div>
           </NavLink>

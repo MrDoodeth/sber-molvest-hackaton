@@ -204,24 +204,24 @@ export default function OperatorWorkspace() {
 
   return (
     <div className="flex h-[calc(100vh-65px)] min-h-[34rem] flex-col">
-      <div className="border-b border-stone-200 bg-white p-2 lg:hidden">
+      <div className="border-b border-[#dbe3f0] bg-white p-2 lg:hidden">
         <Tabs value={mobilePane} onChange={setMobilePane} ariaLabel="Панели рабочего места" items={[{ value: "queue", label: "Очередь" }, { value: "chat", label: "Диалог" }, { value: "template", label: "Шаблон" }]} />
       </div>
       <div className="flex min-h-0 flex-1">
         <OperatorQueue selectedId={dialogId} onSelect={selectDialog} className={mobilePane === "queue" ? "flex w-full lg:w-[19rem]" : "hidden lg:flex lg:w-[19rem]"} />
-        <section className={mobilePane === "chat" ? "flex min-w-0 flex-1 flex-col bg-stone-50" : "hidden min-w-0 flex-1 flex-col bg-stone-50 lg:flex"}>
+        <section className={mobilePane === "chat" ? "flex min-w-0 flex-1 flex-col bg-cream" : "hidden min-w-0 flex-1 flex-col bg-cream lg:flex"}>
           {!dialogId && <EmptyState icon={<Inbox className="size-9" />} title="Выберите обращение" description="Откройте тикет из очереди. До назначения доступен просмотр, но поле ответа останется заблокированным." />}
           {dialogId && detail.isPending && <PageLoader label="Открываем тикет" />}
           {dialogId && detail.isError && <ErrorState description={detail.error.message} onRetry={() => void detail.refetch()} />}
           {dialogId && detail.data && (
             <>
-              <header className="flex min-h-[4.75rem] items-center justify-between gap-4 border-b border-stone-200 bg-white px-4 py-3">
+              <header className="flex min-h-[4.75rem] items-center justify-between gap-4 border-b border-[#dbe3f0] bg-white px-4 py-3">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
-                    <h1 className="text-base font-bold text-stone-950">{truncateTitle(detail.data.title || `Тикет ${detail.data.id.slice(0, 8)}`)}</h1>
+                    <h1 className="text-base font-bold text-black">{truncateTitle(detail.data.title || `Тикет ${detail.data.id.slice(0, 8)}`)}</h1>
                     <DialogStatusBadge dialog={detail.data} />
                   </div>
-                  <p className="mt-1 text-xs text-stone-500">{detail.data.user?.displayName || "Пользователь"} · эскалация {formatDateTime(detail.data.escalatedAt)}</p>
+                  <p className="mt-1 text-xs text-slate-500">{detail.data.user?.displayName || "Пользователь"} · эскалация {formatDateTime(detail.data.escalatedAt)}</p>
                 </div>
                 <div className="flex shrink-0 gap-2">
                   {detail.data.status === "active" && !detail.data.assignedOperator && <Button size="sm" pending={claim.isPending} onClick={() => claim.mutate()}><UserCheck className="size-4" /> Взять в работу</Button>}
@@ -251,29 +251,29 @@ export default function OperatorWorkspace() {
             </>
           )}
         </section>
-        <aside className={mobilePane === "template" ? "flex min-h-0 w-full flex-col bg-[#f7f6ff] lg:w-[22rem] lg:border-l" : "hidden min-h-0 w-[22rem] flex-col border-l border-indigo-100 bg-[#f7f6ff] lg:flex"}>
-          <div className="border-b border-indigo-100 bg-white/70 p-4">
-            <p className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-indigo-600">Operator copilot</p>
-            <h2 className="mt-1 flex items-center gap-2 text-lg font-bold text-stone-950"><Bot className="size-5 text-giga" /> Шаблон ответа</h2>
-            <p className="mt-1.5 text-xs leading-5 text-stone-500">GigaChat соберёт ответ по актуальной истории тикета. Перед отправкой его можно изменить.</p>
+        <aside className={mobilePane === "template" ? "flex min-h-0 w-full flex-col bg-[#fdfbff] lg:w-[22rem] lg:border-l lg:border-[#fbc4fb]" : "hidden min-h-0 w-[22rem] flex-col border-l border-[#fbc4fb] bg-[#fdfbff] lg:flex"}>
+          <div className="border-b border-[#fbc4fb] bg-white/70 p-4">
+            <p className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-[#a13cc9]">Operator copilot</p>
+            <h2 className="mt-1 flex items-center gap-2 text-lg font-bold text-black"><Bot className="size-5 text-giga" /> Шаблон ответа</h2>
+            <p className="mt-1.5 text-xs leading-5 text-slate-500">GigaChat соберёт ответ по актуальной истории тикета. Перед отправкой его можно изменить.</p>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-4">
             {!dialogId && <EmptyState icon={<PanelRight className="size-8" />} title="Шаблон не выбран" description="Откройте тикет, чтобы сгенерировать ответ для клиента." />}
             {dialogId && (
               <div className="space-y-4">
                 {isGeneratingTemplate && (
-                  <div className="rounded-2xl border border-indigo-100 bg-white p-4 shadow-sm" role="status" aria-live="polite">
-                    <div className="flex items-center gap-2 text-sm font-bold text-indigo-700"><Sparkles className="size-4 animate-pulse" /> GigaChat формирует шаблон</div>
-                    <p className="mt-2 text-xs leading-5 text-stone-500">Берём последние сообщения и готовим новую версию ответа.</p>
+                  <div className="rounded-2xl border border-[#fbc4fb] bg-[#fbc4fb]/35 p-4" role="status" aria-live="polite">
+                    <div className="flex items-center gap-2 text-sm font-bold text-[#a13cc9]"><Sparkles className="size-4 animate-pulse" /> GigaChat формирует шаблон</div>
+                    <p className="mt-2 text-xs leading-5 text-slate-500">Берём последние сообщения и готовим новую версию ответа.</p>
                   </div>
                 )}
                 {!isGeneratingTemplate && !templateText && !template?.error && <EmptyState icon={<MessagesSquare className="size-8" />} title="Шаблон ещё не создан" description="Нажмите «Сгенерировать шаблон». Контекст будет собран из актуальной истории тикета." />}
                 {(templateText || isGeneratingTemplate) && (
-                  <div className="rounded-2xl border border-indigo-100 bg-white p-4 shadow-sm">
+                  <div className="rounded-2xl border border-[#dbe3f0] bg-white p-4 shadow-sm">
                     <div className="flex items-center justify-between gap-3">
                       <div>
-                        <label htmlFor="operator-template" className="text-sm font-bold text-stone-950">Редактируемый текст</label>
-                        <p className="mt-1 text-[11px] leading-5 text-stone-500">Изменения применяются только к вашему ответу.</p>
+                          <label htmlFor="operator-template" className="text-sm font-bold text-black">Редактируемый текст</label>
+                          <p className="mt-1 text-[11px] leading-5 text-slate-500">Изменения применяются только к вашему ответу.</p>
                       </div>
                       {templateReady && <Badge tone="success" className="justify-center text-center">Готов к вставке</Badge>}
                     </div>
@@ -290,7 +290,7 @@ export default function OperatorWorkspace() {
             )}
           </div>
           {dialogId && (
-            <div className="border-t border-indigo-100 bg-white/80 p-4">
+            <div className="border-t border-[#fbc4fb] bg-white/80 p-4">
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
                 <Button type="button" variant="giga" className="w-full" pending={isGeneratingTemplate} disabled={!canGenerateTemplate} onClick={() => { if (dialogId) generateTemplate.mutate(dialogId); }}><Sparkles className="size-4" /> {templateText ? "Сгенерировать заново" : "Сгенерировать шаблон"}</Button>
                 <TemplateInsertAction templateText={templateText} currentText={text} disabled={!canInsertTemplate} onInsert={insertTemplate} className="w-full" />

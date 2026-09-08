@@ -200,19 +200,19 @@ export default function UserDialogPage() {
   return (
     <div className="flex h-[calc(100vh-65px)] min-h-[32rem]">
       <UserDialogsNav />
-      <section className="flex min-w-0 flex-1 flex-col bg-stone-50">
+      <section className="flex min-w-0 flex-1 flex-col bg-cream">
         {detail.isPending && <PageLoader label="Открываем обращение" />}
         {detail.isError && <ErrorState description={detail.error.message} onRetry={() => void detail.refetch()} />}
         {detail.data && (
           <>
-            <header className="flex min-h-[4.75rem] items-center gap-3 border-b border-stone-200 bg-white px-3 py-3 sm:px-5">
-              <Link to="/user" className="inline-flex size-10 shrink-0 items-center justify-center rounded-xl text-molvest-800 hover:bg-molvest-50 md:hidden" aria-label="К списку обращений"><ArrowLeft className="size-5" /></Link>
+             <header className="flex min-h-[4.75rem] items-center gap-3 border-b border-[#dbe3f0] bg-white px-3 py-3 sm:px-5">
+               <Link to="/user" className="inline-flex size-10 shrink-0 items-center justify-center rounded-xl text-molvest-700 hover:bg-molvest-50 md:hidden" aria-label="К списку обращений"><ArrowLeft className="size-5" /></Link>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <h1 className="text-base font-bold text-molvest-950">{truncateTitle(detail.data.title || `Обращение ${detail.data.id.slice(0, 8)}`)}</h1>
+                   <h1 className="text-base font-bold text-black">{truncateTitle(detail.data.title || `Обращение ${detail.data.id.slice(0, 8)}`)}</h1>
                   <DialogStatusBadge dialog={detail.data} />
                 </div>
-                <p className="mt-1 truncate text-xs text-stone-500">{detail.data.mode === "operator_support" ? detail.data.assignedOperator ? `На связи ${detail.data.assignedOperator.displayName}` : "Ожидаем свободного специалиста" : "GigaChat использует проверенные материалы базы знаний"}</p>
+                 <p className="mt-1 truncate text-xs text-slate-500">{detail.data.mode === "operator_support" ? detail.data.assignedOperator ? `На связи ${detail.data.assignedOperator.displayName}` : "Ожидаем свободного специалиста" : "GigaChat использует проверенные материалы базы знаний"}</p>
               </div>
               {detail.data.status === "active" && detail.data.mode === "ai_support" && allMessages.some((message) => message.authorType === "assistant") && (
                 <Button variant="secondary" size="sm" disabled={pendingTurn || send.isPending} onClick={() => setCloseOpen(true)}><CheckCircle2 className="size-4" /><span className="hidden sm:inline">Завершить обращение</span></Button>
@@ -230,8 +230,8 @@ export default function UserDialogPage() {
                 />
               )}
             </div>
-            {visiblePhase === "vision" && <div className="flex items-center gap-2 border-t border-indigo-100 bg-indigo-50 px-4 py-2 text-xs font-semibold text-indigo-800"><ImageIcon className="size-4 animate-pulse" /> Анализирую изображение…</div>}
-            {visiblePhase === "thinking" && pendingTurn && <div className="flex items-center gap-3 border-t border-molvest-100 bg-molvest-50 px-4 py-2 text-xs font-semibold text-molvest-800"><span>Анализирую решение…</span></div>}
+             {visiblePhase === "vision" && <div className="flex items-center gap-2 border-t border-[#fbc4fb] bg-[#fdf5fd] px-4 py-2 text-xs font-semibold text-[#a13cc9]"><ImageIcon className="size-4 animate-pulse" /> Анализирую изображение…</div>}
+             {visiblePhase === "thinking" && pendingTurn && <div className="flex items-center gap-3 border-t border-molvest-100 bg-molvest-50 px-4 py-2 text-xs font-semibold text-molvest-700"><span>Анализирую решение…</span></div>}
             {processingError && <div className="flex items-center gap-2 border-t border-red-100 bg-red-50 px-4 py-2 text-xs font-semibold text-red-800"><XCircle className="size-4" /> {processingError}</div>}
             {blockedByOtherTurn && <div className="flex items-center gap-2 border-t border-amber-100 bg-amber-50 px-4 py-2 text-xs font-semibold text-amber-900"><LockKeyhole className="size-4" /> Дождитесь завершения обработки другого обращения.</div>}
             {detail.data.status === "active" ? (

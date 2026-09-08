@@ -13,10 +13,10 @@ const links = [
 
 export default function AdminLayout() {
   return (
-    <div className="flex min-h-screen flex-col bg-stone-100">
+    <div className="flex min-h-screen flex-col bg-cream">
       <RoleHeader zone="Администрирование" dark />
       <div className="mx-auto flex min-h-0 w-full max-w-[1720px] flex-1 flex-col lg:flex-row">
-        <aside className="border-b border-stone-200 bg-white lg:w-64 lg:shrink-0 lg:border-b-0 lg:border-r">
+        <aside className="border-b border-[#dbe3f0] bg-white lg:w-64 lg:shrink-0 lg:border-b-0 lg:border-r">
           <nav aria-label="Разделы администрирования" className="flex gap-1 overflow-x-auto p-2 lg:grid lg:p-4">
             {links.map(({ to, label, icon: Icon }) => (
               <NavLink
@@ -24,7 +24,7 @@ export default function AdminLayout() {
                 to={to}
                 className={({ isActive }) => cn(
                   "flex min-h-11 shrink-0 items-center gap-3 rounded-xl px-3.5 text-sm font-semibold transition",
-                  isActive ? "bg-molvest-800 text-white shadow-sm" : "text-stone-600 hover:bg-molvest-50 hover:text-molvest-900",
+                  isActive ? "bg-black text-white shadow-sm" : "text-slate-600 hover:bg-[#f1f4fb] hover:text-black",
                 )}
               >
                 <Icon className="size-4" /> {label}

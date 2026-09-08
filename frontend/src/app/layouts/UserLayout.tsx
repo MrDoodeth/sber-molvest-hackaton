@@ -6,7 +6,7 @@ export default function UserLayout() {
   return (
     <UserProcessingProvider>
       <div className="flex min-h-screen flex-col bg-cream">
-        <RoleHeader zone="Кабинет пользователя" />
+        <RoleHeader zone="Кабинет пользователя" dark />
         <main className="min-h-0 flex-1"><Outlet /></main>
       </div>
     </UserProcessingProvider>

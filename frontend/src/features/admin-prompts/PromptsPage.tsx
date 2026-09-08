@@ -49,13 +49,13 @@ export default function PromptsPage() {
           {dirty && <Badge tone="warning">Есть несохранённые изменения</Badge>}
         </header>
         <Card className="mt-6 overflow-hidden">
-           <div className="border-b border-stone-100 p-4 sm:p-5"><Tabs value={type} onChange={requestTab} ariaLabel="Тип System Prompt" items={[{ value: "user_support", label: "User Support" }, { value: "operator_gigachat", label: "Operator Template" }, { value: "knowledge_card", label: "Помощник карточки решения" }]} /></div>
+          <div className="border-b border-[#dbe3f0] p-4 sm:p-5"><Tabs value={type} onChange={requestTab} ariaLabel="Тип System Prompt" items={[{ value: "user_support", label: "User Support" }, { value: "operator_gigachat", label: "Operator Template" }, { value: "knowledge_card", label: "Помощник карточки решения" }]} /></div>
           {prompts.isPending && <PageLoader label="Загружаем System Prompts" />}
           {prompts.isError && <ErrorState description={prompts.error.message} onRetry={() => void prompts.refetch()} />}
            {prompts.isSuccess && !prompt && <EmptyState title="Prompt не найден" description="Backend не вернул текст для выбранного типа." />}
           {prompt && (
              <div className="p-4 sm:p-6">
-               <div className="flex items-center gap-3"><div className="flex size-10 items-center justify-center rounded-2xl bg-indigo-100 text-indigo-700">{type === "user_support" ? <Bot className="size-5" /> : type === "operator_gigachat" ? <ShieldCheck className="size-5" /> : <Sparkles className="size-5" />}</div><div><p className="text-[10px] font-extrabold uppercase tracking-[0.15em] text-molvest-600">{type === "knowledge_card" ? "Помощник карточки решения" : type}</p><p className="text-sm font-bold text-molvest-950">Инструкции модели</p></div></div>
+                <div className="flex items-center gap-3"><div className="flex size-10 items-center justify-center rounded-xl bg-[#fbc4fb]/55 text-[#a13cc9]">{type === "user_support" ? <Bot className="size-5" /> : type === "operator_gigachat" ? <ShieldCheck className="size-5" /> : <Sparkles className="size-5" />}</div><div><p className="text-[10px] font-extrabold uppercase tracking-[0.15em] text-molvest-700">{type === "knowledge_card" ? "Помощник карточки решения" : type}</p><p className="text-sm font-bold text-black">Инструкции модели</p></div></div>
                <Textarea id="prompt-content" rows={24} className="mt-5 min-h-[32rem] font-mono text-[13px] leading-6" value={content} onChange={(event) => setContent(event.target.value)} spellCheck={false} />
                <div className="mt-4 flex flex-wrap items-center justify-between gap-3"><span className="text-xs text-stone-400">{content.length.toLocaleString("ru-RU")} символов · изменения применяются к следующим вызовам</span><Button pending={save.isPending} disabled={!dirty || !content.trim()} onClick={() => save.mutate()}><Save className="size-4" /> Сохранить</Button></div>
              </div>
