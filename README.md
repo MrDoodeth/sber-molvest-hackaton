@@ -45,6 +45,31 @@ docker compose -f docker-compose.dev.yml down
 docker compose -f docker-compose.dev.yml down --volumes --remove-orphans
 ```
 
+## Production Deployment
+
+`docker-compose.yml` publishes only Caddy on TCP `80` and `443` (and UDP `443` for
+HTTP/3). PostgreSQL, Qdrant, backend and frontend nginx have no published host ports;
+the browser reaches the SPA and same-origin `/api` only through Caddy.
+
+Before starting the stack, point the DNS `A`/`AAAA` record for the selected domain to
+the server and allow inbound TCP `80`, TCP `443` and UDP `443` in the firewall. Caddy
+uses port `80` for ACME validation and obtains and renews the TLS certificate itself.
+
+```bash
+cp .env.example .env
+# Set DOMAIN, CADDY_EMAIL, POSTGRES_PASSWORD and JWT_SECRET in .env.
+docker compose -f docker-compose.yml up --build -d --wait
+```
+
+The production Compose disables demo authentication and seed data, independently of
+the common `.env` values. Keep the named `caddy_data` volume when updating the stack
+so certificate state survives.
+
+```bash
+docker compose -f docker-compose.yml logs -f caddy
+docker compose -f docker-compose.yml down
+```
+
 ## Проверки
 
 ```bash

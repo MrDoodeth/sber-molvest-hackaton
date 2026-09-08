@@ -1,0 +1,11 @@
+{
+    email {$CADDY_EMAIL}
+}
+
+{$DOMAIN} {
+    encode zstd gzip
+    reverse_proxy frontend:80 {
+        # Stream SSE responses to the browser without proxy buffering.
+        flush_interval -1
+    }
+}

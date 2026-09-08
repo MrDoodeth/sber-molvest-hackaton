@@ -1,0 +1,3584 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>МОЛВЕСТ · Поддержка 1С — AI-агент техподдержки</title>
+  <style>
+    @font-face {
+      font-family: 'Manrope';
+      font-style: normal;
+      font-weight: 400;
+      src: url('https://cdn.jsdelivr.net/fontsource/fonts/manrope@latest/cyrillic-400-normal.woff2') format('woff2');
+    }
+
+    @font-face {
+      font-family: 'Manrope';
+      font-style: normal;
+      font-weight: 500;
+      src: url('https://cdn.jsdelivr.net/fontsource/fonts/manrope@latest/cyrillic-500-normal.woff2') format('woff2');
+    }
+
+    @font-face {
+      font-family: 'Manrope';
+      font-style: normal;
+      font-weight: 600;
+      src: url('https://cdn.jsdelivr.net/fontsource/fonts/manrope@latest/cyrillic-600-normal.woff2') format('woff2');
+    }
+
+    @font-face {
+      font-family: 'Manrope';
+      font-style: normal;
+      font-weight: 700;
+      src: url('https://cdn.jsdelivr.net/fontsource/fonts/manrope@latest/cyrillic-700-normal.woff2') format('woff2');
+    }
+
+    @font-face {
+      font-family: 'Manrope';
+      font-style: normal;
+      font-weight: 800;
+      src: url('https://cdn.jsdelivr.net/fontsource/fonts/manrope@latest/cyrillic-800-normal.woff2') format('woff2');
+    }
+
+    :root {
+      --blue: #2B9FFE;
+      --blue-ink: #0b74d0;
+      --blue-soft: rgba(43, 159, 254, .12);
+      --pink: #FBC4FB;
+      --pink-ink: #a13cc9;
+      --pink-soft: rgba(251, 196, 251, .35);
+      --peach: #FCC67F;
+      --peach-ink: #9a5600;
+      --peach-soft: rgba(252, 198, 127, .35);
+      --bg: #E7EBF4;
+      --white: #FFFFFF;
+      --black: #000000;
+      --line: #dbe3f0;
+      --muted: #61708b;
+      --faint: #93a1b8;
+      --shadow: 0 10px 30px rgba(20, 40, 80, .08);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0
+    }
+
+    html,
+    body {
+      height: 100%
+    }
+
+    body {
+      font-family: 'Manrope', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--black);
+      font-size: 14px;
+      overflow: hidden
+    }
+
+    button {
+      font-family: inherit
+    }
+
+    .view {
+      display: none;
+      height: 100vh;
+      flex-direction: column
+    }
+
+    .view.active {
+      display: flex
+    }
+
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #c3cfe3;
+      border-radius: 99px
+    }
+
+    ::-webkit-scrollbar-track {
+      background: transparent
+    }
+
+    /* ---------- TOPBAR ---------- */
+    .topbar {
+      background: var(--black);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 0 22px;
+      height: 62px;
+      flex: 0 0 62px
+    }
+
+    .logo {
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      overflow: hidden;
+      flex: 0 0 40px;
+      background: linear-gradient(135deg, var(--blue), var(--pink));
+      position: relative;
+      display: grid;
+      place-items: center;
+      color: #fff;
+      font-weight: 800
+    }
+
+    .logo::after {
+      content: 'М';
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      z-index: 0;
+      font-size: 16px
+    }
+
+    .logo img {
+      position: relative;
+      z-index: 1
+    }
+
+    .logo img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block
+    }
+
+    .brand b {
+      font-size: 14px;
+      letter-spacing: .06em;
+      display: block
+    }
+
+    .brand span {
+      display: block;
+      font-size: 10px;
+      letter-spacing: .18em;
+      color: #9fb4d8;
+      text-transform: uppercase;
+      margin-top: 2px
+    }
+
+    .tdivider {
+      width: 1px;
+      height: 26px;
+      background: rgba(255, 255, 255, .25);
+      margin: 0 4px
+    }
+
+    .t-title {
+      font-weight: 700;
+      font-size: 14px
+    }
+
+    .spacer {
+      flex: 1
+    }
+
+    .pill {
+      border: 1px solid rgba(255, 255, 255, .35);
+      padding: 8px 14px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      display: flex;
+      gap: 8px;
+      align-items: center
+    }
+
+    .pill .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 99px;
+      background: var(--peach)
+    }
+
+    .ublock {
+      text-align: right
+    }
+
+    .ublock b {
+      font-size: 13px;
+      display: block
+    }
+
+    .ublock span {
+      display: block;
+      font-size: 10px;
+      letter-spacing: .14em;
+      color: #8ea3c8;
+      text-transform: uppercase;
+      margin-top: 2px
+    }
+
+    .btn-logout {
+      background: #fff;
+      color: #000;
+      border: 0;
+      border-radius: 10px;
+      padding: 9px 14px;
+      font-weight: 700;
+      font-size: 13px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      cursor: pointer;
+      transition: .15s
+    }
+
+    .btn-logout:hover {
+      background: var(--pink)
+    }
+
+    /* ---------- BUTTONS ---------- */
+    .btn {
+      border: 0;
+      border-radius: 12px;
+      cursor: pointer;
+      font-weight: 700;
+      transition: .16s;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px
+    }
+
+    .btn-primary {
+      background: var(--blue);
+      color: #fff
+    }
+
+    .btn-primary:hover {
+      filter: brightness(.94)
+    }
+
+    .btn-ghost {
+      background: #fff;
+      border: 1px solid var(--line);
+      color: var(--black)
+    }
+
+    .btn-ghost:hover {
+      border-color: var(--blue);
+      color: var(--blue-ink)
+    }
+
+    .icon-btn {
+      width: 38px;
+      height: 38px;
+      border-radius: 10px;
+      border: 0;
+      background: #eef2fa;
+      color: #5b6b88;
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      transition: .15s;
+      flex: 0 0 38px
+    }
+
+    .icon-btn:hover {
+      background: var(--blue-soft);
+      color: var(--blue-ink)
+    }
+
+    .send {
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      background: var(--blue);
+      color: #fff;
+      border: 0;
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      flex: 0 0 40px;
+      transition: .15s
+    }
+
+    .send:hover {
+      filter: brightness(.94)
+    }
+
+    /* ---------- LANDING / PUBLIC SITE ---------- */
+    .eyebrow {
+      color: var(--blue-ink);
+      letter-spacing: .18em;
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase
+    }
+
+    .ic.blue {
+      background: var(--blue-soft);
+      color: var(--blue-ink)
+    }
+
+    .ic.pink {
+      background: var(--pink-soft);
+      color: var(--pink-ink)
+    }
+
+    .ic.peach {
+      background: var(--peach-soft);
+      color: var(--peach-ink)
+    }
+
+    #view-landing {
+      background: #f7f9fd;
+      overflow: auto;
+      height: 100vh
+    }
+
+    .site-header {
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      background: rgba(247, 249, 253, .92);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid rgba(219, 227, 240, .85)
+    }
+
+    .site-header__inner,
+    .site-main,
+    .site-footer__inner {
+      width: min(1180px, calc(100% - 48px));
+      margin: 0 auto
+    }
+
+    .site-header__inner {
+      height: 76px;
+      display: flex;
+      align-items: center;
+      gap: 28px
+    }
+
+    .site-brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+      color: var(--black);
+      min-width: max-content
+    }
+
+    .site-brand .logo {
+      width: 42px;
+      height: 42px;
+      flex: 0 0 42px;
+      border-radius: 13px
+    }
+
+    .site-brand__text b {
+      font-size: 14px;
+      letter-spacing: .06em;
+      display: block
+    }
+
+    .site-brand__text span {
+      font-size: 10px;
+      letter-spacing: .17em;
+      color: #7485a3;
+      text-transform: uppercase;
+      display: block;
+      margin-top: 2px
+    }
+
+    .site-nav {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      margin-left: 18px
+    }
+
+    .site-nav a {
+      color: #4d5d78;
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 13px;
+      transition: .15s
+    }
+
+    .site-nav a:hover {
+      color: var(--blue-ink)
+    }
+
+    .site-header__actions {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 10px
+    }
+
+    .staff-entry {
+      border: 0;
+      background: transparent;
+      color: #53627c;
+      font-weight: 700;
+      font-size: 13px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      cursor: pointer
+    }
+
+    .staff-entry:hover {
+      background: #edf3fb;
+      color: var(--black)
+    }
+
+    .site-cta {
+      padding: 11px 17px;
+      border-radius: 12px;
+      font-size: 13px;
+      text-decoration: none
+    }
+
+    .site-main {
+      padding: 58px 0 62px
+    }
+
+    .public-hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.03fr) minmax(420px, .97fr);
+      gap: 64px;
+      align-items: center;
+      min-height: 540px
+    }
+
+    .hero-copy {
+      padding: 26px 0
+    }
+
+    .hero-kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--blue-ink);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .15em;
+      text-transform: uppercase;
+      background: var(--blue-soft);
+      border: 1px solid rgba(43, 159, 254, .18);
+      padding: 7px 10px;
+      border-radius: 999px
+    }
+
+    .hero-kicker::before {
+      content: '';
+      width: 7px;
+      height: 7px;
+      border-radius: 99px;
+      background: var(--blue)
+    }
+
+    .hero-copy h1 {
+      font-size: 58px;
+      line-height: 1.02;
+      letter-spacing: -.045em;
+      font-weight: 800;
+      max-width: 700px;
+      margin: 20px 0
+    }
+
+    .hero-copy h1 em {
+      font-style: normal;
+      color: var(--blue-ink)
+    }
+
+    .hero-copy>p {
+      font-size: 17px;
+      line-height: 1.7;
+      color: var(--muted);
+      max-width: 620px
+    }
+
+    .hero-actions {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-top: 30px
+    }
+
+    .hero-actions .btn {
+      padding: 14px 20px;
+      font-size: 14px;
+      border-radius: 13px
+    }
+
+    .hero-note {
+      display: flex;
+      gap: 18px;
+      flex-wrap: wrap;
+      margin-top: 24px;
+      color: #7585a0;
+      font-size: 12px;
+      font-weight: 600
+    }
+
+    .hero-note span {
+      display: flex;
+      align-items: center;
+      gap: 7px
+    }
+
+    .hero-note svg {
+      color: var(--blue-ink)
+    }
+
+    .ask-preview {
+      position: relative;
+      background: #0c1220;
+      border-radius: 28px;
+      padding: 22px;
+      box-shadow: 0 30px 70px rgba(31, 58, 100, .18);
+      overflow: hidden;
+      min-height: 440px
+    }
+
+    .ask-preview::before {
+      content: '';
+      position: absolute;
+      width: 260px;
+      height: 260px;
+      border-radius: 50%;
+      background: radial-gradient(circle, var(--blue) 0, rgba(43, 159, 254, 0) 68%);
+      opacity: .22;
+      right: -80px;
+      top: -80px
+    }
+
+    .ask-preview::after {
+      content: '';
+      position: absolute;
+      width: 230px;
+      height: 230px;
+      border-radius: 50%;
+      background: radial-gradient(circle, var(--pink) 0, rgba(251, 196, 251, 0) 70%);
+      opacity: .2;
+      left: -80px;
+      bottom: -90px
+    }
+
+    .preview-top {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: #fff;
+      margin-bottom: 22px
+    }
+
+    .preview-top b {
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px
+    }
+
+    .ai-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 99px;
+      background: #77d8a6;
+      box-shadow: 0 0 0 5px rgba(119, 216, 166, .12)
+    }
+
+    .preview-top span {
+      font-size: 11px;
+      color: #8ea3c8;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase
+    }
+
+    .preview-chat {
+      position: relative;
+      z-index: 1;
+      background: #f7f9fd;
+      border-radius: 20px;
+      padding: 20px;
+      min-height: 330px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px
+    }
+
+    .preview-bubble {
+      max-width: 88%;
+      font-size: 13px;
+      line-height: 1.55;
+      padding: 12px 14px;
+      border-radius: 15px
+    }
+
+    .preview-bubble.user {
+      align-self: flex-end;
+      background: var(--blue);
+      color: #fff;
+      border-bottom-right-radius: 5px
+    }
+
+    .preview-bubble.ai {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-bottom-left-radius: 5px
+    }
+
+    .preview-proof {
+      display: flex;
+      gap: 7px;
+      flex-wrap: wrap
+    }
+
+    .preview-proof span {
+      font-size: 10px;
+      font-weight: 800;
+      padding: 5px 8px;
+      border-radius: 999px;
+      background: var(--blue-soft);
+      color: var(--blue-ink)
+    }
+
+    .preview-proof .escalate {
+      background: var(--peach-soft);
+      color: var(--peach-ink)
+    }
+
+    .preview-input {
+      margin-top: auto;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 9px 9px 9px 13px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #8a99b1;
+      font-size: 12px
+    }
+
+    .preview-input span {
+      flex: 1
+    }
+
+    .preview-send {
+      width: 34px;
+      height: 34px;
+      border: 0;
+      border-radius: 10px;
+      background: var(--blue);
+      color: #fff;
+      display: grid;
+      place-items: center
+    }
+
+    .trust-strip {
+      margin-top: 22px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px
+    }
+
+    .trust-card {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 17px;
+      padding: 17px;
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      box-shadow: 0 5px 18px rgba(20, 40, 80, .04)
+    }
+
+    .trust-card .ic {
+      width: 38px;
+      height: 38px;
+      flex: 0 0 38px;
+      border-radius: 11px;
+      display: grid;
+      place-items: center
+    }
+
+    .trust-card b {
+      display: block;
+      font-size: 13px;
+      margin-bottom: 4px
+    }
+
+    .trust-card p {
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.5
+    }
+
+    .how {
+      margin-top: 90px;
+      padding-top: 8px
+    }
+
+    .section-head {
+      max-width: 660px;
+      margin-bottom: 26px
+    }
+
+    .section-head .eyebrow {
+      display: block;
+      margin-bottom: 10px
+    }
+
+    .section-head h2 {
+      font-size: 34px;
+      line-height: 1.15;
+      letter-spacing: -.025em
+    }
+
+    .section-head p {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.65;
+      margin-top: 10px
+    }
+
+    .flow-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px
+    }
+
+    .flow-card {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      padding: 22px;
+      min-height: 210px;
+      position: relative;
+      overflow: hidden
+    }
+
+    .flow-num {
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .16em;
+      color: var(--blue-ink);
+      margin-bottom: 34px
+    }
+
+    .flow-card h3 {
+      font-size: 18px;
+      margin-bottom: 8px
+    }
+
+    .flow-card p {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6
+    }
+
+    .flow-card strong {
+      color: var(--black)
+    }
+
+    .flow-mark {
+      position: absolute;
+      right: 18px;
+      top: 18px;
+      width: 42px;
+      height: 42px;
+      border-radius: 13px;
+      display: grid;
+      place-items: center;
+      background: var(--blue-soft);
+      color: var(--blue-ink)
+    }
+
+    .flow-card:nth-child(2) .flow-mark {
+      background: var(--pink-soft);
+      color: var(--pink-ink)
+    }
+
+    .flow-card:nth-child(3) .flow-mark {
+      background: var(--peach-soft);
+      color: var(--peach-ink)
+    }
+
+    .public-cta {
+      margin-top: 26px;
+      background: linear-gradient(135deg, #0c1220, #17253e);
+      border-radius: 22px;
+      padding: 28px 30px;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 24px
+    }
+
+    .public-cta h3 {
+      font-size: 22px;
+      margin-bottom: 6px
+    }
+
+    .public-cta p {
+      color: #a9b7cf;
+      font-size: 13px;
+      line-height: 1.5
+    }
+
+    .public-cta .btn {
+      margin-left: auto;
+      flex: 0 0 auto;
+      padding: 13px 18px
+    }
+
+    .site-footer {
+      border-top: 1px solid var(--line);
+      background: #fff
+    }
+
+    .site-footer__inner {
+      min-height: 118px;
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      padding: 24px 0
+    }
+
+    .footer-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px
+    }
+
+    .footer-brand .logo {
+      width: 36px;
+      height: 36px;
+      flex: 0 0 36px;
+      border-radius: 11px
+    }
+
+    .footer-brand b {
+      font-size: 13px;
+      display: block
+    }
+
+    .footer-brand span {
+      font-size: 10px;
+      color: var(--muted);
+      display: block;
+      margin-top: 2px
+    }
+
+    .footer-copy {
+      margin-left: auto;
+      color: #7b8aa3;
+      font-size: 11px;
+      line-height: 1.5;
+      text-align: right
+    }
+
+    .footer-staff {
+      border: 0;
+      background: transparent;
+      color: #6b7b96;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+      padding: 8px;
+      border-radius: 8px
+    }
+
+    .footer-staff:hover {
+      background: #f1f4fb;
+      color: var(--black)
+    }
+
+    .staff-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: rgba(8, 14, 25, .58);
+      backdrop-filter: blur(8px)
+    }
+
+    .staff-modal.open {
+      display: flex
+    }
+
+    .staff-dialog {
+      width: min(440px, 100%);
+      background: #fff;
+      border-radius: 22px;
+      padding: 24px;
+      box-shadow: 0 30px 80px rgba(0, 0, 0, .22)
+    }
+
+    .staff-dialog__head {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+      margin-bottom: 18px
+    }
+
+    .staff-dialog__head>div {
+      flex: 1
+    }
+
+    .staff-dialog h2 {
+      font-size: 21px;
+      margin-bottom: 5px
+    }
+
+    .staff-dialog p {
+      font-size: 12px;
+      line-height: 1.55;
+      color: var(--muted)
+    }
+
+    .staff-close {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      border: 0;
+      background: #f1f4fb;
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      color: #64748f
+    }
+
+    .staff-role {
+      display: flex;
+      width: 100%;
+      align-items: center;
+      gap: 13px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 15px;
+      background: #fff;
+      cursor: pointer;
+      text-align: left;
+      margin-top: 10px;
+      transition: .15s
+    }
+
+    .staff-role:hover {
+      border-color: var(--blue);
+      box-shadow: 0 8px 22px rgba(20, 40, 80, .07);
+      transform: translateY(-1px)
+    }
+
+    .staff-role .ic {
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
+      display: grid;
+      place-items: center;
+      flex: 0 0 42px
+    }
+
+    .staff-role b {
+      font-size: 13px;
+      display: block
+    }
+
+    .staff-role span span {
+      font-size: 11px;
+      color: var(--muted);
+      display: block;
+      margin-top: 3px
+    }
+
+    .staff-role .arr {
+      margin-left: auto;
+      color: #9aabc4
+    }
+
+    .staff-secure {
+      font-size: 10px !important;
+      color: #93a1b8 !important;
+      margin-top: 14px !important;
+      display: flex;
+      align-items: center;
+      gap: 6px
+    }
+
+    @media (max-width:980px) {
+      .site-nav {
+        display: none
+      }
+
+      .public-hero {
+        grid-template-columns: 1fr;
+        gap: 30px;
+        min-height: auto
+      }
+
+      .hero-copy h1 {
+        font-size: 48px
+      }
+
+      .ask-preview {
+        min-height: 390px
+      }
+
+      .trust-strip,
+      .flow-grid {
+        grid-template-columns: 1fr
+      }
+
+      .how {
+        margin-top: 64px
+      }
+    }
+
+    @media (max-width:640px) {
+
+      .site-header__inner,
+      .site-main,
+      .site-footer__inner {
+        width: min(100% - 28px, 1180px)
+      }
+
+      .site-header__inner {
+        height: 66px;
+        gap: 12px
+      }
+
+      .site-brand__text span,
+      .staff-entry {
+        display: none
+      }
+
+      .site-cta {
+        padding: 10px 12px
+      }
+
+      .site-main {
+        padding: 34px 0 42px
+      }
+
+      .hero-copy {
+        padding: 8px 0
+      }
+
+      .hero-copy h1 {
+        font-size: 39px;
+        margin: 16px 0
+      }
+
+      .hero-copy>p {
+        font-size: 15px
+      }
+
+      .hero-actions {
+        align-items: stretch
+      }
+
+      .hero-actions .btn {
+        width: 100%
+      }
+
+      .hero-note {
+        gap: 10px;
+        flex-direction: column
+      }
+
+      .ask-preview {
+        border-radius: 22px;
+        padding: 14px;
+        min-height: 360px
+      }
+
+      .preview-chat {
+        padding: 15px;
+        min-height: 300px
+      }
+
+      .public-cta {
+        align-items: flex-start;
+        flex-direction: column
+      }
+
+      .public-cta .btn {
+        margin-left: 0;
+        width: 100%
+      }
+
+      .site-footer__inner {
+        align-items: flex-start;
+        flex-wrap: wrap
+      }
+
+      .footer-copy {
+        width: 100%;
+        margin-left: 0;
+        text-align: left
+      }
+    }
+
+    /* ---------- USER ---------- */
+    .u-layout {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      min-height: 0
+    }
+
+    .u-side {
+      background: #fff;
+      border-right: 1px solid var(--line);
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      min-height: 0
+    }
+
+    #newChatBtn {
+      width: 100%;
+      padding: 13px;
+      border-radius: 14px;
+      font-size: 14px
+    }
+
+    .side-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: var(--muted);
+      letter-spacing: .14em;
+      font-size: 11px;
+      font-weight: 800;
+      padding: 0 4px
+    }
+
+    .side-head .cnt {
+      background: var(--peach-soft);
+      color: var(--peach-ink);
+      border-radius: 999px;
+      padding: 2px 9px;
+      font-size: 11px;
+      letter-spacing: 0
+    }
+
+    #uList {
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      flex: 1
+    }
+
+    .dlg {
+      padding: 12px;
+      border-radius: 12px;
+      cursor: pointer;
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+      justify-content: space-between;
+      border: 0;
+      background: transparent;
+      text-align: left;
+      width: 100%
+    }
+
+    .dlg:hover {
+      background: #f1f4fb
+    }
+
+    .dlg.active {
+      background: var(--blue-soft)
+    }
+
+    .dlg b {
+      font-size: 13px;
+      line-height: 1.4;
+      display: block;
+      color: var(--black)
+    }
+
+    .dlg span {
+      color: var(--faint);
+      font-size: 11px;
+      white-space: nowrap;
+      flex: 0 0 auto;
+      margin-top: 2px
+    }
+
+    .u-main {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      min-height: 0
+    }
+
+    .u-head {
+      padding: 18px 26px;
+      border-bottom: 1px solid var(--line)
+    }
+
+    .u-head h2 {
+      font-size: 17px;
+      font-weight: 800
+    }
+
+    .u-head p {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 4px
+    }
+
+    #uChat {
+      flex: 1;
+      overflow: auto;
+      padding: 26px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px
+    }
+
+    .msg {
+      max-width: 760px;
+      display: flex;
+      flex-direction: column
+    }
+
+    .msg.u {
+      align-self: flex-end;
+      align-items: flex-end
+    }
+
+    .b {
+      border-radius: 16px;
+      padding: 12px 16px;
+      font-size: 14px;
+      line-height: 1.6;
+      white-space: pre-line
+    }
+
+    .msg.u .b {
+      background: var(--blue);
+      color: #fff;
+      border-bottom-right-radius: 6px
+    }
+
+    .msg.ai .b {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-bottom-left-radius: 6px
+    }
+
+    .meta {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+      align-items: center;
+      flex-wrap: wrap
+    }
+
+    .conf {
+      font-size: 11px;
+      font-weight: 800;
+      border-radius: 999px;
+      padding: 4px 10px
+    }
+
+    .conf.hi {
+      background: var(--blue-soft);
+      color: var(--blue-ink)
+    }
+
+    .conf.lo {
+      background: var(--peach-soft);
+      color: var(--peach-ink)
+    }
+
+    .src {
+      font-size: 11px;
+      background: var(--pink-soft);
+      color: var(--pink-ink);
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-weight: 700
+    }
+
+    .sys-chip {
+      align-self: center;
+      background: #fff;
+      border: 1px dashed var(--line);
+      border-radius: 999px;
+      padding: 8px 16px;
+      font-size: 12px;
+      color: var(--muted);
+      display: flex;
+      gap: 10px;
+      align-items: center
+    }
+
+    .sys-chip b {
+      color: var(--black)
+    }
+
+    .sys-chip .conf {
+      margin: 0
+    }
+
+    .filecard {
+      margin-top: 8px;
+      background: rgba(0, 0, 0, .18);
+      border-radius: 10px;
+      padding: 8px 12px;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      font-size: 12px
+    }
+
+    .empty {
+      margin: auto;
+      text-align: center;
+      color: var(--muted);
+      max-width: 420px
+    }
+
+    .empty .eic {
+      width: 64px;
+      height: 64px;
+      border-radius: 99px;
+      background: var(--blue-soft);
+      color: var(--blue-ink);
+      display: grid;
+      place-items: center;
+      margin: 0 auto 16px
+    }
+
+    .empty h3 {
+      font-size: 18px;
+      font-weight: 800;
+      color: var(--black);
+      margin-bottom: 8px
+    }
+
+    .empty p {
+      line-height: 1.6;
+      font-size: 13px
+    }
+
+    .attach-row {
+      display: flex;
+      gap: 8px;
+      padding: 0 26px 8px;
+      flex-wrap: wrap
+    }
+
+    .achip {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 6px 12px;
+      font-size: 12px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      font-weight: 600
+    }
+
+    .achip button {
+      border: 0;
+      background: transparent;
+      cursor: pointer;
+      color: var(--muted);
+      display: grid;
+      place-items: center
+    }
+
+    .composer {
+      margin: 0 26px 10px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px
+    }
+
+    .composer textarea {
+      flex: 1;
+      border: 0;
+      resize: none;
+      font: inherit;
+      background: transparent;
+      outline: none;
+      max-height: 120px;
+      padding: 8px 2px
+    }
+
+    .hint {
+      padding: 0 26px 14px;
+      color: var(--faint);
+      font-size: 11px
+    }
+
+    .typing i {
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      border-radius: 99px;
+      background: #b9c6dd;
+      margin: 0 2px;
+      animation: blink 1s infinite
+    }
+
+    .typing i:nth-child(2) {
+      animation-delay: .2s
+    }
+
+    .typing i:nth-child(3) {
+      animation-delay: .4s
+    }
+
+    @keyframes blink {
+
+      0%,
+      100% {
+        opacity: .3
+      }
+
+      50% {
+        opacity: 1
+      }
+    }
+
+    /* ---------- OPERATOR ---------- */
+    .o-layout {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 300px 1fr 350px;
+      min-height: 0
+    }
+
+    .o-side {
+      background: #fff;
+      border-right: 1px solid var(--line);
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-height: 0
+    }
+
+    .live {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: var(--muted);
+      letter-spacing: .14em;
+      font-size: 11px;
+      font-weight: 800
+    }
+
+    .live .cnt {
+      background: var(--peach);
+      color: #5c3300;
+      border-radius: 999px;
+      padding: 2px 10px;
+      font-size: 12px;
+      letter-spacing: 0;
+      font-weight: 800
+    }
+
+    .o-side h2 {
+      font-size: 20px;
+      font-weight: 800
+    }
+
+    .tabs {
+      display: flex;
+      background: #eef2fa;
+      border-radius: 12px;
+      padding: 4px
+    }
+
+    .tab {
+      flex: 1;
+      text-align: center;
+      padding: 8px;
+      border-radius: 9px;
+      cursor: pointer;
+      font-weight: 700;
+      color: var(--muted);
+      border: 0;
+      background: transparent;
+      font-size: 13px
+    }
+
+    .tab.active {
+      background: #fff;
+      color: var(--blue-ink);
+      box-shadow: 0 1px 4px rgba(0, 0, 0, .08)
+    }
+
+    #oList {
+      overflow: auto;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 6px
+    }
+
+    .tk {
+      padding: 12px;
+      border-radius: 14px;
+      border: 1px solid transparent;
+      cursor: pointer;
+      background: transparent;
+      text-align: left;
+      width: 100%
+    }
+
+    .tk:hover {
+      background: #f1f4fb
+    }
+
+    .tk.active {
+      background: #fff;
+      border-color: var(--line);
+      box-shadow: 0 4px 14px rgba(20, 40, 80, .07)
+    }
+
+    .tk b {
+      font-size: 13px;
+      display: block;
+      margin-bottom: 6px
+    }
+
+    .tk .row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 4px
+    }
+
+    .tk .row .spacer {
+      flex: 1
+    }
+
+    .o-main {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      min-height: 0
+    }
+
+    .o-head {
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap
+    }
+
+    .o-head h2 {
+      font-size: 16px;
+      font-weight: 800
+    }
+
+    .badge {
+      background: var(--blue-soft);
+      color: var(--blue-ink);
+      border-radius: 999px;
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 700
+    }
+
+    .o-head p {
+      width: 100%;
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 2px
+    }
+
+    #oChat {
+      flex: 1;
+      overflow: auto;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px
+    }
+
+    .msg.c {
+      align-self: flex-end;
+      align-items: flex-end
+    }
+
+    .msg.c .b {
+      background: var(--black);
+      color: #fff;
+      border-bottom-right-radius: 6px
+    }
+
+    .msg.o .b {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-bottom-left-radius: 6px
+    }
+
+    .msg .who {
+      font-size: 10px;
+      letter-spacing: .12em;
+      color: var(--faint);
+      font-weight: 800;
+      margin-bottom: 6px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      text-transform: uppercase
+    }
+
+    .copilot {
+      border-left: 1px solid var(--line);
+      background: #fdfbff;
+      padding: 18px;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 14px
+    }
+
+    .cp-eyebrow {
+      color: var(--pink-ink);
+      letter-spacing: .16em;
+      font-size: 11px;
+      font-weight: 800
+    }
+
+    .copilot h3 {
+      font-size: 17px;
+      font-weight: 800;
+      display: flex;
+      gap: 10px;
+      align-items: center
+    }
+
+    .copilot .desc {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.6
+    }
+
+    .gc-card {
+      background: var(--pink-soft);
+      border: 1px solid var(--pink);
+      border-radius: 14px;
+      padding: 14px
+    }
+
+    .gc-card b {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      color: var(--pink-ink);
+      font-size: 13px
+    }
+
+    .gc-card p {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 6px;
+      line-height: 1.5
+    }
+
+    .ed-card {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px
+    }
+
+    .ed-card label {
+      font-weight: 800;
+      font-size: 13px
+    }
+
+    .ed-card small {
+      color: var(--muted);
+      font-size: 11px
+    }
+
+    #tplText {
+      width: 100%;
+      min-height: 200px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px;
+      font: inherit;
+      resize: vertical;
+      background: #fbfcff;
+      outline: none;
+      color: var(--black)
+    }
+
+    #tplText:focus {
+      border-color: var(--pink)
+    }
+
+    #tplGen {
+      background: var(--pink);
+      color: #000;
+      font-weight: 800;
+      width: 100%;
+      padding: 13px;
+      border-radius: 12px;
+      font-size: 13px
+    }
+
+    #tplGen:hover {
+      filter: brightness(.97)
+    }
+
+    #tplGen:disabled {
+      opacity: .7;
+      cursor: wait
+    }
+
+    #tplCopy {
+      width: 100%;
+      padding: 11px;
+      font-size: 13px
+    }
+
+    .spin {
+      animation: rot 1s linear infinite
+    }
+
+    @keyframes rot {
+      to {
+        transform: rotate(360deg)
+      }
+    }
+
+    /* ---------- ADMIN ---------- */
+    .a-layout {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 250px 1fr;
+      min-height: 0
+    }
+
+    .a-side {
+      background: #fff;
+      border-right: 1px solid var(--line);
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px
+    }
+
+    .nav-btn {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 0;
+      background: transparent;
+      cursor: pointer;
+      font-weight: 700;
+      color: #3c4a63;
+      font-size: 13px;
+      text-align: left;
+      transition: .15s
+    }
+
+    .nav-btn:hover {
+      background: #f1f4fb
+    }
+
+    .nav-btn.active {
+      background: var(--black);
+      color: #fff
+    }
+
+    .a-main {
+      overflow: auto;
+      padding: 34px 40px
+    }
+
+    .sec {
+      display: none
+    }
+
+    .sec.active {
+      display: block;
+      animation: fadein .25s
+    }
+
+    @keyframes fadein {
+      from {
+        opacity: 0;
+        transform: translateY(6px)
+      }
+
+      to {
+        opacity: 1;
+        transform: none
+      }
+    }
+
+    .sec-head .eyebrow {
+      margin-bottom: 8px;
+      display: block
+    }
+
+    .sec-head h2 {
+      font-size: 30px;
+      font-weight: 800;
+      letter-spacing: -.01em
+    }
+
+    .sec-head p {
+      color: var(--muted);
+      margin-top: 8px;
+      font-size: 13px
+    }
+
+    .grid2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 22px;
+      margin-top: 26px;
+      align-items: start
+    }
+
+    .card {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: 0 4px 16px rgba(30, 50, 90, .05)
+    }
+
+    .card-h {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      padding: 18px 20px;
+      border-bottom: 1px solid var(--line)
+    }
+
+    .card-h .ic {
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      display: grid;
+      place-items: center;
+      flex: 0 0 40px
+    }
+
+    .card-h b {
+      font-size: 15px;
+      display: block
+    }
+
+    .card-h span {
+      color: var(--muted);
+      font-size: 12px;
+      display: block;
+      margin-top: 2px
+    }
+
+    .card-b {
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px
+    }
+
+    label.f {
+      font-weight: 700;
+      font-size: 13px;
+      display: block;
+      margin-bottom: 8px
+    }
+
+    select,
+    .numin {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 11px 12px;
+      font: inherit;
+      background: #fff;
+      outline: none
+    }
+
+    select:focus,
+    .numin:focus {
+      border-color: var(--blue)
+    }
+
+    .slider-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px 14px
+    }
+
+    input[type=range] {
+      flex: 1;
+      -webkit-appearance: none;
+      appearance: none;
+      height: 6px;
+      border-radius: 99px;
+      background: #d9e2f1;
+      outline: none
+    }
+
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--black);
+      border: 3px solid #fff;
+      box-shadow: 0 1px 5px rgba(0, 0, 0, .35);
+      cursor: pointer
+    }
+
+    input[type=range]::-moz-range-thumb {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--black);
+      border: 3px solid #fff;
+      box-shadow: 0 1px 5px rgba(0, 0, 0, .35);
+      cursor: pointer
+    }
+
+    .pct {
+      font-weight: 800;
+      min-width: 44px;
+      text-align: right
+    }
+
+    .sub {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 7px
+    }
+
+    .budget {
+      background: #f2f7ff;
+      border: 1px solid #d8e6fb;
+      border-radius: 14px;
+      padding: 16px
+    }
+
+    .budget b {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      font-size: 14px;
+      margin-bottom: 10px
+    }
+
+    .brow {
+      display: flex;
+      justify-content: space-between;
+      padding: 6px 0;
+      font-size: 13px;
+      color: var(--muted)
+    }
+
+    .brow b {
+      color: var(--black);
+      margin: 0;
+      display: inline
+    }
+
+    .savebar {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 22px
+    }
+
+    #saveSettings {
+      background: #7d94b8;
+      color: #fff;
+      padding: 13px 20px;
+      font-size: 14px;
+      border-radius: 14px
+    }
+
+    #saveSettings:hover {
+      background: var(--blue)
+    }
+
+    /* KB */
+    .kb-grid {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      gap: 22px;
+      margin-top: 26px;
+      align-items: start
+    }
+
+    .kb-left {
+      padding: 16px
+    }
+
+    .kb-left-h {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-weight: 800;
+      font-size: 14px;
+      margin-bottom: 12px
+    }
+
+    .kb-sec {
+      padding: 14px;
+      border-radius: 14px;
+      border: 1px solid transparent;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      background: transparent;
+      width: 100%;
+      text-align: left
+    }
+
+    .kb-sec:hover {
+      background: #f1f4fb
+    }
+
+    .kb-sec.active {
+      background: var(--blue-soft);
+      border-color: var(--blue)
+    }
+
+    .kb-sec b {
+      font-size: 13px;
+      display: block;
+      color: var(--black)
+    }
+
+    .kb-sec small {
+      color: var(--faint);
+      font-size: 11px;
+      display: block;
+      margin-top: 3px
+    }
+
+    .switch {
+      width: 44px;
+      height: 26px;
+      border-radius: 99px;
+      background: #cfd8ea;
+      position: relative;
+      transition: .2s;
+      border: 0;
+      cursor: pointer;
+      flex: 0 0 44px
+    }
+
+    .switch.on {
+      background: var(--blue)
+    }
+
+    .switch::after {
+      content: '';
+      position: absolute;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #fff;
+      top: 3px;
+      left: 3px;
+      transition: .2s;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, .25)
+    }
+
+    .switch.on::after {
+      left: 21px
+    }
+
+    .kb-right-h {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 18px 20px;
+      border-bottom: 1px solid var(--line);
+      flex-wrap: wrap;
+      gap: 10px
+    }
+
+    .kb-right-h .eyebrow {
+      margin: 0 0 4px
+    }
+
+    .kb-right-h h3 {
+      font-size: 20px;
+      font-weight: 800
+    }
+
+    #kbUpload {
+      padding: 11px 18px;
+      font-size: 13px;
+      background: var(--black);
+      color: #fff;
+      border-radius: 12px
+    }
+
+    #kbUpload:hover {
+      background: var(--blue)
+    }
+
+    .kb-docs {
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px
+    }
+
+    .doc {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff
+    }
+
+    .doc .dic {
+      width: 38px;
+      height: 38px;
+      border-radius: 10px;
+      background: var(--blue-soft);
+      color: var(--blue-ink);
+      display: grid;
+      place-items: center;
+      flex: 0 0 38px
+    }
+
+    .doc b {
+      font-size: 13px;
+      display: block
+    }
+
+    .doc small {
+      color: var(--faint);
+      font-size: 11px
+    }
+
+    .doc .spacer {
+      flex: 1
+    }
+
+    .st {
+      border-radius: 999px;
+      padding: 5px 10px;
+      font-size: 11px;
+      font-weight: 800
+    }
+
+    .st.ready {
+      background: var(--blue-soft);
+      color: var(--blue-ink)
+    }
+
+    .st.index {
+      background: var(--peach-soft);
+      color: var(--peach-ink)
+    }
+
+    .st.off {
+      background: #eef2fa;
+      color: var(--faint)
+    }
+
+    .kb-empty {
+      padding: 60px 20px;
+      text-align: center;
+      color: var(--muted)
+    }
+
+    .kb-empty .eic {
+      width: 56px;
+      height: 56px;
+      margin: 0 auto 14px;
+      border-radius: 99px;
+      background: var(--blue-soft);
+      color: var(--blue-ink);
+      display: grid;
+      place-items: center
+    }
+
+    .kb-empty b {
+      display: block;
+      color: var(--black);
+      font-size: 15px;
+      margin-bottom: 6px
+    }
+
+    .kb-empty p {
+      font-size: 13px;
+      max-width: 380px;
+      margin: 0 auto;
+      line-height: 1.6
+    }
+
+    /* Journal */
+    .j-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 26px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 4px 16px rgba(30, 50, 90, .05)
+    }
+
+    .j-table th {
+      font-size: 10px;
+      letter-spacing: .14em;
+      color: var(--muted);
+      text-transform: uppercase;
+      text-align: left;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--line);
+      font-weight: 800
+    }
+
+    .j-table td {
+      padding: 13px 18px;
+      border-bottom: 1px solid #edf1f9;
+      font-size: 13px;
+      vertical-align: top
+    }
+
+    .j-table tr:last-child td {
+      border-bottom: 0
+    }
+
+    .j-table tr:hover td {
+      background: #fafcff
+    }
+
+    .s-chip {
+      border-radius: 999px;
+      padding: 5px 10px;
+      font-size: 11px;
+      font-weight: 800;
+      white-space: nowrap
+    }
+
+    .s-ai {
+      background: var(--blue-soft);
+      color: var(--blue-ink)
+    }
+
+    .s-esc {
+      background: var(--peach-soft);
+      color: var(--peach-ink)
+    }
+
+    .s-close {
+      background: var(--pink-soft);
+      color: var(--pink-ink)
+    }
+
+    /* Prompts */
+    .p-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 22px;
+      margin-top: 26px
+    }
+
+    .p-card textarea {
+      width: 100%;
+      min-height: 180px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px;
+      font: inherit;
+      font-size: 13px;
+      resize: vertical;
+      outline: none;
+      line-height: 1.6
+    }
+
+    .p-card textarea:focus {
+      border-color: var(--blue)
+    }
+
+    .p-save {
+      margin-top: 12px;
+      padding: 10px 16px;
+      font-size: 12px
+    }
+
+    /* Monitoring */
+    .m-cards {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      margin-top: 26px
+    }
+
+    .m-card {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 18px;
+      box-shadow: 0 4px 16px rgba(30, 50, 90, .05)
+    }
+
+    .m-card span {
+      color: var(--muted);
+      font-size: 12px;
+      display: block
+    }
+
+    .m-card b {
+      font-size: 26px;
+      font-weight: 800;
+      display: block;
+      margin: 6px 0 2px
+    }
+
+    .m-card i {
+      font-style: normal;
+      font-size: 11px;
+      font-weight: 800;
+      border-radius: 999px;
+      padding: 3px 8px
+    }
+
+    .up {
+      background: var(--blue-soft);
+      color: var(--blue-ink)
+    }
+
+    .dn {
+      background: var(--peach-soft);
+      color: var(--peach-ink)
+    }
+
+    .pk {
+      background: var(--pink-soft);
+      color: var(--pink-ink)
+    }
+
+    .m-charts {
+      display: grid;
+      grid-template-columns: 1.6fr 1fr;
+      gap: 22px;
+      margin-top: 22px
+    }
+
+    .chart-b {
+      padding: 20px
+    }
+
+    .legend {
+      display: flex;
+      gap: 16px;
+      margin-top: 10px;
+      font-size: 12px;
+      color: var(--muted);
+      align-items: center
+    }
+
+    .legend i {
+      width: 10px;
+      height: 10px;
+      border-radius: 3px;
+      display: inline-block;
+      margin-right: 6px
+    }
+
+    /* Toasts */
+    #toasts {
+      position: fixed;
+      right: 20px;
+      bottom: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      z-index: 99
+    }
+
+    .toast {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--blue);
+      border-radius: 12px;
+      padding: 13px 18px;
+      font-weight: 700;
+      font-size: 13px;
+      box-shadow: var(--shadow);
+      animation: tin .25s;
+      display: flex;
+      gap: 10px;
+      align-items: center
+    }
+
+    .toast.pk {
+      border-left-color: var(--pink)
+    }
+
+    .toast.pc {
+      border-left-color: var(--peach)
+    }
+
+    @keyframes tin {
+      from {
+        opacity: 0;
+        transform: translateY(8px)
+      }
+
+      to {
+        opacity: 1;
+        transform: none
+      }
+    }
+
+    @media (max-width:1180px) {
+      .landing {
+        grid-template-columns: 1fr;
+        padding: 32px
+      }
+
+      .hero h1 {
+        font-size: 40px
+      }
+
+      .o-layout {
+        grid-template-columns: 260px 1fr
+      }
+
+      .copilot {
+        display: none
+      }
+
+      .grid2,
+      .p-grid,
+      .kb-grid,
+      .m-charts {
+        grid-template-columns: 1fr
+      }
+
+      .m-cards {
+        grid-template-columns: repeat(2, 1fr)
+      }
+
+      .a-layout {
+        grid-template-columns: 200px 1fr
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <div id="toasts"></div>
+
+  <!-- ================= LANDING ================= -->
+  <section class="view active" id="view-landing">
+    <header class="site-header">
+      <div class="site-header__inner">
+        <a class="site-brand" href="#" aria-label="Молвест — поддержка 1С">
+          <div class="logo"><img
+              src="https://image.qwenlm.ai/public_source/b22fc383-709d-427d-95ee-3fb7a5ed0c16/1b5563a00-4741-4066-a846-fd8b73d47001.png"
+              alt="Молвест" onerror="this.remove()"></div>
+          <div class="site-brand__text"><b>МОЛВЕСТ</b><span>Поддержка 1С</span></div>
+        </a>
+        <nav class="site-nav" aria-label="Навигация по странице">
+          <a href="#how">Как это работает</a>
+          <a href="#capabilities">Возможности</a>
+        </nav>
+        <div class="site-header__actions">
+          <button class="staff-entry" data-staff-open>Вход для команды</button>
+          <button class="btn btn-primary site-cta" data-ask-question>Задать вопрос</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="site-main">
+      <section class="public-hero">
+        <div class="hero-copy">
+          <div class="hero-kicker">AI-поддержка сотрудников</div>
+          <h1>Вопрос по 1С? <em>Спросите здесь.</em></h1>
+          <p>Опишите проблему своими словами или приложите скриншот. AI-агент сначала проверит базу знаний «Молвест»,
+            предложит решение и сам подключит специалиста, если вопрос требует человека.</p>
+          <div class="hero-actions">
+            <button class="btn btn-primary" data-ask-question>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                <path d="M8 9h8M8 12h5" />
+              </svg>
+              Задать вопрос
+            </button>
+            <a class="btn btn-ghost" href="#how">Как работает поддержка</a>
+          </div>
+          <div class="hero-note">
+            <span><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <path d="M20 6L9 17l-5-5" />
+              </svg>Без выбора роли</span>
+            <span><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <path d="M20 6L9 17l-5-5" />
+              </svg>История остаётся в одном чате</span>
+            <span><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <path d="M20 6L9 17l-5-5" />
+              </svg>Можно приложить файл или скриншот</span>
+          </div>
+        </div>
+
+        <div class="ask-preview" aria-label="Пример диалога с поддержкой">
+          <div class="preview-top"><b><span class="ai-dot"></span>AI-поддержка 1С</b><span>онлайн</span></div>
+          <div class="preview-chat">
+            <div class="preview-bubble user">Не проводится документ реализации. Что проверить?</div>
+            <div class="preview-bubble ai">Проверю регламент и связанные ошибки в базе знаний. Начните с остатков по
+              партии и статуса «Выработки продукции».</div>
+            <div class="preview-proof"><span>RAG · база знаний</span><span>Confidence 86%</span></div>
+            <div class="preview-bubble ai">Если данных будет недостаточно, я передам этот же диалог специалисту —
+              повторять вопрос не придётся.</div>
+            <div class="preview-proof"><span class="escalate">Автоэскалация при низкой уверенности</span></div>
+            <div class="preview-input"><span>Опишите вопрос по 1С…</span><button class="preview-send" type="button"
+                data-ask-question aria-label="Задать вопрос"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" stroke-width="2">
+                  <path d="M22 2L11 13" />
+                  <path d="M22 2l-7 20-4-9-9-4 20-7z" />
+                </svg></button></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="trust-strip" id="capabilities" aria-label="Возможности поддержки">
+        <article class="trust-card"><span class="ic blue"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+            </svg></span>
+          <div><b>Ответы по базе знаний</b>
+            <p>AI ищет решение в актуальных регламентах и документации 1С.</p>
+          </div>
+        </article>
+        <article class="trust-card"><span class="ic pink"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <circle cx="8.5" cy="8.5" r="1.5" />
+              <path d="M21 15l-5-5L5 21" />
+            </svg></span>
+          <div><b>Разбор скриншотов</b>
+            <p>Можно показать ошибку интерфейса, а не переписывать её вручную.</p>
+          </div>
+        </article>
+        <article class="trust-card"><span class="ic peach"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2">
+              <path d="M3 18v-6a9 9 0 0 1 18 0v6" />
+              <path
+                d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z" />
+            </svg></span>
+          <div><b>Специалист подключается сам</b>
+            <p>Пользователь не выбирает линию поддержки — маршрутизацию делает агент.</p>
+          </div>
+        </article>
+      </section>
+
+      <section class="how" id="how">
+        <div class="section-head">
+          <span class="eyebrow">ОДИН СЦЕНАРИЙ ДЛЯ ПОЛЬЗОВАТЕЛЯ</span>
+          <h2>Не нужно разбираться, кому писать</h2>
+          <p>Вход для сотрудника максимально простой: открыть поддержку, задать вопрос и продолжать диалог. Решение о
+            подключении оператора принимает система по контексту и уверенности ответа.</p>
+        </div>
+        <div class="flow-grid">
+          <article class="flow-card">
+            <div class="flow-num">ШАГ 01</div><span class="flow-mark"><svg width="19" height="19" viewBox="0 0 24 24"
+                fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              </svg></span>
+            <h3>Пользователь задаёт вопрос</h3>
+            <p>Пишет проблему по 1С и при необходимости добавляет <strong>скриншот или файл</strong>.</p>
+          </article>
+          <article class="flow-card">
+            <div class="flow-num">ШАГ 02</div><span class="flow-mark"><svg width="19" height="19" viewBox="0 0 24 24"
+                fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 3l1.9 5.8 5.8 1.9-5.8 1.9L12 18.4l-1.9-5.8L4.3 10.7l5.8-1.9z" />
+              </svg></span>
+            <h3>AI ищет решение</h3>
+            <p>RAG-агент поднимает релевантные материалы, формирует ответ и оценивает <strong>confidence</strong>.</p>
+          </article>
+          <article class="flow-card">
+            <div class="flow-num">ШАГ 03</div><span class="flow-mark"><svg width="19" height="19" viewBox="0 0 24 24"
+                fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M3 18v-6a9 9 0 0 1 18 0v6" />
+                <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3z" />
+              </svg></span>
+            <h3>При необходимости — человек</h3>
+            <p>Если уверенность ниже порога или кейс сложный, обращение <strong>автоматически попадает
+                оператору</strong> с полной историей.</p>
+          </article>
+        </div>
+        <div class="public-cta">
+          <div>
+            <h3>Есть вопрос по 1С?</h3>
+            <p>Начните с одного сообщения — дальше поддержку маршрутизирует система.</p>
+          </div><button class="btn btn-primary" data-ask-question>Открыть поддержку</button>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="site-footer__inner">
+        <div class="footer-brand">
+          <div class="logo"><img
+              src="https://image.qwenlm.ai/public_source/b22fc383-709d-427d-95ee-3fb7a5ed0c16/1b5563a00-4741-4066-a846-fd8b73d47001.png"
+              alt="Молвест" onerror="this.remove()"></div>
+          <div><b>МОЛВЕСТ · Поддержка 1С</b><span>AI-агент первой линии</span></div>
+        </div>
+        <button class="footer-staff" data-staff-open>Служебный вход</button>
+        <div class="footer-copy">Демонстрационный контур<br>Данные и сценарии используются для прототипа</div>
+      </div>
+    </footer>
+
+    <div class="staff-modal" id="staffModal" aria-hidden="true">
+      <div class="staff-dialog" role="dialog" aria-modal="true" aria-labelledby="staffTitle">
+        <div class="staff-dialog__head">
+          <div>
+            <h2 id="staffTitle">Вход для команды поддержки</h2>
+            <p>Служебные рабочие места отделены от пользовательского сценария.</p>
+          </div>
+          <button class="staff-close" id="staffClose" aria-label="Закрыть"><svg width="17" height="17"
+              viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg></button>
+        </div>
+        <button class="staff-role" id="roleOperator"><span class="ic pink"><svg width="20" height="20"
+              viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 18v-6a9 9 0 0 1 18 0v6" />
+              <path
+                d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z" />
+            </svg></span><span><b>Оператор</b><span>Очередь эскалаций и ответы пользователям</span></span><span
+            class="arr">→</span></button>
+        <button class="staff-role" id="roleAdmin"><span class="ic peach"><svg width="20" height="20" viewBox="0 0 24 24"
+              fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+              <path d="M9 12l2 2 4-4" />
+            </svg></span><span><b>Администратор</b><span>База знаний, настройки AI и мониторинг</span></span><span
+            class="arr">→</span></button>
+        <p class="staff-secure"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2">
+            <rect x="3" y="11" width="18" height="10" rx="2" />
+            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+          </svg>В рабочей версии здесь может быть SSO/корпоративная авторизация.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= USER ================= -->
+  <section class="view" id="view-user">
+    <header class="topbar">
+      <div class="logo"><img
+          src="https://image.qwenlm.ai/public_source/b22fc383-709d-427d-95ee-3fb7a5ed0c16/1b5563a00-4741-4066-a846-fd8b73d47001.png"
+          alt="Молвест" onerror="this.remove()"></div>
+      <div class="brand"><b>МОЛВЕСТ</b><span>Поддержка 1С</span></div>
+      <div class="tdivider"></div>
+      <div class="t-title">Кабинет пользователя</div>
+      <div class="spacer"></div>
+      <div class="ublock"><b>Демо пользователь</b><span>Кабинет пользователя</span></div>
+      <button class="btn-logout" data-logout="1"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+          <path d="M16 17l5-5-5-5M21 12H9" />
+        </svg>Выйти</button>
+    </header>
+    <div class="u-layout">
+      <aside class="u-side">
+        <button class="btn btn-primary" id="newChatBtn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+            <path d="M12 5v14M5 12h14" />
+          </svg>Новый чат</button>
+        <div class="side-head">МОИ ОБРАЩЕНИЯ <span class="cnt" id="uCount">0</span></div>
+        <div id="uList"></div>
+      </aside>
+      <main class="u-main">
+        <div class="u-head">
+          <h2 id="uHeadTitle">Новое обращение</h2>
+          <p id="uHeadSub">Диалог появится в списке после отправки первого сообщения.</p>
+        </div>
+        <div id="uChat"></div>
+        <div class="attach-row" id="uAttachRow"></div>
+        <div class="composer">
+          <button class="icon-btn" id="uAttachBtn" title="Приложить файл (до 10 файлов и 1 изображение)"><svg width="18"
+              height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+              stroke-linejoin="round">
+              <path
+                d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+            </svg></button>
+          <input type="file" id="uFile" hidden multiple>
+          <textarea id="uInput" rows="1" placeholder="Опишите вопрос по 1С…"></textarea>
+          <button class="send" id="uSend"><svg width="17" height="17" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 2L11 13" />
+              <path d="M22 2l-7 20-4-9-9-4 20-7z" />
+            </svg></button>
+        </div>
+        <div class="hint">Enter — отправить · Shift+Enter — новая строка</div>
+      </main>
+    </div>
+  </section>
+
+  <!-- ================= OPERATOR ================= -->
+  <section class="view" id="view-operator">
+    <header class="topbar">
+      <div class="logo"><img
+          src="https://image.qwenlm.ai/public_source/b22fc383-709d-427d-95ee-3fb7a5ed0c16/1b5563a00-4741-4066-a846-fd8b73d47001.png"
+          alt="Молвест" onerror="this.remove()"></div>
+      <div class="brand"><b>МОЛВЕСТ</b><span>Поддержка 1С</span></div>
+      <div class="tdivider"></div>
+      <div class="t-title">Рабочее место оператора</div>
+      <div class="spacer"></div>
+      <div class="pill"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 18v-6a9 9 0 0 1 18 0v6" />
+          <path
+            d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z" />
+        </svg>Линия поддержки</div>
+      <div class="ublock"><b>Демо оператор</b><span>Рабочее место оператора</span></div>
+      <button class="btn-logout" data-logout="1"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+          <path d="M16 17l5-5-5-5M21 12H9" />
+        </svg>Выйти</button>
+    </header>
+    <div class="o-layout">
+      <aside class="o-side">
+        <div class="live">LIVE QUEUE <span class="cnt" id="oCount">0</span></div>
+        <h2>Обращения</h2>
+        <div class="tabs">
+          <button class="tab active" id="tabUn">Не назначены</button>
+          <button class="tab" id="tabMy">Мои</button>
+        </div>
+        <div id="oList"></div>
+      </aside>
+      <main class="o-main">
+        <div class="o-head">
+          <h2 id="oTitle">Тикет —</h2>
+          <span class="badge" id="oBadge">Специалист подключён</span>
+          <div class="spacer"></div>
+          <button class="btn btn-ghost" id="closeTicketBtn" style="padding:10px 16px;font-size:13px"><svg width="15"
+              height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+              stroke-linejoin="round">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+              <path d="M22 4L12 14.01l-3-3" />
+            </svg>Закрыть тикет</button>
+          <p id="oSub">Выберите обращение в очереди</p>
+        </div>
+        <div id="oChat"></div>
+        <div class="composer" style="margin:0 24px 10px">
+          <button class="icon-btn" title="Приложить файл"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path
+                d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+            </svg></button>
+          <textarea id="oInput" rows="1" placeholder="Ответ пользователю…"></textarea>
+          <button class="send" id="oSend"><svg width="17" height="17" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 2L11 13" />
+              <path d="M22 2l-7 20-4-9-9-4 20-7z" />
+            </svg></button>
+        </div>
+        <div class="hint" style="padding:0 24px 14px">Enter — отправить · Shift+Enter — новая строка</div>
+      </main>
+      <aside class="copilot">
+        <div class="cp-eyebrow">OPERATOR COPILOT</div>
+        <h3><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round" style="color:var(--pink-ink)">
+            <rect x="4" y="8" width="16" height="12" rx="2" />
+            <path d="M12 8V5" />
+            <circle cx="12" cy="4" r="1" />
+          </svg>Шаблон ответа</h3>
+        <p class="desc">GigaChat соберёт ответ по актуальной истории тикета. Перед отправкой его можно изменить.</p>
+        <div class="gc-card">
+          <b><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 3l1.9 5.8 5.8 1.9-5.8 1.9L12 18.4l-1.9-5.8L4.3 10.7l5.8-1.9z" />
+            </svg>GigaChat формирует шаблон</b>
+          <p>Берём последние сообщения и готовим новую версию ответа.</p>
+        </div>
+        <div class="ed-card">
+          <label>Редактируемый текст</label>
+          <small>Изменения применяются только к вашему ответу.</small>
+          <textarea id="tplText" placeholder="Здесь появится шаблон ответа…"></textarea>
+        </div>
+        <button class="btn btn-ghost" id="tplCopy"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </svg>Скопировать</button>
+        <button class="btn" id="tplGen"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 3l1.9 5.8 5.8 1.9-5.8 1.9L12 18.4l-1.9-5.8L4.3 10.7l5.8-1.9z" />
+          </svg>Сгенерировать шаблон</button>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ================= ADMIN ================= -->
+  <section class="view" id="view-admin">
+    <header class="topbar">
+      <div class="logo"><img
+          src="https://image.qwenlm.ai/public_source/b22fc383-709d-427d-95ee-3fb7a5ed0c16/1b5563a00-4741-4066-a846-fd8b73d47001.png"
+          alt="Молвест" onerror="this.remove()"></div>
+      <div class="brand"><b>МОЛВЕСТ</b><span>Поддержка 1С</span></div>
+      <div class="tdivider"></div>
+      <div class="t-title">Администрирование</div>
+      <div class="spacer"></div>
+      <div class="ublock"><b>Демо администратор</b><span>Администрирование</span></div>
+      <button class="btn-logout" data-logout="1"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+          <path d="M16 17l5-5-5-5M21 12H9" />
+        </svg>Выйти</button>
+    </header>
+    <div class="a-layout">
+      <aside class="a-side">
+        <button class="nav-btn" data-sec="journal"><svg width="17" height="17" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            <path d="M8 9h8M8 12h5" />
+          </svg>Журнал обращений</button>
+        <button class="nav-btn active" data-sec="kb"><svg width="17" height="17" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+          </svg>База знаний</button>
+        <button class="nav-btn" data-sec="prompts"><svg width="17" height="17" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6" />
+          </svg>System Prompts</button>
+        <button class="nav-btn" data-sec="settings"><svg width="17" height="17" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M21 7h-6M9 7H3M21 17h-4M11 17H3" />
+            <circle cx="12" cy="7" r="3" />
+            <circle cx="14" cy="17" r="3" />
+          </svg>AI Settings</button>
+        <button class="nav-btn" data-sec="monitoring"><svg width="17" height="17" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M3 3v18h18" />
+            <path d="M7 14v4M12 9v9M17 12v6" />
+          </svg>Monitoring</button>
+      </aside>
+      <main class="a-main">
+
+        <!-- JOURNAL -->
+        <div class="sec" id="sec-journal">
+          <div class="sec-head">
+            <span class="eyebrow">SUPPORT LOG</span>
+            <h2>Журнал обращений</h2>
+            <p>Все тикеты сотрудников «Молвест»: статус, confidence и источник решения.</p>
+          </div>
+          <table class="j-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Тема</th>
+                <th>Сотрудник</th>
+                <th>Статус</th>
+                <th>Confidence</th>
+                <th>Обновлено</th>
+              </tr>
+            </thead>
+            <tbody id="journalBody"></tbody>
+          </table>
+        </div>
+
+        <!-- KB -->
+        <div class="sec active" id="sec-kb">
+          <div class="sec-head">
+            <span class="eyebrow">RAG LIBRARY</span>
+            <h2>База знаний</h2>
+            <p>Разделы управляют доступностью документов как master switch.</p>
+          </div>
+          <div class="kb-grid">
+            <div class="card kb-left">
+              <div class="kb-left-h">Разделы
+                <button class="icon-btn" title="Новый раздел"><svg width="17" height="17" viewBox="0 0 24 24"
+                    fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                    <path d="M12 11v6M9 14h6" />
+                  </svg></button>
+              </div>
+              <div id="kbSections"></div>
+            </div>
+            <div class="card">
+              <div class="kb-right-h">
+                <div>
+                  <div class="eyebrow">DOCUMENTS</div>
+                  <h3 id="kbSecName">—</h3>
+                </div>
+                <button class="btn" id="kbUpload"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <path d="M17 8l-5-5-5 5M12 3v12" />
+                  </svg>Загрузить</button>
+                <input type="file" id="kbFile" hidden>
+              </div>
+              <div class="kb-docs" id="kbDocs"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- PROMPTS -->
+        <div class="sec" id="sec-prompts">
+          <div class="sec-head">
+            <span class="eyebrow">PROMPT ENGINEERING</span>
+            <h2>System Prompts</h2>
+            <p>Версионируемые системные промпты агента и copilot. Изменения применяются атомарно.</p>
+          </div>
+          <div class="p-grid">
+            <div class="card p-card">
+              <div class="card-h"><span class="ic blue"><svg width="19" height="19" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="4" y="8" width="16" height="12" rx="2" />
+                    <path d="M12 8V5" />
+                    <circle cx="12" cy="4" r="1" />
+                  </svg></span>
+                <div><b>AI-агент · первичная линия</b><span>пользовательская ветка чата</span></div>
+              </div>
+              <div class="card-b">
+                <textarea>Ты — агент поддержки 1С компании «Молвест». Отвечай только по базе знаний: регламенты учёта готовой продукции, «Меркурий», «Честный ЗНАК», закрытие месяца. Указывай документы-источники. Если confidence ниже порога эскалации — передай диалог оператору, сохранив контекст.</textarea>
+                <button class="btn btn-primary p-save save-prompt">Сохранить промпт</button>
+              </div>
+            </div>
+            <div class="card p-card">
+              <div class="card-h"><span class="ic pink"><svg width="19" height="19" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M3 18v-6a9 9 0 0 1 18 0v6" />
+                    <path
+                      d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z" />
+                  </svg></span>
+                <div><b>Operator Copilot</b><span>черновики для линии поддержки</span></div>
+              </div>
+              <div class="card-b">
+                <textarea>Ты — copilot оператора поддержки «Молвест». Собирай черновик ответа по истории тикета и базе знаний. Тон — дружелюбный и точный. Не отправляй ответ пользователю сам: результат редактирует оператор.</textarea>
+                <button class="btn btn-primary p-save save-prompt">Сохранить промпт</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- SETTINGS -->
+        <div class="sec" id="sec-settings">
+          <div class="sec-head">
+            <span class="eyebrow">RUNTIME CONFIGURATION</span>
+            <h2>Настройки AI</h2>
+            <p>Одна атомарная операция для модели, контекста, retrieval и эскалации.</p>
+          </div>
+          <div class="grid2">
+            <div class="card">
+              <div class="card-h"><span class="ic blue"><svg width="19" height="19" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                    <path d="M12 3l1.9 5.8 5.8 1.9-5.8 1.9L12 18.4l-1.9-5.8L4.3 10.7l5.8-1.9z" />
+                  </svg></span>
+                <div><b>GigaChat</b><span>Generation, context и routing gate</span></div>
+              </div>
+              <div class="card-b">
+                <div>
+                  <label class="f">Активная модель</label>
+                  <select id="modelSel">
+                    <option value="128000" selected>Pro · GigaChat-2-Pro</option>
+                    <option value="32768">Standard · GigaChat-2</option>
+                    <option value="8192">Lite · GigaChat-2-Lite</option>
+                  </select>
+                  <div class="sub">Context limits для каждой модели возвращает backend.</div>
+                </div>
+                <div>
+                  <label class="f">Размер скользящего окна GigaChat</label>
+                  <div class="slider-row"><input type="range" id="winSlider" min="5" max="80" value="18"><span
+                      class="pct" id="winPct">18%</span></div>
+                  <div class="sub" id="winSub"></div>
+                </div>
+                <div>
+                  <label class="f">Максимальный размер ответа</label>
+                  <input class="numin" type="number" id="maxResp" min="256" max="8192" step="256" value="2048">
+                  <div class="sub" id="maxRespSub"></div>
+                </div>
+                <div>
+                  <label class="f">Порог подключения оператора</label>
+                  <div class="slider-row"><input type="range" id="thrSlider" min="5" max="80" value="29"><span
+                      class="pct" id="thrPct">29%</span></div>
+                  <div class="sub" id="thrSub">29%: ниже этого confidence тикет эскалируется</div>
+                </div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-h"><span class="ic peach"><svg width="19" height="19" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                    <ellipse cx="12" cy="5" rx="9" ry="3" />
+                    <path d="M21 5v14c0 1.66-4 3-9 3s-9-1.34-9-3V5" />
+                    <path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3" />
+                  </svg></span>
+                <div><b>Retrieval</b><span>BGE-M3 и hybrid evidence</span></div>
+              </div>
+              <div class="card-b">
+                <div>
+                  <label class="f">Контекст Embeddings</label>
+                  <div class="slider-row"><input type="range" id="embSlider" min="5" max="80" value="20"><span
+                      class="pct" id="embPct">20%</span></div>
+                  <div class="sub" id="embSub"></div>
+                </div>
+                <div>
+                  <label class="f">rag_top_k</label>
+                  <input class="numin" type="number" id="ragTopK" min="1" max="20" value="6">
+                  <div class="sub">Количество лучших chunks после RRF. Верхняя граница не задаётся frontend.</div>
+                </div>
+                <div class="budget">
+                  <b><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                      stroke-linecap="round">
+                      <path d="M4 4h16l-6 8v6l-4 2v-8L4 4z" />
+                    </svg>Расчёт budget</b>
+                  <div class="brow"><span>Общий GigaChat</span><b id="bTotal">—</b></div>
+                  <div class="brow"><span>Вход GigaChat</span><b id="bIn">—</b></div>
+                  <div class="brow"><span>Вход BGE-M3</span><b id="bBge">—</b></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="savebar"><button class="btn" id="saveSettings"><svg width="16" height="16" viewBox="0 0 24 24"
+                fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                <path d="M17 21v-8H7v8M7 3v5h8" />
+              </svg>Сохранить все настройки</button></div>
+        </div>
+
+        <!-- MONITORING -->
+        <div class="sec" id="sec-monitoring">
+          <div class="sec-head">
+            <span class="eyebrow">QUALITY OBSERVABILITY</span>
+            <h2>Monitoring</h2>
+            <p>Метрики линии поддержки «Молвест» за последние 7 дней.</p>
+          </div>
+          <div class="m-cards">
+            <div class="m-card"><span>Обращений за неделю</span><b>128</b><i class="up">+12% к прошлой</i></div>
+            <div class="m-card"><span>Решено AI без оператора</span><b>68%</b><i class="pk">target 70%</i></div>
+            <div class="m-card"><span>Среднее время ответа</span><b>42 c</b><i class="up">−18 c</i></div>
+            <div class="m-card"><span>Эскалации</span><b>32%</b><i class="dn">пик в закрытие месяца</i></div>
+          </div>
+          <div class="m-charts">
+            <div class="card">
+              <div class="card-h"><span class="ic blue"><svg width="19" height="19" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                    <path d="M3 3v18h18" />
+                    <path d="M7 14v4M12 9v9M17 12v6" />
+                  </svg></span>
+                <div><b>Обращения по дням</b><span>синий — AI решил, персиковый — эскалация</span></div>
+              </div>
+              <div class="chart-b">
+                <svg viewBox="0 0 560 200" width="100%" height="200">
+                  <g stroke="#edf1f9" stroke-width="1">
+                    <line x1="0" y1="40" x2="560" y2="40" />
+                    <line x1="0" y1="90" x2="560" y2="90" />
+                    <line x1="0" y1="140" x2="560" y2="140" />
+                    <line x1="0" y1="180" x2="560" y2="180" />
+                  </g>
+                  <g>
+                    <rect x="20" y="100" width="26" height="80" rx="6" fill="#2B9FFE" />
+                    <rect x="50" y="150" width="26" height="30" rx="6" fill="#FCC67F" />
+                    <rect x="100" y="70" width="26" height="110" rx="6" fill="#2B9FFE" />
+                    <rect x="130" y="140" width="26" height="40" rx="6" fill="#FCC67F" />
+                    <rect x="180" y="90" width="26" height="90" rx="6" fill="#2B9FFE" />
+                    <rect x="210" y="150" width="26" height="30" rx="6" fill="#FCC67F" />
+                    <rect x="260" y="50" width="26" height="130" rx="6" fill="#2B9FFE" />
+                    <rect x="290" y="130" width="26" height="50" rx="6" fill="#FCC67F" />
+                    <rect x="340" y="60" width="26" height="120" rx="6" fill="#2B9FFE" />
+                    <rect x="370" y="120" width="26" height="60" rx="6" fill="#FCC67F" />
+                    <rect x="420" y="30" width="26" height="150" rx="6" fill="#2B9FFE" />
+                    <rect x="450" y="100" width="26" height="80" rx="6" fill="#FCC67F" />
+                    <rect x="500" y="80" width="26" height="100" rx="6" fill="#2B9FFE" />
+                    <rect x="530" y="145" width="26" height="35" rx="6" fill="#FCC67F" />
+                  </g>
+                  <g font-size="11" fill="#61708b" font-family="Manrope" text-anchor="middle">
+                    <text x="48" y="196">Пн</text><text x="128" y="196">Вт</text><text x="208" y="196">Ср</text><text
+                      x="288" y="196">Чт</text><text x="368" y="196">Пт</text><text x="448" y="196">Сб</text><text
+                      x="528" y="196">Вс</text>
+                  </g>
+                </svg>
+                <div class="legend"><span><i style="background:#2B9FFE"></i>AI решил</span><span><i
+                      style="background:#FCC67F"></i>Эскалация оператору</span></div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-h"><span class="ic pink"><svg width="19" height="19" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="9" />
+                    <path d="M12 7v5l3 3" />
+                  </svg></span>
+                <div><b>Распределение</b><span>доля решений AI</span></div>
+              </div>
+              <div class="chart-b" style="text-align:center">
+                <svg viewBox="0 0 160 160" width="170" height="170">
+                  <circle cx="80" cy="80" r="60" fill="none" stroke="#FBC4FB" stroke-width="22" />
+                  <circle cx="80" cy="80" r="60" fill="none" stroke="#2B9FFE" stroke-width="22"
+                    stroke-dasharray="256.4 376.99" stroke-linecap="round" transform="rotate(-90 80 80)" />
+                  <text x="80" y="76" text-anchor="middle" font-size="26" font-weight="800" fill="#000"
+                    font-family="Manrope">68%</text>
+                  <text x="80" y="96" text-anchor="middle" font-size="10" fill="#61708b" font-family="Manrope">AI решил
+                    сам</text>
+                </svg>
+                <div class="legend" style="justify-content:center"><span><i
+                      style="background:#2B9FFE"></i>AI</span><span><i style="background:#FBC4FB"></i>Оператор</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </main>
+    </div>
+  </section>
+
+  <script>
+    /* ============ HELPERS ============ */
+    var $ = function (s) { return document.querySelector(s); };
+    var $$ = function (s) { return Array.prototype.slice.call(document.querySelectorAll(s)); };
+    function esc(str) { return String(str).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+    function fmt(n) { return n.toLocaleString('ru-RU'); }
+    function toast(msg, kind) {
+      var t = document.createElement('div');
+      t.className = 'toast' + (kind ? ' ' + kind : '');
+      t.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4L12 14.01l-3-3"/></svg>' + esc(msg);
+      $('#toasts').appendChild(t);
+      setTimeout(function () { t.style.opacity = '0'; t.style.transition = 'opacity .3s'; setTimeout(function () { t.remove(); }, 320); }, 2600);
+    }
+    function showView(name) {
+      $$('.view').forEach(function (v) { v.classList.remove('active'); });
+      $('#view-' + name).classList.add('active');
+    }
+
+    /* ============ NAV / LOGOUT ============ */
+    function openStaffModal() { $('#staffModal').classList.add('open'); $('#staffModal').setAttribute('aria-hidden', 'false'); }
+    function closeStaffModal() { $('#staffModal').classList.remove('open'); $('#staffModal').setAttribute('aria-hidden', 'true'); }
+    $$('[data-ask-question]').forEach(function (b) { b.addEventListener('click', function () { activeDialogId = null; pendingFiles = []; showView('user'); renderAttach(); renderUserList(); renderUserChat(); setTimeout(function () { $('#uInput').focus(); }, 0); }); });
+    $$('[data-staff-open]').forEach(function (b) { b.addEventListener('click', openStaffModal); });
+    $('#staffClose').addEventListener('click', closeStaffModal);
+    $('#staffModal').addEventListener('click', function (e) { if (e.target === this) closeStaffModal(); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeStaffModal(); });
+    $('#roleOperator').addEventListener('click', function () { closeStaffModal(); showView('operator'); renderQueue(); });
+    $('#roleAdmin').addEventListener('click', function () { closeStaffModal(); showView('admin'); });
+    $$('[data-logout]').forEach(function (b) { b.addEventListener('click', function () { showView('landing'); $('#view-landing').scrollTop = 0; }); });
+
+    /* ============ USER DATA ============ */
+    var userDialogs = [
+      {
+        id: 1, title: 'Не проводится «Реализация товаров и услуг»', time: '8 мин назад', msgs: [
+          { r: 'u', t: 'Не проводится документ «Реализация товаров и услуг» в 1С:ERP. Пишет «недостаточное количество номенклатуры», партия молока 2,5% «Вкуснотеево».' },
+          { r: 'ai', t: 'Здравствуйте! Это расхождение по партиям на складе готовой продукции. Шаги:\n1. Откройте «Остатки по партиям» и сверьте выработку за смену;\n2. Проверьте, что «Выработка продукции» проведена;\n3. При отрицательном остатке создайте «Корректировку остатков».\nРегламент: 1С:ERP «Молвест», разд. 4.2 «Учёт готовой продукции».', conf: 86, src: ['1С:ERP · Учёт производства', 'База знаний «Молвест»'] }
+        ]
+      },
+      {
+        id: 2, title: 'Не закрылся месяц в 1С:ERP', time: '26 мин назад', msgs: [
+          { r: 'u', t: 'Не закрылся месяц, журнал ошибок показывает «Себестоимость выпуска».' },
+          { r: 'ai', t: 'По базе знаний «Молвест»: сначала проведите «Выработку продукции» и «Переделы», затем повторите «Закрытие месяца». Первая непроведённая операция указана в журнале — начните с неё.', conf: 74, src: ['Журнал обращений'] }
+        ]
+      },
+      {
+        id: 3, title: 'Меркурий: не гасится эВСД на поставку молока', time: '1 ч назад', msgs: [
+          { r: 'u', t: 'Не гасится эВСД в «Меркурии» по поставке сырого молока с фермы.' },
+          { r: 'ai', t: 'Проверьте статус эВСД в контуре «Меркурий»: если «оформлен», выполните гашение в 1С через «Входящий ветеринарный документ». При расхождении объёмов — сверьте массу нетто с приёмкой.', conf: 68, src: ['Регламент_Меркурий_эВСД.pdf'] }
+        ]
+      },
+      {
+        id: 4, title: 'Честный ЗНАК: ошибка маркировки творога', time: '2 ч назад', msgs: [
+          { r: 'u', t: 'При вводе в оборот партии творога 9% «Честный ЗНАК» выдаёт ошибку формата кода.' }
+        ]
+      },
+      { id: 5, title: 'Остатки по складу ГП не сходятся', time: '3 ч назад', msgs: [] },
+      { id: 6, title: 'Не ввелся номер контракта контрагента', time: 'вчера', msgs: [] }
+    ];
+    var activeDialogId = null;
+    var pendingFiles = [];
+    var aiCounter = 0;
+    var AI_POOL = [
+      { t: 'Открыл регламент «Молвест» по учёту готовой продукции. Ошибка типовая для конца месяца:\n1. Проведите «Выработку продукции» за смену;\n2. Сверьте партию в «Остатках по партиям»;\n3. Повторите проведение реализации.\nЕсли не поможет — передам обращение оператору.', conf: 86, src: ['1С:ERP · Производство', 'База «Молвест»'] },
+      { t: 'Проверил по базе знаний: для «Вкуснотеево» такие ошибки чаще связаны с незакрытым периодом. Зайдите в «Закрытие месяца» и посмотрите журнал ошибок — там указана первая непроведённая операция.', conf: 74, src: ['Журнал обращений'] },
+      { t: 'Похоже, случай нетиповой. Передаю обращение специалисту поддержки — он ответит в этом же чате, вся история сохранится.', conf: 22, src: [] }
+    ];
+
+    function renderUserList() {
+      $('#uCount').textContent = userDialogs.length;
+      var html = userDialogs.map(function (d) {
+        return '<button class="dlg' + (d.id === activeDialogId ? ' active' : '') + '" data-id="' + d.id + '"><b>' + esc(d.title) + '</b><span>' + esc(d.time) + '</span></button>';
+      }).join('');
+      $('#uList').innerHTML = html || '<div style="color:var(--faint);font-size:12px;padding:8px">Пока нет обращений.</div>';
+      $$('#uList .dlg').forEach(function (el) {
+        el.addEventListener('click', function () { openDialog(+el.getAttribute('data-id')); });
+      });
+    }
+    function msgBubble(m) {
+      if (m.r === 'sys') {
+        return '<div class="sys-chip"><b>' + esc(m.t) + '</b>' + (m.conf != null ? '<span class="conf lo">Confidence ' + m.conf + '%</span>' : '') + '</div>';
+      }
+      var fileHtml = m.file ? '<div class="filecard"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg><span>' + esc(m.file) + ' · ' + esc(m.size || '') + '</span></div>' : '';
+      var meta = '';
+      if (m.r === 'ai') {
+        meta = '<div class="meta">' + (m.conf != null ? '<span class="conf ' + (m.conf >= 30 ? 'hi' : 'lo') + '">Confidence ' + m.conf + '%</span>' : '') + (m.src || []).map(function (s) { return '<span class="src">' + esc(s) + '</span>'; }).join('') + '</div>';
+      } else if (m.r === 'op') {
+        meta = '<div class="meta"><span class="src" style="background:var(--pink-soft);color:var(--pink-ink)">Специалист поддержки</span></div>';
+      }
+      return '<div class="msg ' + (m.r === 'u' ? 'u' : 'ai') + '"><div class="b">' + esc(m.t) + fileHtml + '</div>' + meta + '</div>';
+    }
+    function renderUserChat() {
+      var box = $('#uChat');
+      var d = userDialogs.filter(function (x) { return x.id === activeDialogId; })[0];
+      if (!d || d.msgs.length === 0) {
+        box.innerHTML = '<div class="empty"><div class="eic"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 9h8M8 12h5"/></svg></div><h3>Начните разговор</h3><p>Опишите проблему с 1С. Можно приложить до 10 файлов и одно изображение — GigaChat проанализирует скриншот.</p></div>';
+        $('#uHeadTitle').textContent = 'Новое обращение';
+        $('#uHeadSub').textContent = 'Диалог появится в списке после отправки первого сообщения.';
+        return;
+      }
+      $('#uHeadTitle').textContent = d.title;
+      $('#uHeadSub').textContent = 'Диалог · ' + d.time + ' · Демо пользователь';
+      box.innerHTML = d.msgs.map(msgBubble).join('');
+      box.scrollTop = box.scrollHeight;
+    }
+    function openDialog(id) { activeDialogId = id; renderUserList(); renderUserChat(); }
+    $('#newChatBtn').addEventListener('click', function () { activeDialogId = null; pendingFiles = []; renderAttach(); renderUserList(); renderUserChat(); });
+
+    function renderAttach() {
+      $('#uAttachRow').innerHTML = pendingFiles.map(function (f, i) {
+        return '<span class="achip"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>' + esc(f.name) + '<button data-fi="' + i + '"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button></span>';
+      }).join('');
+      $$('#uAttachRow [data-fi]').forEach(function (b) {
+        b.addEventListener('click', function () { pendingFiles.splice(+b.getAttribute('data-fi'), 1); renderAttach(); });
+      });
+    }
+    $('#uAttachBtn').addEventListener('click', function () { $('#uFile').click(); });
+    $('#uFile').addEventListener('change', function (e) {
+      Array.prototype.forEach.call(e.target.files, function (f) { pendingFiles.push({ name: f.name, size: Math.max(1, Math.round(f.size / 1024)) + ' КБ' }); });
+      e.target.value = '';
+      renderAttach();
+    });
+    function sendUserMsg() {
+      var text = $('#uInput').value.trim();
+      if (!text && pendingFiles.length === 0) return;
+      var d = null;
+      if (activeDialogId == null) {
+        d = { id: Date.now(), title: text ? text.slice(0, 52) : 'Вложение', time: 'только что', msgs: [] };
+        userDialogs.unshift(d);
+        activeDialogId = d.id;
+      } else {
+        d = userDialogs.filter(function (x) { return x.id === activeDialogId; })[0];
+      }
+      var um = { r: 'u', t: text || 'Вложение:' };
+      if (pendingFiles.length) { um.file = pendingFiles[0].name; um.size = pendingFiles[0].size; }
+      d.msgs.push(um);
+      $('#uInput').value = '';
+      pendingFiles = [];
+      renderAttach();
+      renderUserList();
+      renderUserChat();
+      var box = $('#uChat');
+      var typing = document.createElement('div');
+      typing.className = 'msg ai';
+      typing.innerHTML = '<div class="b typing"><i></i><i></i><i></i></div>';
+      box.appendChild(typing);
+      box.scrollTop = box.scrollHeight;
+      setTimeout(function () {
+        typing.remove();
+        var pick = AI_POOL[aiCounter % AI_POOL.length];
+        aiCounter++;
+        d.msgs.push({ r: 'ai', t: pick.t, conf: pick.conf, src: pick.src });
+        if (pick.conf < 30) {
+          d.msgs.push({ r: 'sys', t: 'Я передал обращение специалисту поддержки. Он продолжит разговор в этом же чате — повторять вопрос не нужно.', conf: pick.conf });
+          var ticketExists = oTickets.some(function (t) { return t.userDialogId === d.id && !t.closed; });
+          if (!ticketExists) {
+            oTickets.unshift({
+              id: 'usr-' + String(d.id),
+              userDialogId: d.id,
+              title: d.title,
+              user: 'Демо пользователь',
+              q: 'только что',
+              conf: pick.conf,
+              assigned: false,
+              msgs: d.msgs.filter(function (m) { return m.r !== 'ai' || m.conf == null || m.conf < 30; }).map(function (m) {
+                return { r: m.r === 'u' ? 'c' : m.r, t: m.t, conf: m.conf, file: m.file, size: m.size };
+              })
+            });
+            renderQueue();
+          }
+        }
+        renderUserChat();
+      }, 1400);
+    }
+    $('#uSend').addEventListener('click', sendUserMsg);
+    $('#uInput').addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendUserMsg(); } });
+
+    /* ============ OPERATOR ============ */
+    var oTickets = [
+      {
+        id: '3e30fa3d', title: 'Не проводится документ 1С', user: 'Светлана · бухгалтер', q: '36 мин назад', conf: 30, assigned: false, msgs: [
+          { r: 'c', t: 'Не проводится документ реализации, горит красный. Срочно: отгрузка фуры с «Вкуснотеево» в сеть!', file: 'promps.txt', size: '14 КБ' },
+          { r: 'sys', t: 'К обращению подключился специалист поддержки.', conf: 0 }
+        ]
+      },
+      { id: 'b71c02aa', title: 'Не провелся документ 1С', user: 'Иван · кладовщик', q: '36 мин назад', conf: 30, assigned: false, msgs: [{ r: 'c', t: 'Не провелся документ перемещения между складами ГП.' }] },
+      { id: 'c9d11ee0', title: '1С документ', user: 'Мария · товаровед', q: '36 мин назад', conf: 30, assigned: false, msgs: [{ r: 'c', t: 'Документ поступления тары не заполняется автоматически.' }] },
+      { id: 'd02f3b71', title: '1С закрылся с ошибкой', user: 'Пётр · оператор линии', q: '34 мин назад', conf: 30, assigned: false, msgs: [{ r: 'c', t: '1С закрылся с ошибкой при проведении выработки за смену.' }] },
+      { id: 'e5a8c412', title: 'помоги', user: 'Анна · бухгалтер', q: '32 мин назад', conf: 0, assigned: false, msgs: [{ r: 'c', t: 'помоги' }] },
+      { id: 'f19b6d03', title: 'Остатки по складу ГП не сходятся', user: 'Дмитрий · завскладом', q: '28 мин назад', conf: 30, assigned: false, msgs: [{ r: 'c', t: 'Остатки по складу ГП не сходятся с отчётом по партиям.' }] }
+    ];
+    var oTab = 'un';
+    var activeTicketId = null;
+
+    function renderQueue() {
+      var list = oTickets.filter(function (t) { return !t.closed && (oTab === 'un' ? !t.assigned : t.assigned); });
+      $('#oCount').textContent = oTickets.filter(function (t) { return !t.closed && !t.assigned; }).length + oTickets.filter(function (t) { return !t.closed && t.assigned; }).length;
+      $('#oList').innerHTML = list.map(function (t) {
+        return '<button class="tk' + (t.id === activeTicketId ? ' active' : '') + '" data-tid="' + t.id + '"><b>' + esc(t.title) + '</b>' +
+          '<div class="row"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>' + esc(t.user) + '</div>' +
+          '<div class="row"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>' + esc(t.q) + '<span class="spacer"></span><span class="conf ' + (t.conf >= 30 ? 'lo' : 'lo') + '" style="background:var(--peach-soft);color:var(--peach-ink)">Confidence ' + t.conf + '%</span></div></button>';
+      }).join('') || '<div style="color:var(--faint);font-size:12px;padding:8px">В этой вкладке пусто.</div>';
+      $$('#oList .tk').forEach(function (el) {
+        el.addEventListener('click', function () { selectTicket(el.getAttribute('data-tid')); });
+      });
+    }
+    function selectTicket(id) {
+      var t = oTickets.filter(function (x) { return x.id === id; })[0];
+      if (!t) return;
+      activeTicketId = id;
+      if (!t.assigned) { t.assigned = true; toast('Тикет назначен вам'); }
+      renderQueue();
+      renderOTicket();
+    }
+    function renderOTicket() {
+      var t = oTickets.filter(function (x) { return x.id === activeTicketId; })[0];
+      var box = $('#oChat');
+      if (!t) {
+        $('#oTitle').textContent = 'Тикет —';
+        $('#oSub').textContent = 'Выберите обращение в очереди';
+        box.innerHTML = '<div class="empty"><div class="eic"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg></div><h3>Линия поддержки</h3><p>Выберите тикет из очереди, чтобы посмотреть историю и ответить.</p></div>';
+        return;
+      }
+      $('#oTitle').textContent = 'Тикет ' + t.id;
+      $('#oSub').textContent = t.user + ' · эскалация ' + t.q;
+      box.innerHTML = t.msgs.map(function (m) {
+        if (m.r === 'sys') return '<div class="sys-chip"><b>' + esc(m.t) + '</b><span class="conf lo">Confidence ' + m.conf + '%</span></div>';
+        var who = m.r === 'c' ? '<div class="who" style="justify-content:flex-end"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>КЛИЕНТ · ' + t.conf + '%</div>' : '<div class="who"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/></svg>ОПЕРАТОР</div>';
+        var fileHtml = m.file ? '<div class="filecard" style="background:rgba(255,255,255,.12)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg><span>' + esc(m.file) + ' · ' + esc(m.size || '') + '</span></div>' : '';
+        return '<div class="msg ' + m.r + '">' + who + '<div class="b">' + esc(m.t) + fileHtml + '</div></div>';
+      }).join('');
+      box.scrollTop = box.scrollHeight;
+    }
+    $('#tabUn').addEventListener('click', function () { oTab = 'un'; $('#tabUn').classList.add('active'); $('#tabMy').classList.remove('active'); renderQueue(); });
+    $('#tabMy').addEventListener('click', function () { oTab = 'my'; $('#tabMy').classList.add('active'); $('#tabUn').classList.remove('active'); renderQueue(); });
+    $('#oSend').addEventListener('click', sendOperatorMsg);
+    $('#oInput').addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendOperatorMsg(); } });
+    function sendOperatorMsg() {
+      var t = oTickets.filter(function (x) { return x.id === activeTicketId; })[0];
+      var text = $('#oInput').value.trim();
+      if (!t || !text) return;
+      t.msgs.push({ r: 'o', t: text });
+      if (t.userDialogId != null) {
+        var d = userDialogs.filter(function (x) { return x.id === t.userDialogId; })[0];
+        if (d) { d.msgs.push({ r: 'op', t: text }); d.time = 'только что'; }
+      }
+      $('#oInput').value = '';
+      renderOTicket();
+      renderUserList();
+      if (activeDialogId === t.userDialogId) renderUserChat();
+    }
+    $('#closeTicketBtn').addEventListener('click', function () {
+      var t = oTickets.filter(function (x) { return x.id === activeTicketId; })[0];
+      if (!t) { toast('Выберите тикет', 'pc'); return; }
+      t.closed = true;
+      if (t.userDialogId != null) {
+        var d = userDialogs.filter(function (x) { return x.id === t.userDialogId; })[0];
+        if (d) d.msgs.push({ r: 'sys', t: 'Обращение закрыто специалистом поддержки.' });
+      }
+      activeTicketId = null;
+      renderQueue();
+      renderOTicket();
+      if (t.userDialogId != null && activeDialogId === t.userDialogId) renderUserChat();
+      toast('Тикет закрыт');
+    });
+    $('#tplGen').addEventListener('click', function () {
+      var t = oTickets.filter(function (x) { return x.id === activeTicketId; })[0];
+      if (!t) { toast('Сначала выберите тикет', 'pc'); return; }
+      var btn = $('#tplGen');
+      btn.disabled = true;
+      btn.innerHTML = '<svg class="spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.2-8.56"/></svg>Генерация…';
+      setTimeout(function () {
+        btn.disabled = false;
+        btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.8 5.8 1.9-5.8 1.9L12 18.4l-1.9-5.8L4.3 10.7l5.8-1.9z"/></svg>Сгенерировать шаблон';
+        $('#tplText').value = 'Здравствуйте! Это линия поддержки 1С «Молвест».\n\nПо обращению «' + t.title + '»: проверьте проведение документа и остатки по партии в «Отчёте по складам». Если после перепроведения ошибка сохраняется — пришлите номер документа и склад, я посмотрю на стороне базы.\n\nС уважением, оператор линии поддержки.';
+        toast('Шаблон готов', 'pk');
+      }, 1100);
+    });
+    $('#tplCopy').addEventListener('click', function () {
+      var txt = $('#tplText').value;
+      if (!txt) { toast('Шаблон пуст', 'pc'); return; }
+      if (navigator.clipboard) { navigator.clipboard.writeText(txt).then(function () { toast('Скопировано в буфер'); }); }
+      else { toast('Скопировано в буфер'); }
+    });
+
+    /* ============ ADMIN ============ */
+    $$('.nav-btn').forEach(function (b) {
+      b.addEventListener('click', function () {
+        $$('.nav-btn').forEach(function (x) { x.classList.remove('active'); });
+        b.classList.add('active');
+        $$('.sec').forEach(function (s) { s.classList.remove('active'); });
+        $('#sec-' + b.getAttribute('data-sec')).classList.add('active');
+      });
+    });
+
+    /* Journal */
+    var journalRows = [
+      ['#1042', 'Не проводится реализация', 'Светлана · бухгалтер', 'ai', 86, '03 сент., 17:10'],
+      ['#1041', 'Не закрылся месяц в 1С:ERP', 'Демо пользователь', 'esc', 22, '03 сент., 16:42'],
+      ['#1040', 'Меркурий: гашение эВСД', 'Иван · кладовщик', 'ai', 81, '03 сент., 15:20'],
+      ['#1039', 'Маркировка творога 9%', 'Мария · товаровед', 'esc', 18, '03 сент., 14:03'],
+      ['#1038', 'Остатки по складу ГП', 'Дмитрий · завскладом', 'close', 77, '03 сент., 12:47'],
+      ['#1037', 'Контрагент: номер контракта', 'Анна · бухгалтер', 'close', 91, '03 сент., 11:15']
+    ];
+    $('#journalBody').innerHTML = journalRows.map(function (r) {
+      var st = r[3] === 'ai' ? '<span class="s-chip s-ai">AI решил</span>' : (r[3] === 'esc' ? '<span class="s-chip s-esc">Эскалация</span>' : '<span class="s-chip s-close">Закрыт</span>');
+      return '<tr><td style="color:var(--faint)">' + r[0] + '</td><td><b>' + esc(r[1]) + '</b></td><td>' + esc(r[2]) + '</td><td>' + st + '</td><td><span class="conf ' + (r[4] >= 30 ? 'hi' : 'lo') + '">' + r[4] + '%</span></td><td style="color:var(--faint)">' + r[5] + '</td></tr>';
+    }).join('');
+
+    /* KB */
+    var kb = [
+      { id: 'doc1c', name: 'Документация 1С', on: true, docs: [] },
+      { id: 'journal', name: 'Журнал обращений', on: true, docs: [] },
+      {
+        id: 'inner', name: 'Внутренняя база «Молвест»', on: true, docs: [
+          { name: 'Регламент_Меркурий_эВСД.pdf', size: '2,1 МБ', st: 'ready' },
+          { name: 'Инструкция_Честный_ЗНАК_маркировка.docx', size: '840 КБ', st: 'ready' }
+        ]
+      }
+    ];
+    var kbActive = 'doc1c';
+    function renderKb() {
+      $('#kbSections').innerHTML = kb.map(function (s) {
+        return '<button class="kb-sec' + (s.id === kbActive ? ' active' : '') + '" data-kid="' + s.id + '"><span><b>' + esc(s.name) + '</b><small>' + s.docs.length + ' документов</small></span><span class="switch' + (s.on ? ' on' : '') + '" data-sw="' + s.id + '"></span></button>';
+      }).join('');
+      $$('#kbSections .kb-sec').forEach(function (el) {
+        el.addEventListener('click', function (e) {
+          if (e.target.getAttribute('data-sw')) return;
+          kbActive = el.getAttribute('data-kid');
+          renderKb();
+        });
+      });
+      $$('#kbSections .switch').forEach(function (sw) {
+        sw.addEventListener('click', function (e) {
+          e.stopPropagation();
+          var s = kb.filter(function (x) { return x.id === sw.getAttribute('data-sw'); })[0];
+          s.on = !s.on;
+          toast(s.on ? 'Раздел «' + s.name + '» включён' : 'Раздел «' + s.name + '» отключён из retrieval', s.on ? '' : 'pc');
+          renderKb();
+        });
+      });
+      var sec = kb.filter(function (x) { return x.id === kbActive; })[0];
+      $('#kbSecName').textContent = sec.name;
+      if (!sec.docs.length) {
+        $('#kbDocs').innerHTML = '<div class="kb-empty"><div class="eic"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 11v6M9 14h6"/></svg></div><b>Документов нет</b><p>Нажмите «Загрузить», чтобы выбрать файл и запустить индексацию.</p></div>';
+        return;
+      }
+      $('#kbDocs').innerHTML = sec.docs.map(function (d) {
+        var st = !sec.on ? '<span class="st off">вне retrieval</span>' : (d.st === 'ready' ? '<span class="st ready">Готов</span>' : '<span class="st index">Индексация…</span>');
+        return '<div class="doc"><span class="dic"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></span><span><b>' + esc(d.name) + '</b><small>' + esc(d.size) + '</small></span><span class="spacer"></span>' + st + '</div>';
+      }).join('');
+    }
+    $('#kbUpload').addEventListener('click', function () { $('#kbFile').click(); });
+    $('#kbFile').addEventListener('change', function (e) {
+      var sec = kb.filter(function (x) { return x.id === kbActive; })[0];
+      var f = e.target.files[0];
+      if (!f) return;
+      var doc = { name: f.name, size: Math.max(1, Math.round(f.size / 1024)) + ' КБ', st: 'index' };
+      sec.docs.push(doc);
+      e.target.value = '';
+      renderKb();
+      toast('Индексация начата: ' + f.name, 'pc');
+      setTimeout(function () { doc.st = 'ready'; renderKb(); toast('Индексация завершена: ' + doc.name); }, 1800);
+    });
+
+    /* Settings */
+    function paintRange(r) {
+      var p = (r.value - r.min) / (r.max - r.min) * 100;
+      r.style.background = 'linear-gradient(90deg, var(--blue) ' + p + '%, #d9e2f1 ' + p + '%)';
+    }
+    function recalc() {
+      var ctx = +$('#modelSel').value;
+      var winPct = +$('#winSlider').value;
+      var win = Math.round(ctx * winPct / 100);
+      var maxR = +$('#maxResp').value || 0;
+      var inn = Math.max(0, win - maxR);
+      var emb = Math.round(8192 * (+$('#embSlider').value) / 100);
+      $('#winPct').textContent = winPct + '%';
+      $('#winSub').textContent = winPct + '% от ' + fmt(ctx) + ' = ' + fmt(win) + ' tokens';
+      $('#maxRespSub').textContent = 'Под вход остаётся ' + fmt(inn) + ' tokens.';
+      $('#thrPct').textContent = $('#thrSlider').value + '%';
+      $('#thrSub').textContent = $('#thrSlider').value + '%: ниже этого confidence тикет эскалируется';
+      $('#embPct').textContent = $('#embSlider').value + '%';
+      $('#embSub').textContent = $('#embSlider').value + '% от 8 192 = ' + fmt(emb) + ' tokens';
+      $('#bTotal').textContent = fmt(win);
+      $('#bIn').textContent = fmt(inn);
+      $('#bBge').textContent = fmt(emb);
+      ['winSlider', 'thrSlider', 'embSlider'].forEach(function (id) { paintRange($('#' + id)); });
+    }
+    ['modelSel', 'winSlider', 'maxResp', 'thrSlider', 'embSlider', 'ragTopK'].forEach(function (id) {
+      $('#' + id).addEventListener('input', recalc);
+    });
+    $('#saveSettings').addEventListener('click', function () { toast('Настройки сохранены'); });
+    $$('.save-prompt').forEach(function (b) { b.addEventListener('click', function () { toast('Промпт сохранён', 'pk'); }); });
+
+    /* ============ INIT ============ */
+    renderUserList();
+    renderUserChat();
+    renderQueue();
+    renderOTicket();
+    renderKb();
+    recalc();
+  </script>
+</body>
+
+</html>

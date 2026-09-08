@@ -213,9 +213,10 @@ seed не скачивает внешний массив документов.
 - **Конфигурация Docker:** runtime-переменные хранятся в единственном корневом
   `.env`; оба Compose-файла передают его backend через `env_file`, а Compose
   переопределяет service-specific database/Qdrant hostnames и режимы запуска.
-  Шаблон `.env.example` также содержит локальные host ports и dev-значения,
-  поэтому правило «все Docker-specific значения только в Compose» фактически не
-  соблюдается.
+   Единый `.env.example` содержит общие runtime-настройки, dev host ports и Caddy
+   domain/email для production. `docker-compose.dev.yml` использует dev ports,
+   а `docker-compose.yml` публикует только Caddy и жёстко задаёт production security
+   defaults независимо от demo-значений шаблона.
 
 ### 3.1. Текущее состояние реализации
 
@@ -5208,11 +5209,12 @@ startup, Compose, seed или тестах; они не являются час�
 - `make rag-check` требует уже работающих PostgreSQL/Qdrant и заранее загруженных
   indexed documents; seed по умолчанию документы не создаёт.
 - `docker-compose.dev.yml` предназначен для демо/hot reload. Production Compose
-  использует `AUTH_COOKIE_SECURE=true`, nginx слушает только HTTP :80, поэтому для
-  browser session нужен внешний TLS reverse proxy. Опубликованный `.env.example`
-  является development-шаблоном (`DEMO_AUTH_ENABLED=true` и development JWT), поэтому
-  production Compose требует отдельные значения `DEMO_AUTH_ENABLED=false` и сильного
-  `JWT_SECRET`. Backend `/health` не является dependency-aware readiness.
+  публикует только Caddy на TCP `80`/`443` и UDP `443`; Caddy автоматически получает
+  и обновляет TLS-сертификат для `DOMAIN`, затем проксирует SPA в приватную сеть.
+  PostgreSQL, Qdrant, backend и frontend nginx не имеют host-портов. `AUTH_COOKIE_SECURE`
+  принудительно включён; единственный `.env.example` требует заменить
+  `POSTGRES_PASSWORD`/`JWT_SECRET` перед deployment, а production Compose отключает
+  demo auth и seed. Backend `/health` не является dependency-aware readiness.
 - S3-compatible storage provider присутствует в коде, но MinIO service и S3-параметры
   не входят в текущие Compose/env templates; демо использует named local volume.
 - Python contract проекта — `>=3.11,<3.12`; Docker использует Python 3.11. Локальный

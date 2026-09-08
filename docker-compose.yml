@@ -6,7 +6,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-molvest}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-molvest}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set for production}
       POSTGRES_DB: ${POSTGRES_DB:-molvest}
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -16,7 +16,7 @@ services:
       timeout: 3s
       retries: 10
     networks:
-      - molvest
+      - app
 
   qdrant:
     image: qdrant/qdrant:v1.15.1
@@ -24,7 +24,7 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
     networks:
-      - molvest
+      - app
 
   backend:
     restart: unless-stopped
@@ -35,14 +35,14 @@ services:
       - .env
     environment:
       ENVIRONMENT: production
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-molvest}:${POSTGRES_PASSWORD:-molvest}@postgres:5432/${POSTGRES_DB:-molvest}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-molvest}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set for production}@postgres:5432/${POSTGRES_DB:-molvest}
       GIGACHAT_CREDENTIALS: ${GIGACHAT_CREDENTIALS:-}
       GIGACHAT_SCOPE: ${GIGACHAT_SCOPE:-GIGACHAT_API_PERS}
       GIGACHAT_CA_BUNDLE_FILE: /etc/ssl/certs/ca-certificates.crt
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set for production}
       JWT_TTL_MINUTES: ${JWT_TTL_MINUTES:-480}
-      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
-      DEMO_AUTH_ENABLED: ${DEMO_AUTH_ENABLED:-true}
+      AUTH_COOKIE_SECURE: "true"
+      DEMO_AUTH_ENABLED: "false"
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
       EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-cpu}
@@ -52,7 +52,7 @@ services:
       DIALOG_IDLE_TIMEOUT_HOURS: ${DIALOG_IDLE_TIMEOUT_HOURS:-24}
       DIALOG_IDLE_SCAN_SECONDS: ${DIALOG_IDLE_SCAN_SECONDS:-300}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
-      SEED_ON_STARTUP: ${SEED_ON_STARTUP:-true}
+      SEED_ON_STARTUP: "false"
     expose:
       - "8000"
     volumes:
@@ -69,7 +69,7 @@ services:
       retries: 20
       start_period: 60s
     networks:
-      - molvest
+      - app
 
   frontend:
     restart: unless-stopped
@@ -77,19 +77,44 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       target: production
-    ports:
-      - "80:80"
+    expose:
+      - "80"
     depends_on:
       backend:
         condition: service_healthy
     networks:
-      - molvest
+      - edge
+      - app
+
+  caddy:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN must be set for production}
+      CADDY_EMAIL: ${CADDY_EMAIL:?CADDY_EMAIL must be set for production}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      frontend:
+        condition: service_started
+    networks:
+      - edge
 
 volumes:
   postgres_data:
   qdrant_data:
   backend_storage:
+  caddy_data:
+  caddy_config:
 
 networks:
-  molvest:
+  edge:
+    driver: bridge
+  app:
     driver: bridge

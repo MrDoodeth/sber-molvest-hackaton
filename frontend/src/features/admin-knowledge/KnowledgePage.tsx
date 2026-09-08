@@ -68,7 +68,8 @@ export default function KnowledgePage() {
     section: KnowledgeSectionDto;
     kind: "disable" | "delete";
   }>();
-  const [documentToDelete, setDocumentToDelete] = useState<KnowledgeDocumentDto>();
+  const [documentToDelete, setDocumentToDelete] =
+    useState<KnowledgeDocumentDto>();
   const [name, setName] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const sections = useQuery({
@@ -192,8 +193,12 @@ export default function KnowledgePage() {
   const deleteDocument = useMutation({
     mutationFn: (id: string) => knowledgeApi.deleteDocument(id),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.kb.documents(filters) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.kb.allDocuments() });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.kb.documents(filters),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.kb.allDocuments(),
+      });
       void queryClient.invalidateQueries({ queryKey: queryKeys.kb.sections() });
       setDocumentToDelete(undefined);
       toast("Документ удалён из базы знаний", "success");
@@ -420,7 +425,10 @@ export default function KnowledgePage() {
                       <th className="w-[16%] px-2 py-3 sm:px-4">Включён</th>
                       <th className="w-[20%] px-2 py-3 sm:px-4">Обновлён</th>
                       <th className="w-[18%] px-2 py-3 sm:px-4">Индекс</th>
-                      <th className="w-[8%] px-2 py-3 sm:px-5" aria-label="Действия" />
+                      <th
+                        className="w-[8%] px-2 py-3 sm:px-5"
+                        aria-label="Действия"
+                      />
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#edf1f9]">
@@ -615,7 +623,7 @@ export default function KnowledgePage() {
       <ConfirmDialog
         open={Boolean(documentToDelete)}
         title="Удалить документ из базы знаний?"
-        description={`Документ «${documentToDelete?.title ?? ""}» будет удалён из поискового индекса и object storage. Действие нельзя отменить.`}
+        description={`Документ будет удалён из поискового индекса и object storage. Действие нельзя отменить.`}
         confirmLabel="Удалить"
         danger
         pending={deleteDocument.isPending}
