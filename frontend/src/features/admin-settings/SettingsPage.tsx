@@ -160,11 +160,10 @@ export default function SettingsPage() {
               Runtime configuration
             </p>
             <h1 className="mt-1 text-3xl font-black tracking-[-0.025em] text-molvest-950">
-              AI Settings
+              Настройки AI
             </h1>
             <p className="mt-2 text-sm text-stone-500">
-              Одна атомарная операция для модели, контекста, retrieval и
-              эскалации.
+              Различные параметры моделей.
             </p>
           </div>
           {dirty && <Badge tone="warning">Настройки изменены</Badge>}
@@ -177,16 +176,10 @@ export default function SettingsPage() {
               </span>
               <div>
                 <h2 className="font-bold text-stone-950">GigaChat</h2>
-                <p className="text-xs text-stone-500">
-                  Generation, context и routing gate
-                </p>
               </div>
             </div>
             <div className="grid gap-5 p-5">
-              <Field
-                label="Активная модель"
-                hint="Context limits для каждой модели возвращает backend."
-              >
+              <Field label="Активная модель">
                 <Select
                   value={form.activeModel}
                   onChange={(event) =>
@@ -241,15 +234,12 @@ export default function SettingsPage() {
                 <Database className="size-5" />
               </span>
               <div>
-                <h2 className="font-bold text-stone-950">Retrieval</h2>
-                <p className="text-xs text-stone-500">
-                  BGE-M3 и hybrid evidence
-                </p>
+                <h2 className="font-bold text-stone-950">BGE-M3</h2>
               </div>
             </div>
             <div className="grid gap-5 p-5">
               <RangeField
-                label="Контекст Embeddings"
+                label="Контекст Embedding модели"
                 value={form.embeddingContextRatio}
                 onChange={(value) =>
                   setForm({ ...form, embeddingContextRatio: value })
@@ -258,7 +248,7 @@ export default function SettingsPage() {
               />
               <Field
                 label="rag_top_k"
-                hint="Количество лучших chunks после RRF. Верхняя граница не задаётся frontend."
+                hint="Количество лучших чанков из базы знаний"
               >
                 <Input
                   type="number"

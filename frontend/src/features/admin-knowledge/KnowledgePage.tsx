@@ -209,7 +209,7 @@ export default function KnowledgePage() {
             База знаний
           </h1>
           <p className="mt-2 text-sm text-stone-500">
-            Разделы управляют доступностью документов как master switch.
+            Разделы управляют доступностью документов.
           </p>
         </header>
         <div className="mt-6 grid gap-5 lg:grid-cols-[18rem_minmax(0,1fr)]">
