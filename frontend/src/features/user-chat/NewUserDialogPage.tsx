@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, MessageCircleMore } from "lucide-react";
 import { useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { ApiError } from "../../api/client";
 import type { DialogDetailDto, DialogSummary, MessageDto } from "../../api/types";
 import { dialogsApi } from "../../api/dialogs";
 import { queryKeys } from "../../api/queryKeys";
@@ -60,12 +61,16 @@ export default function NewUserDialogPage() {
       });
     },
     onError: (error, attempt) => {
+      const attachmentRejected =
+        attempt.attachments.length > 0 &&
+        error instanceof ApiError &&
+        error.code === "unprocessable";
       processing.end();
       setOptimisticMessage(undefined);
       setText(attempt.text);
-      setAttachments(attempt.attachments);
-      setFailedAttempt(attempt);
-      setAttachmentError(undefined);
+      setAttachments(attachmentRejected ? [] : attempt.attachments);
+      setFailedAttempt(attachmentRejected ? undefined : attempt);
+      setAttachmentError(attachmentRejected ? error.message : undefined);
       toast(getErrorMessage(error), "error");
       requestAnimationFrame(() => textareaRef.current?.focus());
     },

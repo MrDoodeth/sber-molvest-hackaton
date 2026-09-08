@@ -72,12 +72,16 @@ export default function UserDialogPage() {
       requestAnimationFrame(() => textareaRef.current?.focus());
     },
     onError: (error, attempt) => {
+      const attachmentRejected =
+        attempt.attachments.length > 0 &&
+        error instanceof ApiError &&
+        error.code === "unprocessable";
       setAwaitingTerminal(false);
       processing.end(dialogId);
       setText(attempt.text);
-      setAttachments(attempt.attachments);
-      setFailedAttempt(attempt);
-      setAttachmentError(undefined);
+      setAttachments(attachmentRejected ? [] : attempt.attachments);
+      setFailedAttempt(attachmentRejected ? undefined : attempt);
+      setAttachmentError(attachmentRejected ? error.message : undefined);
       events.cancelTurn();
       toast(getErrorMessage(error), "error");
       requestAnimationFrame(() => textareaRef.current?.focus());

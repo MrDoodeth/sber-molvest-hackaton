@@ -181,7 +181,7 @@ export function validateRuntimeAttachment(file: File): string | null {
     return "Поддерживаются изображения PNG/JPEG/TIFF/BMP и документы TXT/DOC/DOCX/PDF/EPUB/PPT/PPTX/XLSX.";
   }
   const expectedMimeTypes = MIME_TYPES_BY_EXTENSION[extension] ?? [];
-  if (file.type && !expectedMimeTypes.includes(file.type)) {
+  if (!file.type || !expectedMimeTypes.includes(file.type)) {
     return `Тип файла ${file.name} не соответствует его расширению.`;
   }
   const limit = isImage ? IMAGE_LIMIT : DOCUMENT_LIMIT;
