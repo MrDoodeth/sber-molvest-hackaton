@@ -67,6 +67,11 @@ export const knowledgeApi = {
       json: patch,
       signal,
     }),
+  deleteDocument: (id: string, signal?: AbortSignal) =>
+    apiRequest<void>(`/api/admin/knowledge/documents/${id}`, {
+      method: "DELETE",
+      signal,
+    }),
   reindex: (id: string, signal?: AbortSignal) =>
     apiRequest<KnowledgeDocumentDto>(`/api/admin/knowledge/documents/${id}/reindex`, {
       method: "POST",

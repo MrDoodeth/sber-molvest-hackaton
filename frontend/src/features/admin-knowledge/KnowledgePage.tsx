@@ -14,7 +14,11 @@ import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { knowledgeApi, type DocumentFilters } from "../../api/knowledge";
 import { queryKeys } from "../../api/queryKeys";
-import type { IndexStatus, KnowledgeSectionDto } from "../../api/types";
+import type {
+  IndexStatus,
+  KnowledgeDocumentDto,
+  KnowledgeSectionDto,
+} from "../../api/types";
 import {
   Badge,
   Button,
@@ -64,6 +68,7 @@ export default function KnowledgePage() {
     section: KnowledgeSectionDto;
     kind: "disable" | "delete";
   }>();
+  const [documentToDelete, setDocumentToDelete] = useState<KnowledgeDocumentDto>();
   const [name, setName] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const sections = useQuery({
@@ -181,6 +186,17 @@ export default function KnowledgePage() {
       });
       queryClient.setQueryData(queryKeys.kb.document(document.id), document);
       toast("Переиндексация запущена", "success");
+    },
+    onError: (error) => toast(error.message, "error"),
+  });
+  const deleteDocument = useMutation({
+    mutationFn: (id: string) => knowledgeApi.deleteDocument(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.kb.documents(filters) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.kb.allDocuments() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.kb.sections() });
+      setDocumentToDelete(undefined);
+      toast("Документ удалён из базы знаний", "success");
     },
     onError: (error) => toast(error.message, "error"),
   });
@@ -400,10 +416,11 @@ export default function KnowledgePage() {
                 <table className="w-full table-fixed text-left text-sm">
                   <thead className="bg-[#f7f9fd] text-[10px] font-extrabold uppercase tracking-[0.12em] text-slate-500">
                     <tr>
-                      <th className="w-[42%] px-2 py-3 sm:px-5">Документ</th>
-                      <th className="w-[18%] px-2 py-3 sm:px-4">Включён</th>
-                      <th className="w-[22%] px-2 py-3 sm:px-4">Обновлён</th>
-                      <th className="w-[18%] px-2 py-3 sm:px-5">Индекс</th>
+                      <th className="w-[38%] px-2 py-3 sm:px-5">Документ</th>
+                      <th className="w-[16%] px-2 py-3 sm:px-4">Включён</th>
+                      <th className="w-[20%] px-2 py-3 sm:px-4">Обновлён</th>
+                      <th className="w-[18%] px-2 py-3 sm:px-4">Индекс</th>
+                      <th className="w-[8%] px-2 py-3 sm:px-5" aria-label="Действия" />
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#edf1f9]">
@@ -467,6 +484,17 @@ export default function KnowledgePage() {
                               </IconButton>
                             )}
                           </div>
+                        </td>
+                        <td className="px-2 py-4 text-right sm:px-5">
+                          <IconButton
+                            type="button"
+                            className="size-8 text-slate-400 hover:bg-red-50 hover:text-red-700"
+                            aria-label={`Удалить ${document.title}`}
+                            disabled={deleteDocument.isPending}
+                            onClick={() => setDocumentToDelete(document)}
+                          >
+                            <Trash2 className="size-3.5" />
+                          </IconButton>
                         </td>
                       </tr>
                     ))}
@@ -583,6 +611,18 @@ export default function KnowledgePage() {
           sectionAction && deleteSection.mutate(sectionAction.section.id)
         }
         onCancel={() => setSectionAction(undefined)}
+      />
+      <ConfirmDialog
+        open={Boolean(documentToDelete)}
+        title="Удалить документ из базы знаний?"
+        description={`Документ «${documentToDelete?.title ?? ""}» будет удалён из поискового индекса и object storage. Действие нельзя отменить.`}
+        confirmLabel="Удалить"
+        danger
+        pending={deleteDocument.isPending}
+        onConfirm={() => {
+          if (documentToDelete) deleteDocument.mutate(documentToDelete.id);
+        }}
+        onCancel={() => setDocumentToDelete(undefined)}
       />
     </div>
   );

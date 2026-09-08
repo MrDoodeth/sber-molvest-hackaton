@@ -75,6 +75,10 @@ class KnowledgeBaseService:
         async def run() -> None:
             try:
                 await self.ingest(document_id)
+            except NotFoundError:
+                # The document can be deleted after this task is scheduled.
+                # Deletion is terminal and must not be retried by the worker.
+                return
             finally:
                 self._scheduled_document_ids.discard(document_id)
 
@@ -398,134 +402,142 @@ class KnowledgeBaseService:
             old_vector_ids: list[uuid.UUID] = []
             try:
                 async with self._session_factory() as session:
-                    row = (
-                        await session.execute(
-                            select(KnowledgeDocument, KnowledgeSection)
-                            .join(
-                                KnowledgeSection,
-                                KnowledgeDocument.section_id == KnowledgeSection.id,
+                    # The row lock covers the complete external indexing flow.
+                    # A concurrent delete waits until we either finish indexing
+                    # or roll back, then removes the final vector state.
+                    async with session.begin():
+                        row = (
+                            await session.execute(
+                                select(KnowledgeDocument, KnowledgeSection)
+                                .join(
+                                    KnowledgeSection,
+                                    KnowledgeDocument.section_id == KnowledgeSection.id,
+                                )
+                                .where(KnowledgeDocument.id == document_id)
+                                .with_for_update()
                             )
-                            .where(KnowledgeDocument.id == document_id)
-                        )
-                    ).one_or_none()
-                    if row is None:
-                        raise NotFoundError("Документ базы знаний не найден")
-                    document, section = row
-                    document.index_status = IndexStatus.PROCESSING
-                    document.index_error = None
-                    old_vector_ids = list(
-                        await session.scalars(
-                            select(Chunk.vector_id).where(Chunk.doc_id == document_id)
-                        )
-                    )
-                    await session.commit()
-                    storage_key = document.storage_key
-                    suffix = Path(storage_key).suffix
-
-                data = await self._storage.get(storage_key)
-                temporary_path = await asyncio.to_thread(
-                    self._write_temporary, data, suffix
-                )
-                try:
-                    parsed_chunks = await self._parser.parse(temporary_path)
-                finally:
-                    await asyncio.to_thread(temporary_path.unlink, missing_ok=True)
-                if not parsed_chunks:
-                    raise IngestionFailedError("Документ не содержит текстовых чанков")
-                contextualized_chunks = [
-                    self._contextualize_chunk(document, chunk.text, chunk.heading_path)
-                    for chunk in parsed_chunks
-                ]
-                embeddings = await self._embedding_provider.embed_documents(
-                    contextualized_chunks
-                )
-                if len(embeddings) != len(parsed_chunks):
-                    raise IngestionFailedError(
-                        "Embedding provider returned an unexpected vector count"
-                    )
-                indexed_at = datetime.now(UTC)
-                points: list[VectorPoint] = []
-                metadata_items: list[dict[str, Any]] = []
-                for index, (parsed, contextualized, embedding) in enumerate(
-                    zip(parsed_chunks, contextualized_chunks, embeddings, strict=True)
-                ):
-                    text_digest = hashlib.sha256(
-                        contextualized.encode("utf-8")
-                    ).hexdigest()
-                    vector_id = uuid.uuid5(
-                        VECTOR_NAMESPACE, f"{document_id}:{index}:{text_digest}"
-                    )
-                    new_vector_ids.append(vector_id)
-                    metadata = {
-                        "heading_path": parsed.heading_path,
-                        "page": parsed.page,
-                        "chunk_index": index,
-                    }
-                    metadata_items.append(metadata)
-                    payload = {
-                        **self._document_payload(document, section),
-                        "heading_path": parsed.heading_path,
-                        "page": parsed.page,
-                        "chunk_index": index,
-                        "updated_at": indexed_at.isoformat(),
-                        "answer_eligible": True,
-                    }
-                    points.append(
-                        VectorPoint(
-                            vector_id=vector_id,
-                            dense=embedding.dense,
-                            sparse_indices=embedding.sparse_indices,
-                            sparse_values=embedding.sparse_values,
-                            payload=payload,
-                        )
-                    )
-                await self._vector_store.upsert(points)
-
-                async with self._session_factory() as session:
-                    document = await session.get(
-                        KnowledgeDocument, document_id, with_for_update=True
-                    )
-                    if document is None:
-                        await self._vector_store.delete_points(new_vector_ids)
-                        return
-                    section = await session.get(
-                        KnowledgeSection, document.section_id, with_for_update=True
-                    )
-                    if section is None:
-                        raise NotFoundError("Раздел базы знаний не найден")
-                    await session.execute(
-                        delete(Chunk).where(Chunk.doc_id == document_id)
-                    )
-                    session.add_all(
-                        [
-                            Chunk(
-                                doc_id=document_id,
-                                text=contextualized,
-                                vector_id=vector_id,
-                                metadata_=metadata,
+                        ).one_or_none()
+                        if row is None:
+                            raise NotFoundError("Документ базы знаний не найден")
+                        document, section = row
+                        document.index_status = IndexStatus.PROCESSING
+                        document.index_error = None
+                        old_vector_ids = list(
+                            await session.scalars(
+                                select(Chunk.vector_id).where(
+                                    Chunk.doc_id == document_id
+                                )
                             )
-                            for contextualized, vector_id, metadata in zip(
+                        )
+                        storage_key = document.storage_key
+                        suffix = Path(storage_key).suffix
+
+                        data = await self._storage.get(storage_key)
+                        temporary_path = await asyncio.to_thread(
+                            self._write_temporary, data, suffix
+                        )
+                        try:
+                            parsed_chunks = await self._parser.parse(temporary_path)
+                        finally:
+                            await asyncio.to_thread(
+                                temporary_path.unlink, missing_ok=True
+                            )
+                        if not parsed_chunks:
+                            raise IngestionFailedError(
+                                "Документ не содержит текстовых чанков"
+                            )
+                        contextualized_chunks = [
+                            self._contextualize_chunk(
+                                document, chunk.text, chunk.heading_path
+                            )
+                            for chunk in parsed_chunks
+                        ]
+                        embeddings = await self._embedding_provider.embed_documents(
+                            contextualized_chunks
+                        )
+                        if len(embeddings) != len(parsed_chunks):
+                            raise IngestionFailedError(
+                                "Embedding provider returned an unexpected vector count"
+                            )
+                        indexed_at = datetime.now(UTC)
+                        points: list[VectorPoint] = []
+                        metadata_items: list[dict[str, Any]] = []
+                        for index, (parsed, contextualized, embedding) in enumerate(
+                            zip(
+                                parsed_chunks,
                                 contextualized_chunks,
-                                new_vector_ids,
-                                metadata_items,
+                                embeddings,
                                 strict=True,
                             )
-                        ]
-                    )
-                    document.index_status = IndexStatus.INDEXED
-                    document.index_error = None
-                    document.indexed_at = indexed_at
-                    await self._vector_store.set_document_payload(
-                        document.id,
-                        {
-                            "is_enabled": section.is_enabled and document.is_enabled,
-                            "answer_eligible": True,
-                        },
-                    )
-                    await session.commit()
+                        ):
+                            text_digest = hashlib.sha256(
+                                contextualized.encode("utf-8")
+                            ).hexdigest()
+                            vector_id = uuid.uuid5(
+                                VECTOR_NAMESPACE,
+                                f"{document_id}:{index}:{text_digest}",
+                            )
+                            new_vector_ids.append(vector_id)
+                            metadata = {
+                                "heading_path": parsed.heading_path,
+                                "page": parsed.page,
+                                "chunk_index": index,
+                            }
+                            metadata_items.append(metadata)
+                            payload = {
+                                **self._document_payload(document, section),
+                                "heading_path": parsed.heading_path,
+                                "page": parsed.page,
+                                "chunk_index": index,
+                                "updated_at": indexed_at.isoformat(),
+                                "answer_eligible": True,
+                            }
+                            points.append(
+                                VectorPoint(
+                                    vector_id=vector_id,
+                                    dense=embedding.dense,
+                                    sparse_indices=embedding.sparse_indices,
+                                    sparse_values=embedding.sparse_values,
+                                    payload=payload,
+                                )
+                            )
+                        await self._vector_store.upsert(points)
+
+                        await session.execute(
+                            delete(Chunk).where(Chunk.doc_id == document_id)
+                        )
+                        session.add_all(
+                            [
+                                Chunk(
+                                    doc_id=document_id,
+                                    text=contextualized,
+                                    vector_id=vector_id,
+                                    metadata_=metadata,
+                                )
+                                for contextualized, vector_id, metadata in zip(
+                                    contextualized_chunks,
+                                    new_vector_ids,
+                                    metadata_items,
+                                    strict=True,
+                                )
+                            ]
+                        )
+                        document.index_status = IndexStatus.INDEXED
+                        document.index_error = None
+                        document.indexed_at = indexed_at
+                        await self._vector_store.set_document_payload(
+                            document.id,
+                            {
+                                "is_enabled": section.is_enabled
+                                and document.is_enabled,
+                                "answer_eligible": True,
+                            },
+                        )
                 stale_ids = list(set(old_vector_ids) - set(new_vector_ids))
                 await self._delete_stale_vectors(stale_ids, document_id)
             except Exception as exc:
+                if isinstance(exc, NotFoundError):
+                    raise
                 introduced = list(set(new_vector_ids) - set(old_vector_ids))
                 if introduced:
                     try:
@@ -560,28 +572,27 @@ class KnowledgeBaseService:
     async def delete_document(self, document_id: uuid.UUID) -> None:
         async with self._lock_for(document_id):
             async with self._session_factory() as session:
-                document = await session.get(KnowledgeDocument, document_id)
-                if document is None:
-                    raise NotFoundError("Документ базы знаний не найден")
-                storage_key = document.storage_key
-            try:
-                await self._vector_store.delete_document(document_id)
-            except Exception as exc:
-                raise ServiceUnavailableError(
-                    "Не удалось удалить документ из поискового индекса"
-                ) from exc
-            try:
-                await self._storage.delete(storage_key)
-            except Exception as exc:
-                raise ServiceUnavailableError(
-                    "Не удалось очистить документ из storage; запись сохранена "
-                    "для повторной попытки"
-                ) from exc
-            async with self._session_factory() as session:
-                document = await session.get(
-                    KnowledgeDocument, document_id, with_for_update=True
-                )
-                if document is not None:
+                # This is the same row lock used by ingest(). It serializes the
+                # whole deletion against active or queued indexing in any worker.
+                async with session.begin():
+                    document = await session.get(
+                        KnowledgeDocument, document_id, with_for_update=True
+                    )
+                    if document is None:
+                        raise NotFoundError("Документ базы знаний не найден")
+                    try:
+                        await self._vector_store.delete_document(document_id)
+                    except Exception as exc:
+                        raise ServiceUnavailableError(
+                            "Не удалось удалить документ из поискового индекса"
+                        ) from exc
+                    try:
+                        await self._storage.delete(document.storage_key)
+                    except Exception as exc:
+                        raise ServiceUnavailableError(
+                            "Не удалось очистить документ из storage; запись сохранена "
+                            "для повторной попытки"
+                        ) from exc
                     candidates = list(
                         await session.scalars(
                             select(KnowledgeCandidate)
@@ -598,7 +609,6 @@ class KnowledgeBaseService:
                         candidate.status = CandidateStatus.REJECTED
                         candidate.resulting_document_id = None
                     await session.delete(document)
-                    await session.commit()
 
     @staticmethod
     def _write_temporary(data: bytes, suffix: str) -> Path:

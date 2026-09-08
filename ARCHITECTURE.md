@@ -282,6 +282,10 @@ seed не скачивает внешний массив документов.
 - backend имеет пять unit-тестов для confidence/policy helper-ов, но не имеет
   API/integration/SSE/ingestion тестов; frontend test runner отсутствует. Golden RAG
   evaluator требует заранее загруженных indexed documents и не поднимает fixture сам.
+- удаление KB-документа serializes с ingestion через process lock и `SELECT FOR UPDATE`:
+  Qdrant document points и object-storage object очищаются до удаления SQL-записи.
+  Поставленная в очередь ingestion-задача считает отсутствующий документ терминально
+  удалённым и не помечает его как failed и не повторяет обработку.
 
 В этой версии `knowledge_card` prompt остаётся для явного legacy/admin backfill;
 обычный candidate создаётся без дополнительного LLM-вызова и редактируется
@@ -4067,7 +4071,7 @@ Frontend не решает concurrency самостоятельно.
 | GET    | `/api/admin/knowledge/documents/{id}`                  | document detail                   |
 | PATCH  | `/api/admin/knowledge/documents/{id}`                  | enable-disable only in current MVP |
 | POST   | `/api/admin/knowledge/documents/{id}/reindex`          | повторный ingestion               |
-| DELETE | `/api/admin/knowledge/documents/{id}`                  | удалить документ + index          |
+| DELETE | `/api/admin/knowledge/documents/{id}`                  | удалить SQL-запись, Qdrant index и storage object |
 
 ### 20.4 Admin — Prompts / Settings
 
@@ -4789,6 +4793,7 @@ Document
 Enabled
 Updated
 Index status
+Actions
 ```
 
 `index_status`:
@@ -4801,7 +4806,8 @@ failed
 ```
 
 Actions: enable/disable; failed documents additionally show `Reindex` directly in
-the status cell. Separate document detail/edit/delete UI is not part of this panel.
+the status cell. Каждая строка также содержит кнопку-корзину в последней колонке;
+она открывает destructive confirmation перед `DELETE`.
 
 Upload:
 
@@ -4820,6 +4826,20 @@ Upload:
 Отдельная страница document detail не нужна: список показывает только документ,
 enabled, compact updated date и index status; failed status содержит action для
 повторной индексации. Raw chunks и служебные metadata через UI не редактируются.
+
+Удаление permanent document выполняется в таком порядке:
+
+```text
+lock document row against ingestion
+→ delete all Qdrant points for document_id
+→ delete local/S3 object by storage_key
+→ reject linked approved KnowledgeCandidate records and clear resulting_document_id
+→ delete KnowledgeDocument (and cascading Chunk rows) from PostgreSQL
+```
+
+Если Qdrant или object storage недоступны, SQL-запись сохраняется для повторной
+попытки. Удалённый документ считается terminal state: background ingestion, успевший
+попасть в очередь до удаления, не восстанавливает его и не создаёт failed status.
 
 ---
 
@@ -5131,7 +5151,8 @@ candidate card edit/fill/approve/reject, hard delete after candidate review.
 ### Frontend F5 — admin KB
 
 Sections master switches, file-picker upload into the selected section, newest-first
-documents, indexing states and inline failed-document reindex.
+documents, indexing states, inline failed-document reindex and confirmed document
+deletion with index/storage cleanup.
 
 ### Frontend F6 — admin config
 
