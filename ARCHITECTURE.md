@@ -214,8 +214,9 @@ seed не скачивает внешний массив документов.
   `.env`; Compose передаёт backend явным allowlist-ом только поддерживаемые
   настройки и переопределяет service-specific database/Qdrant hostnames и режимы
   запуска.
-  Единый `.env.example` содержит общие runtime-настройки, dev host ports и Caddy
-  domain для production. `docker-compose.dev.yml` использует dev ports,
+  Единый `.env.example` содержит только GigaChat credentials. Остальные runtime
+  defaults и dev host ports заданы в Compose; `docker-compose.dev.yml` использует dev
+  defaults, а `docker-compose.yml` — production defaults и Caddy domain.
   а `docker-compose.yml` публикует только Caddy и жёстко задаёт production security
   defaults независимо от demo-значений шаблона. Auth/demo settings не являются
   environment variables: development использует внутренние defaults, production
@@ -5175,7 +5176,7 @@ System Prompts, AI Settings, Monitoring.
 │   │   └── models/
 ├── docker-compose.yml            # production
 ├── docker-compose.dev.yml        # hot reload development
-├── .env.example                  # common root runtime configuration template
+├── .env.example                  # GigaChat credentials template; other defaults live in Compose
 ├── ARCHITECTURE.md
 ├── README.md
 └── Makefile
@@ -5206,8 +5207,8 @@ frontend: актуальным UI является React SPA в `frontend/src`.
   `/health` остаётся liveness endpoint и не является dependency-aware readiness.
   FastAPI Swagger/ReDoc/OpenAPI включены в development и отключены в production.
 - S3-compatible storage provider присутствует в коде, но MinIO service не входит в
-  текущий Compose. S3 endpoint/credentials документированы в едином `.env.example`,
-  а demo и production по умолчанию используют named local volume.
+  текущий Compose. S3 endpoint/credentials можно передать через shell environment или
+  Compose override, а demo и production по умолчанию используют named local volume.
 - Python contract проекта — `>=3.11,<3.12`; Docker использует Python 3.11. Локальный
   ignored virtualenv должен соответствовать этому ограничению.
 

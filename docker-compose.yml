@@ -6,7 +6,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-molvest}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set for production}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-molvest-production}
       POSTGRES_DB: ${POSTGRES_DB:-molvest}
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -40,29 +40,29 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     environment:
-      ENVIRONMENT: production
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-molvest}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set for production}@postgres:5432/${POSTGRES_DB:-molvest}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-molvest}:${POSTGRES_PASSWORD:-molvest-production}@postgres:5432/${POSTGRES_DB:-molvest}
       GIGACHAT_CREDENTIALS: ${GIGACHAT_CREDENTIALS:-}
       GIGACHAT_SCOPE: ${GIGACHAT_SCOPE:-GIGACHAT_API_PERS}
       GIGACHAT_CA_BUNDLE_FILE: /etc/ssl/certs/ca-certificates.crt
-      CORS_ORIGINS: ""
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
       QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
       QDRANT_API_KEY: ${QDRANT_API_KEY:-}
-      EMBEDDING_DEVICE: cpu
-      EMBEDDING_MODEL_PATH: /opt/models/bge-m3
-      DOCLING_ARTIFACTS_PATH: /opt/models/docling
-      SSE_HEARTBEAT_SECONDS: "15"
-      DIALOG_IDLE_TIMEOUT_HOURS: "24"
-      DIALOG_IDLE_SCAN_SECONDS: "300"
+      EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-cpu}
+      EMBEDDING_MODEL_PATH: ${EMBEDDING_MODEL_PATH:-/opt/models/bge-m3}
+      DOCLING_ARTIFACTS_PATH: ${DOCLING_ARTIFACTS_PATH:-/opt/models/docling}
+      SSE_HEARTBEAT_SECONDS: ${SSE_HEARTBEAT_SECONDS:-15}
+      DIALOG_IDLE_TIMEOUT_HOURS: ${DIALOG_IDLE_TIMEOUT_HOURS:-24}
+      DIALOG_IDLE_SCAN_SECONDS: ${DIALOG_IDLE_SCAN_SECONDS:-300}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
-      LOCAL_STORAGE_PATH: /app/var/storage
+      LOCAL_STORAGE_PATH: ${LOCAL_STORAGE_PATH:-/app/var/storage}
       S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
       S3_REGION: ${S3_REGION:-us-east-1}
       S3_BUCKET: ${S3_BUCKET:-molvest}
       S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
       S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
       S3_USE_SSL: ${S3_USE_SSL:-true}
-      SEED_ON_STARTUP: "false"
+      SEED_ON_STARTUP: ${SEED_ON_STARTUP:-false}
     expose:
       - "8000"
     volumes:
@@ -88,13 +88,12 @@ services:
       dockerfile: Dockerfile.caddy
     restart: unless-stopped
     environment:
-      DOMAIN: ${DOMAIN:?DOMAIN must be set for production}
+      DOMAIN: ${DOMAIN:-localhost}
     ports:
       - "80:80"
       - "443:443"
       - "443:443/udp"
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:

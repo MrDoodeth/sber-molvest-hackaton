@@ -182,8 +182,8 @@ cp .env.example .env
 GIGACHAT_CREDENTIALS=<Authorization Key из sber.creds>
 ```
 
-Единый `.env.example` содержит комментарии ко всем переменным и используется как
-для dev, так и для production. Dev Compose сам переопределяет внутренние адреса
+`.env.example` содержит только GigaChat credentials. Все остальные настройки имеют
+defaults в соответствующем Compose-файле; dev Compose сам задаёт внутренние адреса
 сервисов и `CORS_ORIGINS` для localhost.
 
 ### 2. Запустить dev Compose
@@ -321,18 +321,17 @@ Production Compose предназначен для server deployment с един
 2. Разрешите в firewall входящие TCP `80`, TCP `443` и UDP `443`.
 3. Установите Docker Engine и Compose plugin.
 4. Клонируйте репозиторий на сервер.
-5. Подготовьте `.env` из единого шаблона:
+5. Подготовьте GigaChat credentials в `.env` из единого шаблона:
 
 ```bash
 cp .env.example .env
 ```
 
-Обязательно замените минимум:
+Production-only значения передайте через shell environment или Compose override:
 
-```dotenv
-DOMAIN=support.example.com
-POSTGRES_PASSWORD=<long-random-password>
-GIGACHAT_CREDENTIALS=<Authorization Key>
+```bash
+export DOMAIN=support.example.com
+export POSTGRES_PASSWORD='<long-random-password>'
 ```
 
 `DOMAIN` указывается без `https://` и без path. Не коммитьте `.env` и credentials.
@@ -361,7 +360,8 @@ docker compose -f docker-compose.yml up --build -d --wait
 
 ### Важное ограничение production authentication
 
-Production Compose не включает login/auth provisioning и задаёт `SEED_ON_STARTUP=false`.
+Production Compose не включает login/auth provisioning и использует
+`SEED_ON_STARTUP=false` по умолчанию.
 Это означает, что при чистом production volume не создаются demo users, системные
 sections, prompts и settings.
 В текущем коде единственный login — demo endpoint; production identity provider,
@@ -374,29 +374,47 @@ end-user authentication и первичное provisioning для реально
 
 ## Конфигурация
 
-Все переменные находятся в корневом `.env.example` без комментариев, чтобы файл можно
-было напрямую копировать в `.env`. Подробное описание настроек:
+`.env.example` содержит только GigaChat credentials. Остальные переменные можно
+переопределить через shell environment или Compose override-файл; если их не задавать,
+dev/prod Compose используют встроенные defaults. Подробное описание настроек:
 
 | Переменная | Допустимые значения и назначение |
 | --- | --- |
 | `DOMAIN` | DNS-имя production-сервера без `https://` и path, например `support.example.com`. Caddy использует его для TLS и маршрутизации. В dev не используется. |
-| `POSTGRES_PASSWORD` | В production обязательна сильная URL-safe строка. Не используйте `@`, `:`, `/`, `#`, `%`, потому что значение входит в PostgreSQL URL. В dev пустое значение заменяется локальным fallback `molvest`. |
+| `POSTGRES_PASSWORD` | URL-safe пароль без `@`, `:`, `/`, `#`, `%`. Dev fallback — `molvest`, production fallback — `molvest-production`; для реального сервера обязательно переопределите его сильным значением. |
+| `POSTGRES_USER` | Optional override роли PostgreSQL; default `molvest`. |
+| `POSTGRES_DB` | Optional override имени базы; default `molvest`. |
+| `POSTGRES_PORT` | Optional dev host-порт PostgreSQL; default `5432`, bind только на `127.0.0.1`. |
+| `BACKEND_PORT` | Optional dev host-порт FastAPI; default `8000`, bind только на `127.0.0.1`. |
+| `FRONTEND_PORT` | Optional dev host-порт Vite; default `5173`, bind только на `127.0.0.1`. |
+| `QDRANT_HTTP_PORT` | Optional dev host-порт Qdrant HTTP; default `6333`, bind только на `127.0.0.1`. |
+| `QDRANT_GRPC_PORT` | Optional dev host-порт Qdrant gRPC; default `6334`, bind только на `127.0.0.1`. |
+| `ENVIRONMENT` | Internal Compose mode: dev default `development`, prod default `production`. Не требуется задавать вручную. |
+| `CORS_ORIGINS` | Optional allowed origins; dev default `http://localhost:5173`, production default empty same-origin. `*` запрещён. |
+| `SSE_HEARTBEAT_SECONDS` | Optional positive number; default `15`. |
+| `DIALOG_IDLE_TIMEOUT_HOURS` | Optional positive number; default `24`. |
+| `DIALOG_IDLE_SCAN_SECONDS` | Optional positive number; default `300`. |
 | `STORAGE_BACKEND` | `local` или `s3`. `local` использует named Docker volume, `s3` — внешний S3-compatible storage. |
+| `LOCAL_STORAGE_PATH` | Optional container path for local storage; default `/app/var/storage`. |
 | `S3_ENDPOINT_URL` | URL S3 endpoint, например `https://s3.example.com`; для AWS можно оставить пустым. Используется только при `STORAGE_BACKEND=s3`. |
 | `S3_REGION` | Непустой регион S3, например `us-east-1`. |
 | `S3_BUCKET` | Непустое имя bucket, например `molvest`. |
 | `S3_ACCESS_KEY_ID` | S3 access key; обязателен при `STORAGE_BACKEND=s3`. |
 | `S3_SECRET_ACCESS_KEY` | S3 secret key; обязателен при `STORAGE_BACKEND=s3`. Не коммитьте это значение. |
 | `S3_USE_SSL` | `true` или `false`; использовать HTTPS для S3 endpoint. Для production рекомендуется `true`. |
+| `EMBEDDING_DEVICE` | Optional device; default `cpu`. `cuda` требует отдельного GPU image/runtime. |
+| `EMBEDDING_MODEL_PATH` | Optional BGE-M3 path; default `/opt/models/bge-m3`. |
+| `DOCLING_ARTIFACTS_PATH` | Optional Docling artifacts path; default `/opt/models/docling`. |
+| `QDRANT_URL` | Optional Qdrant URL; default `http://qdrant:6333`. |
 | `QDRANT_API_KEY` | Пусто для локального Qdrant либо API key защищённого внешнего Qdrant. |
 | `GIGACHAT_CREDENTIALS` | Authorization Key из `sber.creds`; пустое значение отключает GigaChat generation. Не коммитьте credentials. |
 | `GIGACHAT_SCOPE` | Scope, выданный для ключа, обычно `GIGACHAT_API_PERS`. |
 
 По умолчанию используется local object storage в Docker volume. MinIO в Compose не
-входит; для S3 нужно предоставить внешний endpoint и credentials. Production Compose
-переопределяет внутренние hostnames, порты, CORS, seed, embedding device и тайминги.
-PostgreSQL user/database (`molvest`), Qdrant URL и остальные внутренние service
-defaults находятся в Compose и не требуют `.env`.
+входит; для S3 нужно предоставить внешний endpoint и credentials. `SEED_ON_STARTUP`
+имеет default `true` в dev и `false` в production. PostgreSQL user/database (`molvest`),
+Qdrant URL и остальные внутренние service defaults находятся в Compose и не требуют
+`.env`.
 
 `ENVIRONMENT` не является пользовательской переменной: dev Compose передаёт
 `development`, production Compose передаёт `production`. Backend использует режим,
