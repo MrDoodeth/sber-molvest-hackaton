@@ -108,7 +108,7 @@ class DoclingHybridParser:
         max_tokens: int = 800,
         model_path: str | Path = "/opt/models/bge-m3",
         artifacts_path: str | Path | None = None,
-        workers: int = 2,
+        workers: int = 1,
     ) -> None:
         self._max_tokens = max_tokens
         self._model_path = Path(model_path)

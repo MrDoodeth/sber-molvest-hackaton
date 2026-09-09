@@ -61,7 +61,7 @@ class KnowledgeBaseService:
         embedding_provider: EmbeddingProvider,
         vector_store: VectorStore,
         tasks: TaskSupervisor,
-        index_concurrency: int = 2,
+        index_concurrency: int = 1,
     ) -> None:
         self._session_factory = session_factory
         self._storage = storage
