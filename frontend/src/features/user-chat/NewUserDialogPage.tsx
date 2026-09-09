@@ -72,6 +72,13 @@ export default function NewUserDialogPage() {
       setFailedAttempt(attachmentRejected ? undefined : attempt);
       setAttachmentError(attachmentRejected ? error.message : undefined);
       toast(getErrorMessage(error), "error");
+      const draft = createdDialogRef.current;
+      if (draft) {
+        void dialogsApi.discardDraft(draft.id).then(
+          () => { createdDialogRef.current = undefined; },
+          () => undefined,
+        );
+      }
       requestAnimationFrame(() => textareaRef.current?.focus());
     },
   });

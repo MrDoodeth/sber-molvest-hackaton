@@ -24,7 +24,13 @@ from app.contracts.schemas import (
 from app.core.constants import PROTECTED_SECTION_IDS
 from app.core.enums import CandidateStatus, DocumentSourceType, IndexStatus
 from app.core.errors import ConflictError, NotFoundError, ServiceUnavailableError
-from app.models import Chunk, KnowledgeCandidate, KnowledgeDocument, KnowledgeSection
+from app.models import (
+    Chunk,
+    KnowledgeCandidate,
+    KnowledgeDocument,
+    KnowledgeSection,
+    SystemSetting,
+)
 from app.providers.interfaces import (
     EmbeddingProvider,
     ObjectStorage,
@@ -34,6 +40,7 @@ from app.providers.interfaces import (
     VectorStore,
 )
 from app.services.attachments import ValidatedUpload, safe_file_name
+from app.services.rag_cache import RAG_CACHE_VERSION_KEY
 from app.services.tasks import TaskSupervisor
 
 VECTOR_NAMESPACE = uuid.UUID("f72eb19d-0ee1-4f39-924d-7bb9fb8adb76")
@@ -170,6 +177,7 @@ class KnowledgeBaseService:
                             {"is_enabled": section.is_enabled and document.is_enabled},
                         )
                         updated_payloads.append(document)
+                    await self._touch_rag_cache_version(session)
                 await session.commit()
             except IntegrityError as exc:
                 await session.rollback()
@@ -207,23 +215,25 @@ class KnowledgeBaseService:
         if section_id in PROTECTED_SECTION_IDS:
             raise ConflictError("Системный раздел базы знаний нельзя удалить")
         async with self._session_factory() as session:
-            section = await session.get(KnowledgeSection, section_id)
-            if section is None:
-                raise NotFoundError("Раздел базы знаний не найден")
-            document_ids = list(
-                await session.scalars(
-                    select(KnowledgeDocument.id).where(
-                        KnowledgeDocument.section_id == section_id
+            async with session.begin():
+                section = await session.get(
+                    KnowledgeSection, section_id, with_for_update=True
+                )
+                if section is None:
+                    raise NotFoundError("Раздел базы знаний не найден")
+                document_ids = list(
+                    await session.scalars(
+                        select(KnowledgeDocument.id).where(
+                            KnowledgeDocument.section_id == section_id
+                        )
                     )
                 )
-            )
-        for document_id in document_ids:
-            await self.delete_document(document_id)
-        async with self._session_factory() as session:
-            section = await session.get(KnowledgeSection, section_id)
-            if section is not None:
+                for document_id in document_ids:
+                    await self.delete_document(document_id)
+                # The section row remains locked until all document cleanup has
+                # completed, so concurrent uploads cannot orphan storage objects.
                 await session.delete(section)
-                await session.commit()
+                await self._touch_rag_cache_version(session)
 
     async def list_documents(
         self, section_id: uuid.UUID | None
@@ -296,7 +306,9 @@ class KnowledgeBaseService:
         digest = hashlib.sha256(upload.data).hexdigest()
         key = storage_key or f"knowledge/{digest}{upload.extension}"
         async with self._session_factory() as session:
-            section = await session.get(KnowledgeSection, section_id)
+            section = await session.get(
+                KnowledgeSection, section_id, with_for_update=True
+            )
             if section is None:
                 raise NotFoundError("Раздел базы знаний не найден")
             duplicate = await session.scalar(
@@ -377,6 +389,7 @@ class KnowledgeBaseService:
                         raise ServiceUnavailableError(
                             "Не удалось обновить документ в поисковом индексе"
                         ) from exc
+                await self._touch_rag_cache_version(session)
                 await session.commit()
                 return document_dto(document, section)
 
@@ -391,6 +404,7 @@ class KnowledgeBaseService:
                 if document_id not in self._scheduled_document_ids:
                     document.index_status = IndexStatus.PROCESSING
                     document.index_error = None
+                    await self._touch_rag_cache_version(session)
                     await session.commit()
         result = await self.get_document(document_id)
         self._schedule_ingestion(document_id)
@@ -525,6 +539,7 @@ class KnowledgeBaseService:
                         document.index_status = IndexStatus.INDEXED
                         document.index_error = None
                         document.indexed_at = indexed_at
+                        await self._touch_rag_cache_version(session)
                         await self._vector_store.set_document_payload(
                             document.id,
                             {
@@ -557,16 +572,20 @@ class KnowledgeBaseService:
     async def _delete_stale_vectors(
         self, vector_ids: list[uuid.UUID], document_id: uuid.UUID
     ) -> None:
+        if not vector_ids:
+            return
         for attempt in range(3):
             try:
                 await self._vector_store.delete_points(vector_ids)
                 return
-            except Exception:
+            except Exception as exc:
                 if attempt == 2:
                     logger.exception(
                         "Unable to remove stale vectors for document %s", document_id
                     )
-                    return
+                    raise ServiceUnavailableError(
+                        "Не удалось удалить устаревшие векторы документа"
+                    ) from exc
                 await asyncio.sleep(0.2 * (attempt + 1))
 
     async def delete_document(self, document_id: uuid.UUID) -> None:
@@ -609,6 +628,20 @@ class KnowledgeBaseService:
                         candidate.status = CandidateStatus.REJECTED
                         candidate.resulting_document_id = None
                     await session.delete(document)
+                    await self._touch_rag_cache_version(session)
+
+    @staticmethod
+    async def _touch_rag_cache_version(session: AsyncSession) -> None:
+        setting = await session.get(
+            SystemSetting, RAG_CACHE_VERSION_KEY, with_for_update=True
+        )
+        if setting is None:
+            session.add(SystemSetting(key=RAG_CACHE_VERSION_KEY, value=1))
+            return
+        try:
+            setting.value = int(setting.value) + 1
+        except (TypeError, ValueError):
+            setting.value = 1
 
     @staticmethod
     def _write_temporary(data: bytes, suffix: str) -> Path:

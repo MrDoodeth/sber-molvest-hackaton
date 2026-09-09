@@ -10,7 +10,7 @@ dev-down:
 	docker compose -f docker-compose.dev.yml down
 
 prod:
-	docker compose -f docker-compose.yml up --build -d
+	docker compose -f docker-compose.yml up --build -d --wait
 
 prod-down:
 	docker compose -f docker-compose.yml down

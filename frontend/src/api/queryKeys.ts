@@ -2,13 +2,19 @@ import type { AdminDialogFilters } from "./admin";
 import type { DocumentFilters } from "./knowledge";
 import type { MonitoringPeriod } from "./types";
 
+function demoRole(): "user" | "operator" | "admin" {
+  if (typeof window === "undefined") return "user";
+  const role = window.location.pathname.split("/")[1];
+  return role === "operator" || role === "admin" ? role : "user";
+}
+
 export const queryKeys = {
   user: {
     dialogs: () => ["user", "dialogs"] as const,
   },
   dialog: {
-    detail: (dialogId: string) => ["dialog", dialogId, "detail"] as const,
-    messages: (dialogId: string) => ["dialog", dialogId, "messages"] as const,
+    detail: (dialogId: string) => [demoRole(), "dialog", dialogId, "detail"] as const,
+    messages: (dialogId: string) => [demoRole(), "dialog", dialogId, "messages"] as const,
   },
   operator: {
     queues: () => ["operator", "queue"] as const,

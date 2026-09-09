@@ -36,6 +36,7 @@ roadmap.
 ### Пользователь
 
 - Создание и ведение нескольких обращений.
+- Неотправленный пустой черновик удаляется, если первая отправка завершилась ошибкой.
 - Ответы AI по истории диалога и индексированной базе знаний.
 - Streaming ответа через SSE.
 - Прикрепление до 10 файлов в сообщении, включая максимум один скриншот.
@@ -56,6 +57,7 @@ roadmap.
 ### Администратор
 
 - Журнал закрытых обращений с фильтрами `helpful`, `ai_error`, `unrated`.
+- Фильтры и страница журнала сохраняются при переходе в карточку обращения и назад.
 - Просмотр диалога, confidence, модели, prompt snapshot и moderation state.
 - Модерация `KnowledgeCandidate`: редактирование, генерация карточки, approve/reject.
 - Разделы базы знаний: создание, переименование, включение/выключение, удаление.
@@ -228,7 +230,7 @@ Qdrant `6333/6334`, backend `8000` и frontend `5173`. Их можно изме�
 
 ## Как пользоваться MVP
 
-1. Войдите demo-пользователем и создайте обращение.
+1. Выберите demo-контур пользователя и создайте обращение.
 2. Отправьте вопрос и при необходимости приложите screenshot или документ.
 3. Backend сохранит сообщение, соберёт контекст, выполнит hybrid retrieval,
    confidence assessment и начнёт streaming ответа.
@@ -288,6 +290,11 @@ upload
 Qdrant, object-storage object, SQL-запись и связанные chunks; approved candidates,
 ссылающиеся на документ, переводятся в `rejected` и отвязываются. Поставленная до
 удаления ingestion-задача не восстанавливает документ.
+
+Удаление раздела удерживает SQL-lock секции до завершения очистки всех документов,
+поэтому параллельная загрузка не может оставить orphaned storage object или vectors.
+Reindex завершается `failed`, если после повторных попыток не удалось удалить
+устаревшие Qdrant vectors.
 
 ### Runtime attachments
 
@@ -375,14 +382,16 @@ dev/prod Compose используют встроенные defaults. Подро�
 | Переменная | Допустимые значения и назначение |
 | --- | --- |
 | `DOMAIN` | DNS-имя production-сервера без `https://` и path, например `support.example.com`. Caddy использует его для TLS и маршрутизации. В dev не используется. |
-| `POSTGRES_PASSWORD` | URL-safe пароль без `@`, `:`, `/`, `#`, `%`. Dev fallback — `molvest`, production fallback — `molvest-production`; для реального сервера обязательно переопределите его сильным значением. |
+| `POSTGRES_PASSWORD` | URL-safe пароль без `@`, `:`, `/`, `#`, `%`. Dev fallback — `molvest123`, production fallback — `molvest-production-123`; для реального сервера обязательно переопределите его сильным значением. |
 | `POSTGRES_USER` | Optional override роли PostgreSQL; default `molvest`. |
-| `POSTGRES_DB` | Optional override имени базы; default `molvest`. |
+| `POSTGRES_DB` | Optional override имени базы; default `molvestdb`. |
 | `POSTGRES_PORT` | Optional dev host-порт PostgreSQL; default `5432`, bind только на `127.0.0.1`. |
 | `BACKEND_PORT` | Optional dev host-порт FastAPI; default `8000`, bind только на `127.0.0.1`. |
 | `FRONTEND_PORT` | Optional dev host-порт Vite; default `5173`, bind только на `127.0.0.1`. |
 | `QDRANT_HTTP_PORT` | Optional dev host-порт Qdrant HTTP; default `6333`, bind только на `127.0.0.1`. |
 | `QDRANT_GRPC_PORT` | Optional dev host-порт Qdrant gRPC; default `6334`, bind только на `127.0.0.1`. |
+| `REDIS_URL` | URL Redis для shared RAG cache; Compose default `redis://redis:6379/0`. При недоступности Redis backend выполняет поиск напрямую в Qdrant. |
+| `RAG_CACHE_TTL_SECONDS` | TTL cached Qdrant search hits; default `900`. Версия кэша фиксируется в PostgreSQL и меняется вместе с KB-изменениями. |
 | `ENVIRONMENT` | Internal Compose mode: dev default `development`, prod default `production`. Не требуется задавать вручную. |
 | `CORS_ORIGINS` | Optional allowed origins; dev default `http://localhost:5173`, production default empty same-origin. `*` запрещён. |
 | `SSE_HEARTBEAT_SECONDS` | Optional positive number; default `15`. |
@@ -444,8 +453,11 @@ npm --prefix frontend run build
   Изменения модели на persistent database могут потребовать ручной миграции или
   пересоздания volume.
 - Background tasks, ingestion recovery, GenerationGate и EventBroker работают
-  внутри процесса. Нет Redis/Celery, durable queue, cross-worker SSE replay или
+  внутри процесса. Нет Celery, durable queue, cross-worker SSE replay или
   внешнего pub/sub; полноценные replicas не поддерживаются.
+- Redis ускоряет повторные RAG-запросы, сохраняя только Qdrant search hits. Chunks и
+  metadata всегда загружаются из PostgreSQL, а version кэша повышается в той же
+  транзакции, что и изменения KB; после commit старые ключи не используются.
 - SSE использует native EventSource, heartbeat и polling fallback, но не реализует
   replay по `Last-Event-ID`.
 - Monitoring отдаёт aggregate metrics, average latency и failed request count; p50/p95,

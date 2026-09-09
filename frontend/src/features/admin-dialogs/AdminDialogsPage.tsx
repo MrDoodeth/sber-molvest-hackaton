@@ -113,7 +113,7 @@ export default function AdminDialogsPage() {
                          <td className="px-3 py-4"><Badge className="max-w-full whitespace-normal break-words text-center" tone={dialog.resolvedBy === "ai" ? "giga" : "info"}>{dialog.resolvedBy === "ai" ? <><Bot className="mr-1 size-3 shrink-0" /> AI</> : <><UserRound className="mr-1 size-3 shrink-0" /> Оператор</>}</Badge></td>
                          <td className="break-words px-3 py-4 font-bold text-stone-700">{dialog.lastConfidence == null ? "—" : formatPercent(dialog.lastConfidence)}</td>
                          <td className="px-3 py-4 text-center"><Badge className="w-full justify-center whitespace-normal break-words text-center" tone={moderationTone(dialog.moderationStatus)}>{moderationLabel(dialog.moderationStatus)}</Badge></td>
-                         <td className="px-3 py-4 text-right"><Link to={`/admin/dialogs/${dialog.id}`} className="text-sm font-bold text-molvest-700 hover:text-molvest-900">Открыть</Link></td>
+                          <td className="px-3 py-4 text-right"><Link to={{ pathname: `/admin/dialogs/${dialog.id}`, search: searchParams.toString() }} className="text-sm font-bold text-molvest-700 hover:text-molvest-900">Открыть</Link></td>
                       </tr>
                     ))}
                   </tbody>
@@ -121,7 +121,7 @@ export default function AdminDialogsPage() {
               </div>
               <div className="grid divide-y divide-stone-100 md:hidden">
                 {dialogs.data.items.map((dialog) => (
-                  <Link key={dialog.id} to={`/admin/dialogs/${dialog.id}`} className="p-4 transition hover:bg-molvest-50">
+                  <Link key={dialog.id} to={{ pathname: `/admin/dialogs/${dialog.id}`, search: searchParams.toString() }} className="p-4 transition hover:bg-molvest-50">
                     <div className="flex items-start justify-between gap-3"><p className="line-clamp-2 text-sm font-bold text-stone-900">{dialog.title || dialog.lastMessagePreview || "Завершённое обращение"}</p>{dialog.hasAttachment && <ImageIcon className="size-4 shrink-0 text-indigo-500" />}</div>
                      <div className="mt-3 flex flex-wrap items-center gap-2"><Badge tone={dialog.resolvedBy === "ai" ? "giga" : "info"}>{dialog.resolvedBy === "ai" ? "AI" : "Оператор"}</Badge><Badge tone={moderationTone(dialog.moderationStatus)}>{moderationLabel(dialog.moderationStatus)}</Badge><span className="ml-auto text-xs text-stone-400">{formatDateTime(dialog.closedAt)}</span></div>
                   </Link>

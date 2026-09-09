@@ -64,6 +64,15 @@ async def create_dialog(
     return await container.dialogs.create_dialog(user)
 
 
+@router.delete("/dialogs/{dialog_id}/draft", status_code=204, response_model=None)
+async def discard_empty_dialog(
+    dialog_id: uuid.UUID,
+    user: User = Depends(get_request_actor),
+    container: ApplicationContainer = Depends(get_container),
+) -> None:
+    await container.dialogs.discard_empty_dialog(user, dialog_id)
+
+
 @router.get(
     "/dialogs/{dialog_id}",
     response_model=DialogDetail,

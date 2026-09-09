@@ -29,6 +29,7 @@ from app.services.generation_context import GenerationContextService
 from app.services.kb import KnowledgeBaseService
 from app.services.moderation import ModerationService
 from app.services.rag import RAGService
+from app.services.rag_cache import RAGCache
 from app.services.settings import PromptService, SettingsService
 from app.services.tasks import TaskSupervisor
 
@@ -49,6 +50,7 @@ class ApplicationContainer:
     prompt_service: PromptService
     attachment_service: AttachmentService
     rag_service: RAGService
+    rag_cache: RAGCache
     knowledge_base: KnowledgeBaseService
     dialogs: DialogService
     moderation: ModerationService
@@ -102,7 +104,8 @@ def build_container(
     settings_service = SettingsService()
     prompt_service = PromptService()
     attachment_service = AttachmentService(actual_storage, actual_llm, settings)
-    rag_service = RAGService(actual_embedding, actual_vector)
+    rag_cache = RAGCache(settings.redis_url, settings.rag_cache_ttl_seconds)
+    rag_service = RAGService(actual_embedding, actual_vector, rag_cache)
     context_builder = ContextBuilder()
     generation_context = GenerationContextService(
         session_factory=session_factory,
@@ -157,6 +160,7 @@ def build_container(
         prompt_service=prompt_service,
         attachment_service=attachment_service,
         rag_service=rag_service,
+        rag_cache=rag_cache,
         knowledge_base=knowledge_base,
         dialogs=dialogs,
         moderation=moderation,

@@ -63,6 +63,8 @@ class Settings(BaseSettings):
 
     qdrant_url: str = "http://localhost:6333"
     qdrant_api_key: SecretStr | None = None
+    redis_url: str | None = None
+    rag_cache_ttl_seconds: int = Field(default=900, ge=1)
     embedding_device: str = "cpu"
     embedding_model_path: Path = Path("/opt/models/bge-m3")
     docling_artifacts_path: Path | None = None

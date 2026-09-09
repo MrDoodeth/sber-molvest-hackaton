@@ -49,6 +49,7 @@ def create_app(
             yield
         finally:
             await actual_container.tasks.shutdown()
+            await actual_container.rag_cache.close()
             await actual_container.engine.dispose()
 
     app = FastAPI(

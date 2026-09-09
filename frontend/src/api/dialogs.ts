@@ -18,6 +18,8 @@ export const dialogsApi = {
   list: (signal?: AbortSignal) => apiRequest<DialogSummary[]>("/api/dialogs", { signal }),
   create: (signal?: AbortSignal) =>
     apiRequest<DialogDetailDto>("/api/dialogs", { method: "POST", signal }),
+  discardDraft: (dialogId: string, signal?: AbortSignal) =>
+    apiRequest<void>(`/api/dialogs/${dialogId}/draft`, { method: "DELETE", signal }),
   detail: (dialogId: string, signal?: AbortSignal) =>
     apiRequest<DialogDetailDto>(`/api/dialogs/${dialogId}`, { signal }),
   messages: (dialogId: string, cursor?: string, signal?: AbortSignal) =>

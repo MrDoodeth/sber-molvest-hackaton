@@ -19,6 +19,7 @@ dependencies = [
   "pydantic-settings==2.10.1",
   "python-multipart==0.0.20",
   "qdrant-client==1.15.1",
+  "redis==5.2.1",
   "SQLAlchemy==2.0.43",
   "torch==2.8.0",
   "torchvision==0.23.0",

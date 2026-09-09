@@ -236,6 +236,24 @@ class DialogService:
                 raise NotFoundError("Пользователь не найден")
             return dialog_detail(dialog, persisted_user)
 
+    async def discard_empty_dialog(self, user: User, dialog_id: uuid.UUID) -> None:
+        if user.role != UserRole.USER:
+            raise ForbiddenError("Endpoint доступен только пользователю")
+        async with self.dialog_lock(dialog_id):
+            async with self._session_factory() as session:
+                dialog = await session.get(Dialog, dialog_id, with_for_update=True)
+                if dialog is None:
+                    raise NotFoundError("Диалог не найден")
+                if dialog.user_id != user.id:
+                    raise ForbiddenError()
+                has_messages = await session.scalar(
+                    select(Message.id).where(Message.dialog_id == dialog_id).limit(1)
+                )
+                if has_messages is not None:
+                    raise ConflictError("Черновик уже содержит сообщение")
+                await session.delete(dialog)
+                await session.commit()
+
     async def list_user_dialogs(self, user: User) -> list[DialogSummary]:
         if user.role != UserRole.USER:
             raise ForbiddenError("Endpoint доступен только пользователю")

@@ -252,6 +252,11 @@ seed не скачивает внешний массив документов.
   retrieval-настройки и суммарный usage confidence/answer calls; RAG source snapshot
   сохраняется во внутреннем поле `Message.sources`, но не отдаётся через текущий
   `MessageDto`;
+- React Query keys для detail/messages включают demo actor, поэтому данные одного
+  диалога не переиспользуются между user/operator/admin контурами.
+- Если отправка первого сообщения не удалась, frontend удаляет созданный пустой
+  Dialog через draft endpoint; при уже сохранённом сообщении cleanup отклоняется и
+  retry продолжает использовать тот же Dialog.
 - admin settings позволяют одной atomic mutation менять `active_model`, оба context
   ratios, `gigachat_max_output_tokens`, `rag_top_k` и
   `operator_escalation_threshold`; backend валидирует модель, диапазоны и общий
@@ -289,6 +294,12 @@ seed не скачивает внешний массив документов.
   Qdrant document points и object-storage object очищаются до удаления SQL-записи.
   Поставленная в очередь ingestion-задача считает отсутствующий документ терминально
   удалённым и не помечает его как failed и не повторяет обработку.
+- удаление KB-раздела удерживает `SELECT FOR UPDATE` на section до удаления всех
+  документов, а создание документа берёт тот же lock до записи в storage. Reindex
+  становится `failed`, если stale Qdrant vectors не удалось очистить после retry.
+- Redis хранит versioned Qdrant search hits. Версия лежит в `SystemSetting` и
+  повышается в той же SQL-транзакции, что и KB-изменение; evidence всегда повторно
+  загружается из PostgreSQL, поэтому Redis не становится источником истины.
 
 В этой версии `knowledge_card` prompt остаётся для явного legacy/admin backfill;
 обычный candidate создаётся без дополнительного LLM-вызова и редактируется
@@ -327,6 +338,7 @@ flowchart TB
     subgraph DATA["Хранилища"]
         PG[("PostgreSQL")]
         VDB[("Qdrant")]
+        REDIS[("Redis RAG cache")]
         S3[("Local / optional S3-compatible storage")]
     end
 
@@ -347,6 +359,7 @@ flowchart TB
     RAG --> EMB
     EMB --> VDB
     RAG --> VDB
+    RAG --> REDIS
     RAG --> GIGA
 
     KB --> EMB
@@ -385,6 +398,7 @@ flowchart TB
 | Embeddings          | **Локально `BAAI/bge-m3`** через `FlagEmbedding` / `sentence-transformers`  | Бесплатно локально; RU/multilingual; dense+sparse representations для hybrid retrieval                                                  |
 | Оркестрация         | LangChain Core / LCEL + `langchain-gigachat`                                | Простые контролируемые Runnable-вызовы без agent executor; прозрачный контроль latency и числа GigaChat-вызовов         |
 | Векторная БД        | Qdrant                                                                      | Hybrid search, payload-фильтры, Docker-friendly                                                                                         |
+| RAG cache           | Redis                                                                       | Versioned Qdrant search hits; PostgreSQL подтверждает chunks и metadata на каждом retrieval                                            |
 | РСУБД               | PostgreSQL                                                                  | Диалоги, тикеты, метаданные БЗ, логи, метрики                                                                                           |
 | Фоновые задачи      | FastAPI `BackgroundTasks` / простой in-process worker                       | Для MVP достаточно для переиндексации небольшого объёма документов без отдельной очереди                                                |
 | Объектное хранилище | LocalObjectStorage по умолчанию; опционально S3 через `aioboto3`            | Скриншоты, исходные документы; MinIO не входит в текущий Compose                                                                        | Быстро извлекает текст/коды ошибки локально перед retrieval; GigaChat всё равно получает исходное изображение и выполняет смысловой Vision-анализ |
@@ -426,7 +440,7 @@ _Открытый вопрос для приёмки: считать SLA «<5 с
 
 **Безопасность и данные:** self-hosted Qdrant/Postgres и local storage по умолчанию (либо внешний S3 через provider); authentication в MVP отсутствует. User/operator/admin контуры используют незащищённый `X-Molvest-Role` demo actor context и не являются публичным security boundary. GigaChat credentials находятся только на backend. В Docker/Linux устанавливаем доверенный сертификат НУЦ Минцифры или задаём `ca_bundle_file`; SSL verification не отключаем. Runtime-файлы удаляются из GigaChat File Storage при close/hard delete, а не обязательно сразу после каждого generation-call. PII не пишем в технические логи без необходимости.
 
-**Масштабирование:** на MVP отдельная очередь задач не нужна. Индексация запускается через FastAPI `BackgroundTasks` / простой in-process worker, а документы в `uploaded/processing` восстанавливаются при старте. Один пользовательский AI-turn глобально защищён PostgreSQL advisory admission lock, а локальный `TurnCoordinator` добавляет process-local guard. `GenerationGate` сериализует provider work только внутри одного процесса; `EventBroker` и SSE также работают только внутри процесса. Распределённая очередь для всех generation/file/vision вызовов и внешний broker для SSE при нескольких replicas остаются Roadmap.
+**Масштабирование:** Redis разделяет только RAG cache между процессами; кэш versioned и согласован с PostgreSQL. Индексация, `GenerationGate`, `TurnCoordinator` и `EventBroker` остаются process-local, поэтому Redis не делает SSE или фоновые задачи multi-worker-safe. Распределённая очередь для generation/file/vision вызовов и внешний broker для SSE при нескольких replicas остаются Roadmap.
 
 ## 7. Метрики эффективности
 
@@ -461,7 +475,7 @@ answer не запускался, сохраняется usage только conf
 | Минимальные данные     | Документы загружаются через KB API; автоматический seed реальной документации 1С не выполняется                                  | Полный массив источников заказчика и автоматическая стартовая загрузка       |
 | Админ-настройки        | **Модель, context ratios, max output tokens, `rag_top_k` и `operator_escalation_threshold`** редактируются одной atomic mutation | Продвинутые политики эскалации, RBAC, SLA                                    |
 | Метрики                | % успешных ответов, среднее время ответа, число эскалаций                                                                        | Prometheus/Grafana, алерты, расширенная аналитика                            |
-| Очереди/фоновые задачи | FastAPI `BackgroundTasks` / простой worker                                                                                       | Redis + Celery/RQ при росте объёма индексации и параллельных задач           |
+| Очереди/фоновые задачи | FastAPI `BackgroundTasks` / простой worker                                                                                       | Redis Streams + Celery/RQ при росте объёма индексации и параллельных задач   |
 | Контекст моделей       | GigaChat/BGE-M3 ratios, max output tokens и `rag_top_k` задаются через admin settings; история сообщений обрезается первой       | Более сложная memory/summarization логика только при измеримой необходимости |
 
 ### Проверка ожидаемого результата по ТЗ
@@ -3971,6 +3985,7 @@ OpenAPI-схема FastAPI и Swagger UI `/docs` — источник истин
 | Header | `X-Molvest-Role`                                    | demo actor: `user`, `operator` или `admin`                    |
 | GET    | `/api/dialogs`                                      | dialogs текущего user                                         |
 | POST   | `/api/dialogs`                                      | создать новый Dialog                                          |
+| DELETE | `/api/dialogs/{dialogId}/draft`                     | удалить пустой user draft после неуспешной первой отправки    |
 | GET    | `/api/dialogs/{dialogId}`                           | metadata Dialog, включая `is_processing` и `processing_error` |
 | GET    | `/api/dialogs/{dialogId}/messages?cursor=&limit=50` | история сообщений                                             |
 | POST   | `/api/dialogs/{dialogId}/messages`                  | отправить text + optional attachment                          |

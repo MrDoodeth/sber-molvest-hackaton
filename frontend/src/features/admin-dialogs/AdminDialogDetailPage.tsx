@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Bot, BrainCircuit, Gauge, Paperclip, Sparkles, Trash2, UserRound } from "lucide-react";
 import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { adminApi } from "../../api/admin";
 import { queryKeys } from "../../api/queryKeys";
 import { MessageList } from "../../shared/chat";
@@ -11,10 +11,12 @@ import CandidateModeration from "./CandidateModeration";
 
 export default function AdminDialogDetailPage() {
   const { dialogId = "" } = useParams();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const toast = useToast();
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const journalPath = `/admin/dialogs?${searchParams.toString() || "feedback=helpful"}`;
   const detail = useQuery({
     queryKey: queryKeys.admin.dialog(dialogId),
     queryFn: ({ signal }) => adminApi.dialog(dialogId, signal),
@@ -27,7 +29,7 @@ export default function AdminDialogDetailPage() {
     mutationFn: () => adminApi.deleteDialog(dialogId),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.admin.allDialogs() });
-      navigate(`/admin/dialogs?feedback=${detail.data?.feedback?.verdict ?? "unrated"}`, { replace: true });
+      navigate(journalPath, { replace: true });
       toast("Чат удалён", "success");
     },
     onError: (error) => toast(error.message, "error"),
@@ -42,7 +44,7 @@ export default function AdminDialogDetailPage() {
   return (
     <div className="p-4 sm:p-6 lg:p-8">
       <div className="mx-auto max-w-7xl">
-        <Link to={`/admin/dialogs?feedback=${feedback?.verdict ?? "unrated"}`} className="inline-flex items-center gap-2 text-sm font-bold text-molvest-700 hover:text-molvest-950"><ArrowLeft className="size-4" /> К журналу</Link>
+        <Link to={journalPath} className="inline-flex items-center gap-2 text-sm font-bold text-molvest-700 hover:text-molvest-950"><ArrowLeft className="size-4" /> К журналу</Link>
         <header className="mt-5 flex flex-wrap items-start justify-between gap-4">
           <div>
             <div className="flex flex-wrap items-center gap-2">

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import uuid
 from dataclasses import dataclass
 from typing import Literal
@@ -10,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.contracts.schemas import SourceRef
 from app.core.enums import IndexStatus
-from app.models import Chunk, KnowledgeDocument, KnowledgeSection
+from app.models import Chunk, KnowledgeDocument, KnowledgeSection, SystemSetting
 from app.providers.interfaces import (
     EmbeddingProvider,
     Evidence,
@@ -18,6 +20,7 @@ from app.providers.interfaces import (
     VectorHit,
     VectorStore,
 )
+from app.services.rag_cache import RAG_CACHE_VERSION_KEY, RAGCache
 
 RAGStatus = Literal["ready", "empty", "no_match"]
 
@@ -30,10 +33,14 @@ class RetrievalResult:
 
 class RAGService:
     def __init__(
-        self, embedding_provider: EmbeddingProvider, vector_store: VectorStore
+        self,
+        embedding_provider: EmbeddingProvider,
+        vector_store: VectorStore,
+        cache: RAGCache,
     ) -> None:
         self._embedding_provider = embedding_provider
         self._vector_store = vector_store
+        self._cache = cache
 
     async def embed_query(self, search_context: str) -> HybridEmbedding:
         return await self._embedding_provider.embed_query(search_context)
@@ -55,19 +62,35 @@ class RAGService:
         if not queries or top_k < 1:
             return RetrievalResult([], await self._empty_status(session))
 
+        normalized_weights = weights or [1.0] * len(queries)
+        if len(normalized_weights) != len(queries):
+            raise ValueError("RAG query weights must match query count")
+        cache_version = await self._cache_version(session)
         candidate_limit = max(top_k * 4, 20)
         evidence: list[Evidence] = []
         for _ in range(3):
-            hit_lists = await asyncio.gather(
-                *(
-                    self._vector_store.search(query, candidate_limit)
-                    for query in queries
-                )
+            cache_key = self._cache_key(
+                queries,
+                normalized_weights,
+                top_k,
+                candidate_limit,
+                cache_version,
             )
-            hits = self._fuse_hits(hit_lists, weights)
+            hits = await self._cache.get(cache_key)
+            hit_lists: list[list[VectorHit]] | None = None
+            if hits is None:
+                hit_lists = await asyncio.gather(
+                    *(
+                        self._vector_store.search(query, candidate_limit)
+                        for query in queries
+                    )
+                )
+                hits = self._fuse_hits(hit_lists, normalized_weights)
+                await self._cache.set(cache_key, hits)
             evidence = await self._load_evidence(session, hits, top_k)
-            if len(evidence) >= top_k or not any(
-                len(hit_list) >= candidate_limit for hit_list in hit_lists
+            if len(evidence) >= top_k or (
+                hit_lists is not None
+                and not any(len(hit_list) >= candidate_limit for hit_list in hit_lists)
             ):
                 break
             candidate_limit *= 2
@@ -75,6 +98,37 @@ class RAGService:
         if not evidence:
             return RetrievalResult([], await self._empty_status(session))
         return RetrievalResult(evidence, "ready")
+
+    @staticmethod
+    async def _cache_version(session: AsyncSession) -> int:
+        row = await session.get(SystemSetting, RAG_CACHE_VERSION_KEY)
+        try:
+            return int(row.value) if row is not None else 0
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def _cache_key(
+        queries: list[HybridEmbedding],
+        weights: list[float],
+        top_k: int,
+        candidate_limit: int,
+        version: int,
+    ) -> str:
+        payload = {
+            "queries": [
+                [query.dense, query.sparse_indices, query.sparse_values]
+                for query in queries
+            ],
+            "weights": weights,
+            "top_k": top_k,
+            "candidate_limit": candidate_limit,
+            "version": version,
+        }
+        digest = hashlib.sha256(
+            json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        return f"rag:search:{version}:{digest}"
 
     @staticmethod
     async def _load_evidence(
