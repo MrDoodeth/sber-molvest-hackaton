@@ -1,6 +1,13 @@
-import type { AttachmentDto, DialogDetailDto, DialogSummary, MessageDto } from "../api/types";
+import type {
+  AttachmentDto,
+  DialogDetailDto,
+  DialogSummary,
+  MessageDto,
+} from "../api/types";
 
-export function cn(...classes: Array<string | false | null | undefined>): string {
+export function cn(
+  ...classes: Array<string | false | null | undefined>
+): string {
   return classes.filter(Boolean).join(" ");
 }
 
@@ -45,19 +52,29 @@ export function formatBytes(bytes?: number | null): string {
 export function truncateTitle(value: string, maxLength = 50): string {
   const characters = Array.from(value);
   if (characters.length <= maxLength) return value;
-  return `${characters.slice(0, maxLength - 1).join("").trimEnd()}…`;
+  return `${characters
+    .slice(0, maxLength - 1)
+    .join("")
+    .trimEnd()}…`;
 }
 
-export function dialogStatusLabel(dialog: Pick<DialogSummary, "status" | "mode">): string {
+export function dialogStatusLabel(
+  dialog: Pick<DialogSummary, "status" | "mode">,
+): string {
   if (dialog.status === "closed") return "Закрыт";
-  return dialog.mode === "operator_support" ? "Специалист подключён" : "AI отвечает";
+  return dialog.mode === "operator_support" ? "Оператор" : "AI";
 }
 
-export function mergePersistedMessages(...groups: MessageDto[][]): MessageDto[] {
+export function mergePersistedMessages(
+  ...groups: MessageDto[][]
+): MessageDto[] {
   const byId = new Map<string, MessageDto>();
   groups.flat().forEach((message) => {
     const current = byId.get(message.id);
-    if (!current || Date.parse(message.createdAt) >= Date.parse(current.createdAt)) {
+    if (
+      !current ||
+      Date.parse(message.createdAt) >= Date.parse(current.createdAt)
+    ) {
       byId.set(message.id, message);
     }
   });
@@ -80,18 +97,26 @@ export function createClientId(): string {
       const bytes = crypto.getRandomValues(new Uint8Array(16));
       bytes[6] = (bytes[6] & 0x0f) | 0x40;
       bytes[8] = (bytes[8] & 0x3f) | 0x80;
-      const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+      const hex = Array.from(bytes, (byte) =>
+        byte.toString(16).padStart(2, "0"),
+      ).join("");
       return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
     }
   }
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (character) => {
-    const random = Math.floor(Math.random() * 16);
-    const value = character === "x" ? random : (random & 0x3) | 0x8;
-    return value.toString(16);
-  });
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(
+    /[xy]/g,
+    (character) => {
+      const random = Math.floor(Math.random() * 16);
+      const value = character === "x" ? random : (random & 0x3) | 0x8;
+      return value.toString(16);
+    },
+  );
 }
 
-export function createSendAttempt(text: string, attachments: File[] = []): SendAttempt {
+export function createSendAttempt(
+  text: string,
+  attachments: File[] = [],
+): SendAttempt {
   return {
     clientMessageId: createClientId(),
     text,
@@ -106,24 +131,34 @@ export function retryOrCreateSendAttempt(
 ): SendAttempt {
   const normalized = text.trim();
   if (
-    failedAttempt?.text === normalized
-    && failedAttempt.attachments.length === attachments.length
-    && failedAttempt.attachments.every((file, index) => file === attachments[index])
+    failedAttempt?.text === normalized &&
+    failedAttempt.attachments.length === attachments.length &&
+    failedAttempt.attachments.every(
+      (file, index) => file === attachments[index],
+    )
   ) {
     return failedAttempt;
   }
   return createSendAttempt(normalized, attachments);
 }
 
-export function canShowFeedback(dialog: Pick<DialogDetailDto, "status" | "feedback">): boolean {
+export function canShowFeedback(
+  dialog: Pick<DialogDetailDto, "status" | "feedback">,
+): boolean {
   return dialog.status === "closed" && !dialog.feedback;
 }
 
-export function safeAttachmentUrl(attachment: Pick<AttachmentDto, "url">): string | undefined {
+export function safeAttachmentUrl(
+  attachment: Pick<AttachmentDto, "url">,
+): string | undefined {
   if (!attachment.url) return undefined;
   try {
     const url = new URL(attachment.url, window.location.origin);
-    if (url.origin !== window.location.origin || !url.pathname.startsWith("/api/")) return undefined;
+    if (
+      url.origin !== window.location.origin ||
+      !url.pathname.startsWith("/api/")
+    )
+      return undefined;
     return withDemoRole(`${url.pathname}${url.search}`);
   } catch {
     return undefined;
@@ -141,5 +176,7 @@ export function withDemoRole(path: string): string {
 }
 
 export function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "Произошла непредвиденная ошибка";
+  return error instanceof Error
+    ? error.message
+    : "Произошла непредвиденная ошибка";
 }

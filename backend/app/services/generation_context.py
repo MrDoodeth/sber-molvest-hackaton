@@ -100,11 +100,12 @@ class GenerationContextService:
         ]
         return await self._build_request(
             dialog_id=dialog_id,
-            current_text=(
-                "Подготовь ответ клиенту на последнее актуальное сообщение, "
-                "используя полный диалог выше."
+            current_text=message.text,
+            # The newest user turn is the request itself, not just an item in the
+            # history. This keeps retrieval and generation focused on its content.
+            history=self._history(
+                [item for item in messages if item.id != message.id], attachments
             ),
-            history=self._history(messages, attachments),
             attachments=all_attachments,
             system_prompt=system_prompt,
             settings=settings,
