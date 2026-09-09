@@ -119,7 +119,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "wget --header='Host: $${DOMAIN}' --spider --quiet http://localhost/",
+          "wget --no-check-certificate --header='Host: $${DOMAIN}' --spider --quiet https://localhost/",
         ]
       interval: 10s
       timeout: 3s
