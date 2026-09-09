@@ -1,9 +1,11 @@
+# syntax=docker/dockerfile:1.7
+
 FROM python:3.11-slim-bookworm AS bge-model
 
 ARG BGE_M3_REVISION=5617a9f61b028005a4858fdac845db406aefb181
 
-RUN pip install --no-cache-dir --upgrade pip==25.2 \
-    && pip install --no-cache-dir huggingface-hub==0.34.4 \
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install huggingface-hub==0.34.4 \
     && mkdir -p /opt/models/bge-m3 \
     && python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='BAAI/bge-m3', revision='${BGE_M3_REVISION}', local_dir='/opt/models/bge-m3', allow_patterns=['config.json', 'config_sentence_transformers.json', 'modules.json', 'sentence_bert_config.json', 'special_tokens_map.json', 'tokenizer.json', 'tokenizer_config.json', 'sentencepiece.bpe.model', 'pytorch_model.bin', 'sparse_linear.pt', 'colbert_linear.pt', '1_Pooling/config.json'])"
 
@@ -11,7 +13,7 @@ FROM python:3.11-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
     EMBEDDING_MODEL_PATH=/opt/models/bge-m3 \
     DOCLING_ARTIFACTS_PATH=/opt/models/docling \
     HF_HUB_OFFLINE=1 \
@@ -30,13 +32,14 @@ RUN update-ca-certificates
 WORKDIR /app
 COPY pyproject.toml ./
 COPY --from=bge-model /opt/models/bge-m3 /opt/models/bge-m3
-RUN pip install --upgrade pip==25.2 hatchling==1.27.0 \
-    && pip install --index-url https://download.pytorch.org/whl/cpu \
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --index-url https://download.pytorch.org/whl/cpu \
         torch==2.8.0 torchvision==0.23.0 \
-    && pip install $(python -c "import tomllib; excluded = {'docling', 'torch', 'torchvision'}; dependencies = tomllib.load(open('pyproject.toml', 'rb'))['project']['dependencies']; print(' '.join(dependency for dependency in dependencies if dependency.split('==', 1)[0].lower() not in excluded))")
+    && pip install hatchling==1.27.0 $(python -c "import tomllib; excluded = {'docling', 'torch', 'torchvision'}; dependencies = tomllib.load(open('pyproject.toml', 'rb'))['project']['dependencies']; print(' '.join(dependency for dependency in dependencies if dependency.split('==', 1)[0].lower() not in excluded))")
 
 # Keep Docling and its model artifacts in layers that only change with pyproject.toml.
-RUN pip install docling==2.48.0
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install docling==2.48.0
 
 RUN mkdir -p /opt/models/docling/ds4sd--docling-layout-old \
     /opt/models/docling/ds4sd--docling-models \
@@ -55,7 +58,8 @@ EasyOcrModel.download_models(local_dir=base / "EasyOcr")
 PY
 
 COPY app ./app
-RUN pip install --no-deps --no-build-isolation .
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-deps --no-build-isolation .
 
 RUN useradd --create-home --uid 10001 appuser \
     && mkdir -p /app/var/storage \
