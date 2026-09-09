@@ -83,6 +83,7 @@ def build_container(
     actual_parser = document_parser or DoclingHybridParser(
         model_path=settings.embedding_model_path,
         artifacts_path=settings.docling_artifacts_path,
+        workers=settings.kb_index_concurrency,
     )
     if storage is not None:
         actual_storage = storage
@@ -121,6 +122,7 @@ def build_container(
         embedding_provider=actual_embedding,
         vector_store=actual_vector,
         tasks=tasks,
+        index_concurrency=settings.kb_index_concurrency,
     )
     moderation = ModerationService(
         session_factory=session_factory,

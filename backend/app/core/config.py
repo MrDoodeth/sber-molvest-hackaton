@@ -68,6 +68,7 @@ class Settings(BaseSettings):
     embedding_device: str = "cpu"
     embedding_model_path: Path = Path("/opt/models/bge-m3")
     docling_artifacts_path: Path | None = None
+    kb_index_concurrency: int = Field(default=2, ge=1, le=4)
 
     gigachat_credentials: SecretStr | None = None
     gigachat_scope: str = "GIGACHAT_API_PERS"

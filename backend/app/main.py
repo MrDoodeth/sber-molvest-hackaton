@@ -49,6 +49,9 @@ def create_app(
             yield
         finally:
             await actual_container.tasks.shutdown()
+            parser_close = getattr(actual_container.document_parser, "close", None)
+            if callable(parser_close):
+                await parser_close()
             await actual_container.rag_cache.close()
             await actual_container.engine.dispose()
 

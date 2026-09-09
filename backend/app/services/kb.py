@@ -61,6 +61,7 @@ class KnowledgeBaseService:
         embedding_provider: EmbeddingProvider,
         vector_store: VectorStore,
         tasks: TaskSupervisor,
+        index_concurrency: int = 2,
     ) -> None:
         self._session_factory = session_factory
         self._storage = storage
@@ -68,6 +69,7 @@ class KnowledgeBaseService:
         self._embedding_provider = embedding_provider
         self._vector_store = vector_store
         self._tasks = tasks
+        self._ingestion_gate = asyncio.Semaphore(index_concurrency)
         self._document_locks: dict[uuid.UUID, asyncio.Lock] = {}
         self._scheduled_document_ids: set[uuid.UUID] = set()
 
@@ -411,7 +413,7 @@ class KnowledgeBaseService:
         return result
 
     async def ingest(self, document_id: uuid.UUID) -> None:
-        async with self._lock_for(document_id):
+        async with self._ingestion_gate, self._lock_for(document_id):
             new_vector_ids: list[uuid.UUID] = []
             old_vector_ids: list[uuid.UUID] = []
             try:
