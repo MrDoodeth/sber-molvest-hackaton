@@ -374,23 +374,33 @@ end-user authentication и первичное provisioning для реально
 
 ## Конфигурация
 
-Все переменные находятся в корневом `.env.example`. Главные группы:
+Все переменные находятся в корневом `.env.example` без комментариев, чтобы файл можно
+было напрямую копировать в `.env`. Подробное описание настроек:
 
-| Группа | Переменные | Назначение |
-| --- | --- | --- |
-| Caddy | `DOMAIN` | public hostname для автоматического ACME/TLS |
-| PostgreSQL | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | database credentials |
-| CORS | `CORS_ORIGINS` | разрешённые browser origins; `*` запрещён |
-| Storage | `STORAGE_BACKEND`, `S3_*` | `local` или внешний S3-compatible backend |
-| AI | `GIGACHAT_CREDENTIALS`, `GIGACHAT_SCOPE`, `EMBEDDING_DEVICE` | GigaChat и local BGE-M3 |
-| Services | `QDRANT_URL`, `SSE_HEARTBEAT_SECONDS`, `DIALOG_IDLE_*` | vector store и фоновые политики |
+| Переменная | Допустимые значения и назначение |
+| --- | --- |
+| `DOMAIN` | DNS-имя production-сервера без `https://` и path, например `support.example.com`. Caddy использует его для TLS и маршрутизации. В dev не используется. |
+| `POSTGRES_PASSWORD` | В production обязательна сильная URL-safe строка. Не используйте `@`, `:`, `/`, `#`, `%`, потому что значение входит в PostgreSQL URL. В dev пустое значение заменяется локальным fallback `molvest`. |
+| `STORAGE_BACKEND` | `local` или `s3`. `local` использует named Docker volume, `s3` — внешний S3-compatible storage. |
+| `S3_ENDPOINT_URL` | URL S3 endpoint, например `https://s3.example.com`; для AWS можно оставить пустым. Используется только при `STORAGE_BACKEND=s3`. |
+| `S3_REGION` | Непустой регион S3, например `us-east-1`. |
+| `S3_BUCKET` | Непустое имя bucket, например `molvest`. |
+| `S3_ACCESS_KEY_ID` | S3 access key; обязателен при `STORAGE_BACKEND=s3`. |
+| `S3_SECRET_ACCESS_KEY` | S3 secret key; обязателен при `STORAGE_BACKEND=s3`. Не коммитьте это значение. |
+| `S3_USE_SSL` | `true` или `false`; использовать HTTPS для S3 endpoint. Для production рекомендуется `true`. |
+| `QDRANT_API_KEY` | Пусто для локального Qdrant либо API key защищённого внешнего Qdrant. |
+| `GIGACHAT_CREDENTIALS` | Authorization Key из `sber.creds`; пустое значение отключает GigaChat generation. Не коммитьте credentials. |
+| `GIGACHAT_SCOPE` | Scope, выданный для ключа, обычно `GIGACHAT_API_PERS`. |
 
 По умолчанию используется local object storage в Docker volume. MinIO в Compose не
 входит; для S3 нужно предоставить внешний endpoint и credentials. Production Compose
-переопределяет внутренние hostnames, secure cookie, demo auth и seed независимо от
-значений development-шаблона. Demo/RBAC auth-параметры не являются переменными
-окружения: dev использует внутренние defaults для демонстрации, production их
-принудительно отключает по `ENVIRONMENT=production`.
+переопределяет внутренние hostnames, порты, CORS, seed, embedding device и тайминги.
+PostgreSQL user/database (`molvest`), Qdrant URL и остальные внутренние service
+defaults находятся в Compose и не требуют `.env`.
+
+`ENVIRONMENT` не является пользовательской переменной: dev Compose передаёт
+`development`, production Compose передаёт `production`. Backend использует режим,
+чтобы включить dev Swagger/demo defaults и отключить demo login в production.
 
 ## Проверки и тесты
 
