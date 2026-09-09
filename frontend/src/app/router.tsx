@@ -4,6 +4,7 @@ import RootLayout from "./layouts/RootLayout";
 import { PageLoader } from "../shared/ui";
 
 const UserLayout = lazy(() => import("./layouts/UserLayout"));
+const RoleSelectionPage = lazy(() => import("../features/RoleSelectionPage"));
 const OperatorLayout = lazy(() => import("./layouts/OperatorLayout"));
 const AdminLayout = lazy(() => import("./layouts/AdminLayout"));
 const UserHomePage = lazy(() => import("../features/user-chat/UserHomePage"));
@@ -29,7 +30,7 @@ export const router = createBrowserRouter([
   {
     element: <RootLayout />,
     children: [
-      { index: true, element: <Navigate to="/user" replace /> },
+      { index: true, element: suspended(<RoleSelectionPage />) },
       {
         path: "user",
         element: suspended(<UserLayout />),
