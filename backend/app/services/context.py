@@ -114,7 +114,7 @@ class ContextBuilder:
                 continue
             selected_evidence.append(item)
             remaining -= cost
-        selected: list[ChatTurn] = []
+        selected = []
         for turn in reversed(history):
             cost = estimate_tokens(turn.text) + 4
             if cost > remaining:

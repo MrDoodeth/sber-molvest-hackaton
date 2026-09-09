@@ -93,9 +93,6 @@ class GenerationContextService:
             raise UnprocessableError(
                 "Нельзя сгенерировать шаблон без сообщений пользователя"
             )
-        message_index = next(
-            index for index, item in enumerate(messages) if item.id == message.id
-        )
         all_attachments = [
             attachment
             for message_item in messages
@@ -103,8 +100,11 @@ class GenerationContextService:
         ]
         return await self._build_request(
             dialog_id=dialog_id,
-            current_text=message.text,
-            history=self._history(messages[:message_index], attachments),
+            current_text=(
+                "Подготовь ответ клиенту на последнее актуальное сообщение, "
+                "используя полный диалог выше."
+            ),
+            history=self._history(messages, attachments),
             attachments=all_attachments,
             system_prompt=system_prompt,
             settings=settings,
