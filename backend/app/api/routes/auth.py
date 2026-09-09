@@ -33,8 +33,8 @@ async def me(user: User = Depends(get_current_user)) -> CurrentUser:
     tags=["Auth"],
     summary="Login as a seeded demo role",
     description=(
-        "Available only when `DEMO_AUTH_ENABLED=true`. Otherwise this endpoint "
-        "returns `404`. It selects the seeded user for the requested role and "
+        "Available only outside production. In production this endpoint returns "
+        "`404`. It selects the seeded user for the requested role and "
         "sets the HttpOnly JWT cookie; it is not a production identity provider."
     ),
     responses=PROTECTED_RESPONSES,

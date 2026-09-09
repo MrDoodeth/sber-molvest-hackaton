@@ -45,10 +45,6 @@ services:
       GIGACHAT_CREDENTIALS: ${GIGACHAT_CREDENTIALS:-}
       GIGACHAT_SCOPE: ${GIGACHAT_SCOPE:-GIGACHAT_API_PERS}
       GIGACHAT_CA_BUNDLE_FILE: /etc/ssl/certs/ca-certificates.crt
-      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set for production}
-      JWT_TTL_MINUTES: ${JWT_TTL_MINUTES:-480}
-      AUTH_COOKIE_SECURE: "true"
-      DEMO_AUTH_ENABLED: "false"
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
       QDRANT_API_KEY: ${QDRANT_API_KEY:-}
@@ -86,32 +82,13 @@ services:
       - proxy
       - data
 
-  frontend:
-    restart: unless-stopped
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-      target: production
-    expose:
-      - "80"
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "--quiet", "http://localhost/"]
-      interval: 10s
-      timeout: 3s
-      retries: 10
-    depends_on:
-      backend:
-        condition: service_healthy
-    networks:
-      - edge
-      - proxy
-
   caddy:
-    image: caddy:2.10.2-alpine
+    build:
+      context: .
+      dockerfile: Dockerfile.caddy
     restart: unless-stopped
     environment:
       DOMAIN: ${DOMAIN:?DOMAIN must be set for production}
-      CADDY_EMAIL: ${CADDY_EMAIL:?CADDY_EMAIL must be set for production}
     ports:
       - "80:80"
       - "443:443"
@@ -121,11 +98,11 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
-      frontend:
+      backend:
         condition: service_healthy
     healthcheck:
       test:
-        ["CMD", "wget", "--spider", "--quiet", "http://localhost:2019/config/"]
+        ["CMD-SHELL", "wget --header='Host: $${DOMAIN}' --spider --quiet http://localhost/"]
       interval: 10s
       timeout: 3s
       retries: 10

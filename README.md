@@ -309,10 +309,10 @@ Production Compose предназначен для server deployment с един
 
 - Caddy публикует TCP `80`, TCP `443` и UDP `443` для HTTP/3.
 - Caddy автоматически получает и обновляет TLS-сертификат через ACME.
-- PostgreSQL, Qdrant, backend и frontend nginx не имеют host-портов.
-- Caddy проксирует весь трафик в frontend nginx.
-- frontend nginx отдаёт SPA и проксирует `/api/` во внутренний backend.
-- Swagger/ReDoc/OpenAPI доступны в development; в production API-документация
+- PostgreSQL, Qdrant и backend не имеют host-портов.
+- Caddy сам собирает и раздаёт статический React bundle.
+- Caddy проксирует `/api/` напрямую во внутренний backend.
+- Swagger/ReDoc/OpenAPI доступны только в development; в production API-документация
   отключена.
 
 ### Подготовка сервера
@@ -331,9 +331,7 @@ cp .env.example .env
 
 ```dotenv
 DOMAIN=support.example.com
-CADDY_EMAIL=ops@example.com
 POSTGRES_PASSWORD=<long-random-password>
-JWT_SECRET=<long-random-secret>
 GIGACHAT_CREDENTIALS=<Authorization Key>
 ```
 
@@ -363,9 +361,9 @@ docker compose -f docker-compose.yml up --build -d --wait
 
 ### Важное ограничение production authentication
 
-Production Compose принудительно задаёт `AUTH_COOKIE_SECURE=true`,
-`DEMO_AUTH_ENABLED=false` и `SEED_ON_STARTUP=false`. Это означает, что при чистом
-production volume не создаются demo users, системные sections, prompts и settings.
+Production Compose не включает login/auth provisioning и задаёт `SEED_ON_STARTUP=false`.
+Это означает, что при чистом production volume не создаются demo users, системные
+sections, prompts и settings.
 В текущем коде единственный login — demo endpoint; production identity provider,
 регистрация пользователей, SSO и отзыв уже выданных JWT ещё не реализованы. Поэтому
 production Compose уже готов как TLS/private-network deployment baseline, но
@@ -380,9 +378,8 @@ end-user authentication и первичное provisioning для реально
 
 | Группа | Переменные | Назначение |
 | --- | --- | --- |
-| Caddy | `DOMAIN`, `CADDY_EMAIL` | public hostname и ACME contact |
+| Caddy | `DOMAIN` | public hostname для автоматического ACME/TLS |
 | PostgreSQL | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | database credentials |
-| Auth | `JWT_SECRET`, `JWT_TTL_MINUTES`, `AUTH_COOKIE_SECURE`, `DEMO_AUTH_ENABLED` | cookie JWT и demo login |
 | CORS | `CORS_ORIGINS` | разрешённые browser origins; `*` запрещён |
 | Storage | `STORAGE_BACKEND`, `S3_*` | `local` или внешний S3-compatible backend |
 | AI | `GIGACHAT_CREDENTIALS`, `GIGACHAT_SCOPE`, `EMBEDDING_DEVICE` | GigaChat и local BGE-M3 |
@@ -391,7 +388,9 @@ end-user authentication и первичное provisioning для реально
 По умолчанию используется local object storage в Docker volume. MinIO в Compose не
 входит; для S3 нужно предоставить внешний endpoint и credentials. Production Compose
 переопределяет внутренние hostnames, secure cookie, demo auth и seed независимо от
-значений development-шаблона.
+значений development-шаблона. Demo/RBAC auth-параметры не являются переменными
+окружения: dev использует внутренние defaults для демонстрации, production их
+принудительно отключает по `ENVIRONMENT=production`.
 
 ## Проверки и тесты
 
@@ -455,10 +454,10 @@ frontend/
     app/          router, layouts, providers, guards
     api/          REST client, DTOs, query keys
     features/     auth, user, operator and admin screens
-    shared/       chat, hooks and UI primitives
+  shared/       chat, hooks and UI primitives
   Dockerfile
-  nginx.conf
-Caddyfile         production TLS/reverse proxy
+Dockerfile.caddy   production static frontend + Caddy image
+Caddyfile          production TLS, SPA and API proxy
 docker-compose.yml
 .env.example
 ARCHITECTURE.md

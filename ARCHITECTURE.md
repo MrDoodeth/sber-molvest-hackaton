@@ -211,12 +211,15 @@ seed не скачивает внешний массив документов.
   пересоздаётся PostgreSQL volume. Создание схемы идемпотентно для уже
   существующего актуального volume.
 - **Конфигурация Docker:** runtime-переменные хранятся в единственном корневом
-  `.env`; оба Compose-файла передают его backend через `env_file`, а Compose
-  переопределяет service-specific database/Qdrant hostnames и режимы запуска.
+  `.env`; Compose передаёт backend явным allowlist-ом только поддерживаемые
+  настройки и переопределяет service-specific database/Qdrant hostnames и режимы
+  запуска.
   Единый `.env.example` содержит общие runtime-настройки, dev host ports и Caddy
-  domain/email для production. `docker-compose.dev.yml` использует dev ports,
+  domain для production. `docker-compose.dev.yml` использует dev ports,
   а `docker-compose.yml` публикует только Caddy и жёстко задаёт production security
-  defaults независимо от demo-значений шаблона.
+  defaults независимо от demo-значений шаблона. Auth/demo settings не являются
+  environment variables: development использует внутренние defaults, production
+  отключает demo login по `ENVIRONMENT=production`.
 
 ### 3.1. Текущее состояние реализации
 
@@ -421,7 +424,7 @@ flowchart TB
 
 _Открытый вопрос для приёмки: считать SLA «<5 сек» как время до первого токена (со стримингом) или до полного ответа — уточнить у В.В. Донцовой._
 
-**Безопасность и данные:** self-hosted Qdrant/Postgres и local storage по умолчанию (либо внешний S3 через provider); JWT + роли user/operator/admin. В текущем MVP единственный login — demo endpoint, доступный при `DEMO_AUTH_ENABLED=true`; production identity provider и отзыв уже выданных JWT отсутствуют. GigaChat credentials находятся только на backend. В Docker/Linux устанавливаем доверенный сертификат НУЦ Минцифры или задаём `ca_bundle_file`; SSL verification не отключаем. Runtime-файлы удаляются из GigaChat File Storage при close/hard delete, а не обязательно сразу после каждого generation-call. PII не пишем в технические логи без необходимости.
+**Безопасность и данные:** self-hosted Qdrant/Postgres и local storage по умолчанию (либо внешний S3 через provider); JWT + роли user/operator/admin. В dev MVP единственный login — внутренний demo endpoint с Settings defaults; production login/auth provisioning и отзыв уже выданных JWT отсутствуют. GigaChat credentials находятся только на backend. В Docker/Linux устанавливаем доверенный сертификат НУЦ Минцифры или задаём `ca_bundle_file`; SSL verification не отключаем. Runtime-файлы удаляются из GigaChat File Storage при close/hard delete, а не обязательно сразу после каждого generation-call. PII не пишем в технические логи без необходимости.
 
 **Масштабирование:** на MVP отдельная очередь задач не нужна. Индексация запускается через FastAPI `BackgroundTasks` / простой in-process worker, а документы в `uploaded/processing` восстанавливаются при старте. Один пользовательский AI-turn глобально защищён PostgreSQL advisory admission lock, а локальный `TurnCoordinator` добавляет process-local guard. `GenerationGate` сериализует provider work только внутри одного процесса; `EventBroker` и SSE также работают только внутри процесса. Распределённая очередь для всех generation/file/vision вызовов и внешний broker для SSE при нескольких replicas остаются Roadmap.
 
@@ -3631,12 +3634,11 @@ type CurrentUser = {
 Role guard отвечает только за UX/navigation. Backend повторно проверяет role на каждом endpoint.
 
 Для SPA + native `EventSource` используется same-origin auth через HttpOnly cookie.
-В dev Compose `AUTH_COOKIE_SECURE=false`. Production Compose публикует только Caddy
-на `80/443`, автоматически терминирует TLS и принудительно задаёт secure cookie.
-Единственный реализованный login — `POST /api/auth/demo-login` при
-`DEMO_AUTH_ENABLED=true`; production Compose его отключает, потому что production
-identity provider не входит в текущий код. GigaChat credentials никогда не попадают
-в browser.
+В dev demo login использует внутренние Settings defaults для cookie JWT. Production
+не включает login/auth provisioning: `ENVIRONMENT=production` принудительно отключает
+demo endpoint, а production identity provider не входит в текущий код. Production
+публикует только Caddy на `80/443` и автоматически терминирует TLS. GigaChat
+credentials никогда не попадают в browser.
 
 Dev:
 
@@ -3987,7 +3989,7 @@ OpenAPI-схема FastAPI и Swagger UI `/docs` — источник истин
 | Method | Endpoint                                            | Назначение                                                    |
 | ------ | --------------------------------------------------- | ------------------------------------------------------------- |
 | GET    | `/api/me`                                           | текущий пользователь + role                                   |
-| POST   | `/api/auth/demo-login`                              | demo login по роли; доступен только при `DEMO_AUTH_ENABLED=true` |
+| POST   | `/api/auth/demo-login`                              | dev demo login по роли; отключён при `ENVIRONMENT=production` |
 | POST   | `/api/auth/logout`                                  | удалить HttpOnly session cookie; JWT server-side не отзывается |
 | GET    | `/api/dialogs`                                      | dialogs текущего user                                         |
 | POST   | `/api/dialogs`                                      | создать новый Dialog                                          |
@@ -5170,7 +5172,8 @@ System Prompts, AI Settings, Monitoring.
 │   │   └── models/
 ├── docker-compose.yml            # production
 ├── docker-compose.dev.yml        # hot reload development
-├── Caddyfile                      # production TLS/reverse proxy
+├── Dockerfile.caddy               # production static frontend + Caddy image
+├── Caddyfile                      # production TLS, SPA and API proxy
 ├── .env.example                  # common root runtime configuration template
 ├── ARCHITECTURE.md
 ├── README.md
@@ -5191,14 +5194,14 @@ frontend: актуальным UI является React SPA в `frontend/src`.
 - `docker-compose.dev.yml` предназначен для демо/hot reload. Production Compose
   публикует только Caddy на TCP `80`/`443` и UDP `443`; Caddy автоматически получает
   и обновляет TLS-сертификат для `DOMAIN`, затем проксирует SPA в приватную сеть.
-  PostgreSQL, Qdrant, backend и frontend nginx не имеют host-портов. Dev Compose
+  PostgreSQL, Qdrant и backend не имеют host-портов. Caddy сам собирает и раздаёт
+  production static frontend bundle. Dev Compose
   публикует свои сервисные порты только на loopback `127.0.0.1`; production использует
-  отдельные `edge`, `proxy` и `data` Docker networks, поэтому frontend не имеет прямого
-  доступа к PostgreSQL/Qdrant. `AUTH_COOKIE_SECURE`
-  принудительно включён; единственный `.env.example` требует задать
-  `POSTGRES_PASSWORD`/`JWT_SECRET` перед deployment, а production Compose отключает
-  demo auth и seed. На чистом production volume seed users/sections/prompts/settings
-  не создаются; Compose healthchecks проверяют Qdrant/frontend/Caddy, но backend
+  отдельные `edge`, `proxy` и `data` Docker networks, поэтому Caddy не имеет прямого
+  доступа к PostgreSQL/Qdrant. Auth/demo settings не являются env variables;
+  production отключает login и seed. На чистом production volume seed
+  users/sections/prompts/settings не создаются; Compose healthchecks проверяют Qdrant
+  и Caddy, но backend
   `/health` остаётся liveness endpoint и не является dependency-aware readiness.
   FastAPI Swagger/ReDoc/OpenAPI включены в development и отключены в production.
 - S3-compatible storage provider присутствует в коде, но MinIO service не входит в

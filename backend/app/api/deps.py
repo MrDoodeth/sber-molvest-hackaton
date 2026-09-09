@@ -14,8 +14,8 @@ cookie_jwt_scheme = APIKeyCookie(
     name="molvest_session",
     scheme_name="CookieJWT",
     description=(
-        "JWT access token in an HttpOnly cookie. Use demo login when "
-        "DEMO_AUTH_ENABLED=true; Swagger then reuses the browser cookie."
+        "JWT access token in an HttpOnly cookie. Development demo login reuses the "
+        "browser cookie; production identity provisioning is not implemented."
     ),
     auto_error=False,
 )

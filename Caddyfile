@@ -1,10 +1,16 @@
-{
-    email {$CADDY_EMAIL}
-}
-
 {$DOMAIN} {
-    # Keep compression off here: SSE responses must be flushed immediately.
-    reverse_proxy frontend:80 {
-        flush_interval -1
-    }
+	@api path /api /api/*
+
+	handle @api {
+		reverse_proxy backend:8000 {
+			# Stream SSE responses without proxy buffering.
+			flush_interval -1
+		}
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
 }

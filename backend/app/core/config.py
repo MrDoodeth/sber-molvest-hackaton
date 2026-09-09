@@ -97,8 +97,8 @@ class Settings(BaseSettings):
         if "*" in self.cors_origins:
             raise ValueError("CORS wildcard is incompatible with credentialed cookies")
         if self.environment == "production":
-            if self.jwt_secret.get_secret_value().startswith("local-development"):
-                raise ValueError("JWT_SECRET must be configured in production")
+            self.auth_cookie_secure = True
+            self.demo_auth_enabled = False
             if "change-me-before-production" in self.database_url:
                 raise ValueError("POSTGRES_PASSWORD must be changed in production")
         if self.storage_backend == "s3" and (
