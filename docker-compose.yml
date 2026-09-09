@@ -84,7 +84,7 @@ services:
 
   caddy:
     build:
-      context: .
+      context: ./frontend
       dockerfile: Dockerfile.caddy
     restart: unless-stopped
     environment:

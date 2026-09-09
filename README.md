@@ -464,10 +464,10 @@ frontend/
     app/          router, layouts, providers, guards
     api/          REST client, DTOs, query keys
     features/     auth, user, operator and admin screens
-  shared/       chat, hooks and UI primitives
-  Dockerfile
-Dockerfile.caddy   production static frontend + Caddy image
-Caddyfile          production TLS, SPA and API proxy
+    shared/       chat, hooks and UI primitives
+  Dockerfile      development Vite image
+  Dockerfile.caddy production static frontend + Caddy image
+  Caddyfile       production TLS, SPA and API proxy
 docker-compose.yml
 .env.example
 ARCHITECTURE.md

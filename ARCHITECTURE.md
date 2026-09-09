@@ -5161,6 +5161,9 @@ System Prompts, AI Settings, Monitoring.
 │       ├── api/                  # typed REST client + query keys
 │       ├── features/             # user/operator/admin feature modules
 │       └── shared/               # UI/chat/hooks/utils
+│   ├── Dockerfile                # development Vite image
+│   ├── Dockerfile.caddy          # production static frontend + Caddy image
+│   └── Caddyfile                 # production TLS, SPA and API proxy
 │
 ├── backend/
 │   ├── app/
@@ -5172,8 +5175,6 @@ System Prompts, AI Settings, Monitoring.
 │   │   └── models/
 ├── docker-compose.yml            # production
 ├── docker-compose.dev.yml        # hot reload development
-├── Dockerfile.caddy               # production static frontend + Caddy image
-├── Caddyfile                      # production TLS, SPA and API proxy
 ├── .env.example                  # common root runtime configuration template
 ├── ARCHITECTURE.md
 ├── README.md
