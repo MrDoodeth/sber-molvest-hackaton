@@ -9,7 +9,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-molvest-production-123}
       POSTGRES_DB: ${POSTGRES_DB:-molvestdb}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - ./PRODUCTION/postgres_data:/var/lib/postgresql/data
     healthcheck:
       test:
         ["CMD-SHELL", 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
@@ -23,7 +23,7 @@ services:
     image: qdrant/qdrant:v1.15.1
     restart: unless-stopped
     volumes:
-      - qdrant_data:/qdrant/storage
+      - ./PRODUCTION/qdrant_data:/qdrant/storage
     healthcheck:
       # The Qdrant image intentionally has no curl/wget; verify its HTTP port
       # with bash's built-in /dev/tcp instead.
@@ -80,7 +80,7 @@ services:
     expose:
       - "8000"
     volumes:
-      - backend_storage:/app/var/storage
+      - ./PRODUCTION/backend_storage:/app/var/storage
     depends_on:
       postgres:
         condition: service_healthy
@@ -110,8 +110,8 @@ services:
       - "443:443"
       - "443:443/udp"
     volumes:
-      - caddy_data:/data
-      - caddy_config:/config
+      - ./PRODUCTION/caddy/caddy_data:/data
+      - ./PRODUCTION/caddy/caddy_config:/config
     depends_on:
       backend:
         condition: service_healthy
@@ -127,13 +127,6 @@ services:
     networks:
       - edge
       - proxy
-
-volumes:
-  postgres_data:
-  qdrant_data:
-  backend_storage:
-  caddy_data:
-  caddy_config:
 
 networks:
   edge:
