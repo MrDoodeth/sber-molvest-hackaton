@@ -99,8 +99,13 @@ class Settings(BaseSettings):
         if self.environment == "production":
             if self.jwt_secret.get_secret_value().startswith("local-development"):
                 raise ValueError("JWT_SECRET must be configured in production")
+            if "change-me-before-production" in self.database_url:
+                raise ValueError("POSTGRES_PASSWORD must be changed in production")
         if self.storage_backend == "s3" and (
-            self.s3_access_key_id is None or self.s3_secret_access_key is None
+            self.s3_access_key_id is None
+            or not self.s3_access_key_id.get_secret_value()
+            or self.s3_secret_access_key is None
+            or not self.s3_secret_access_key.get_secret_value()
         ):
             raise ValueError("S3 credentials are required when STORAGE_BACKEND=s3")
         return self

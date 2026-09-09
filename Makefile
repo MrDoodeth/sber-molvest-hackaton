@@ -1,4 +1,4 @@
-.PHONY: dev dev-build dev-down prod prod-down check-backend check-frontend rag-check
+.PHONY: dev dev-build dev-down prod prod-down check-backend check-frontend
 
 dev:
 	docker compose -f docker-compose.dev.yml up
@@ -21,8 +21,3 @@ check-backend:
 check-frontend:
 	npm --prefix frontend run lint
 	npm --prefix frontend run typecheck
-
-rag-check:
-	docker compose -f docker-compose.dev.yml run --rm \
-		-v ./tests/rag:/app/tests/rag:ro \
-		backend python /app/tests/rag/evaluate_rag.py

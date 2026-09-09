@@ -64,9 +64,11 @@ def create_app(
         openapi_tags=OPENAPI_TAGS,
         contact={"name": "Molvest Hackathon Backend Team"},
         license_info={"name": "Internal Hackathon MVP"},
-        docs_url="/docs",
-        redoc_url="/redoc",
-        openapi_url="/openapi.json",
+        docs_url="/docs" if actual_settings.environment != "production" else None,
+        redoc_url="/redoc" if actual_settings.environment != "production" else None,
+        openapi_url=(
+            "/openapi.json" if actual_settings.environment != "production" else None
+        ),
         lifespan=lifespan,
     )
     app.state.container = actual_container

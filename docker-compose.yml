@@ -11,28 +11,34 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-molvest}"]
+      test:
+        ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s
       timeout: 3s
       retries: 10
     networks:
-      - app
+      - data
 
   qdrant:
     image: qdrant/qdrant:v1.15.1
     restart: unless-stopped
     volumes:
       - qdrant_data:/qdrant/storage
+    healthcheck:
+      # The Qdrant image intentionally has no curl/wget; verify its HTTP port
+      # with bash's built-in /dev/tcp instead.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/6333"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     networks:
-      - app
+      - data
 
   backend:
     restart: unless-stopped
     build:
       context: ./backend
       dockerfile: Dockerfile
-    env_file:
-      - .env
     environment:
       ENVIRONMENT: production
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-molvest}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set for production}@postgres:5432/${POSTGRES_DB:-molvest}
@@ -45,6 +51,7 @@ services:
       DEMO_AUTH_ENABLED: "false"
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
       EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-cpu}
       EMBEDDING_MODEL_PATH: /opt/models/bge-m3
       DOCLING_ARTIFACTS_PATH: /opt/models/docling
@@ -52,6 +59,13 @@ services:
       DIALOG_IDLE_TIMEOUT_HOURS: ${DIALOG_IDLE_TIMEOUT_HOURS:-24}
       DIALOG_IDLE_SCAN_SECONDS: ${DIALOG_IDLE_SCAN_SECONDS:-300}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      LOCAL_STORAGE_PATH: /app/var/storage
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_BUCKET: ${S3_BUCKET:-molvest}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      S3_USE_SSL: ${S3_USE_SSL:-true}
       SEED_ON_STARTUP: "false"
     expose:
       - "8000"
@@ -61,7 +75,7 @@ services:
       postgres:
         condition: service_healthy
       qdrant:
-        condition: service_started
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
@@ -69,7 +83,8 @@ services:
       retries: 20
       start_period: 60s
     networks:
-      - app
+      - proxy
+      - data
 
   frontend:
     restart: unless-stopped
@@ -79,12 +94,17 @@ services:
       target: production
     expose:
       - "80"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://localhost/"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
     depends_on:
       backend:
         condition: service_healthy
     networks:
       - edge
-      - app
+      - proxy
 
   caddy:
     image: caddy:2.10.2-alpine
@@ -102,7 +122,13 @@ services:
       - caddy_config:/config
     depends_on:
       frontend:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test:
+        ["CMD", "wget", "--spider", "--quiet", "http://localhost:2019/config/"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
     networks:
       - edge
 
@@ -116,5 +142,7 @@ volumes:
 networks:
   edge:
     driver: bridge
-  app:
+  proxy:
+    driver: bridge
+  data:
     driver: bridge

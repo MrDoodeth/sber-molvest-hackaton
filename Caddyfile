@@ -3,9 +3,8 @@
 }
 
 {$DOMAIN} {
-    encode zstd gzip
+    # Keep compression off here: SSE responses must be flushed immediately.
     reverse_proxy frontend:80 {
-        # Stream SSE responses to the browser without proxy buffering.
         flush_interval -1
     }
 }

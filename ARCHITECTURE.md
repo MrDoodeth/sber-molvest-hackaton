@@ -57,7 +57,7 @@
 - **Backend — модульный монолит на FastAPI**, не микросервисы: меньше DevOps-расходов на хакатон, модули (RAG, Vision, Escalation, KB) изолированы и готовы к выносу в отдельные сервисы позже.
 - **GigaChat — центральная генеративная модель:** используем API для формирования финального ответа и анализа приложенных скриншотов. Для MVP основной кандидат — `GigaChat (активная модель)`.
 - **Embeddings делаем локально:** Freemium предоставляет бесплатные токены генерации, но векторное представление текста оплачивается отдельно. Поэтому retrieval не зависит от платного Embeddings API; основной локальный кандидат — `BAAI/bge-m3`.
-- **Критичное ограничение Freemium — 1 поток генерации.** Все GigaChat generation, vision и Files API операции проходят через единый re-entrant `GenerationGate` внутри процесса. Обычный пользовательский turn использует два последовательных GigaChat generation-call с одним `GenerationContext`: structured `confidence` и streaming user answer. При screenshot его parse выполняется до retrieval в том же атомарном turn. Confidence публикуется скрытым от пользователя SSE-событием; первый и второй подряд низкий confidence всё равно запускают streaming answer, а третий подряд ниже порога эскалирует без второго call. Ручной шаблон оператора выполняется отдельным generation-call.
+- **Критичное ограничение Freemium — 1 поток генерации.** Все GigaChat generation, vision и Files API операции проходят через единый re-entrant `GenerationGate` внутри процесса. Обычный пользовательский turn использует два последовательных GigaChat generation-call с одним `GenerationContext`: structured `confidence` и streaming user answer. При screenshot его parse выполняется до retrieval в том же атомарном turn. Confidence публикуется отдельным техническим SSE-событием: пользовательский UI его не показывает, но браузер получает и обрабатывает значение; operator/admin UI могут его отображать. Первый и второй подряд низкий confidence всё равно запускают streaming answer, а третий подряд ниже порога эскалирует без второго call. Ручной шаблон оператора выполняется отдельным generation-call.
 - **GigaChain используем точечно**, где он ускоряет интеграцию с GigaChat/LangChain, но не строим многошаговую agent-chain, которая последовательно занимает единственный поток.
 
 ## 2. Контекст, цели и требования
@@ -79,7 +79,7 @@
 | --- | --------------------------------------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1   | **Вопрос–ответ (чат-бот)**                          | **Обязательный MVP**                                         | Пользователь пишет вопрос в нашем веб-чате → backend анализирует запрос → выполняет поиск по БЗ → GigaChat формирует понятный ответ → при низкой уверенности обращение эскалируется оператору         |
 | 2   | **Автоматическое подключение к существующему чату** | **Roadmap, не MVP**                                          | В будущем агент подключается к Bitrix24/Redmine, читает сообщения в реальном времени и либо предлагает оператору черновик, либо отвечает автоматически по настройке                                   |
-| 3   | **Анализ изображений и скриншотов**                 | **Обязательный MVP, доступен в каждом диалоге по умолчанию** | В любом чате пользователь может приложить PNG/JPEG-скриншот 1С; агент извлекает текст и визуальные признаки, определяет ошибку/поле/состояние интерфейса и использует результат как часть RAG-запроса |
+| 3   | **Анализ изображений и скриншотов**                 | **Обязательный MVP, доступен в каждом диалоге по умолчанию** | В любом чате пользователь может приложить PNG/JPEG/TIFF/BMP-скриншот 1С; агент извлекает текст и визуальные признаки, определяет ошибку/поле/состояние интерфейса и использует результат как часть RAG-запроса |
 | 4   | **Управление базой знаний**                         | **Обязательный MVP**                                         | Администратор создаёт/редактирует/удаляет разделы БЗ, загружает документы, запускает переиндексацию, обновляет источники и управляет параметрами системы                                              |
 
 #### 1.2.1 Текущий канал взаимодействия и совместимость с Bitrix24/Redmine
@@ -213,10 +213,10 @@ seed не скачивает внешний массив документов.
 - **Конфигурация Docker:** runtime-переменные хранятся в единственном корневом
   `.env`; оба Compose-файла передают его backend через `env_file`, а Compose
   переопределяет service-specific database/Qdrant hostnames и режимы запуска.
-   Единый `.env.example` содержит общие runtime-настройки, dev host ports и Caddy
-   domain/email для production. `docker-compose.dev.yml` использует dev ports,
-   а `docker-compose.yml` публикует только Caddy и жёстко задаёт production security
-   defaults независимо от demo-значений шаблона.
+  Единый `.env.example` содержит общие runtime-настройки, dev host ports и Caddy
+  domain/email для production. `docker-compose.dev.yml` использует dev ports,
+  а `docker-compose.yml` публикует только Caddy и жёстко задаёт production security
+  defaults независимо от demo-значений шаблона.
 
 ### 3.1. Текущее состояние реализации
 
@@ -280,9 +280,8 @@ seed не скачивает внешний массив документов.
 - context budget учитывает текст, history, evidence и screenshot analysis, но не
   оценивает фактический размер содержимого Files API; при overflow возможна ошибка
   GigaChat без автоматического fallback в Docling/RAG.
-- backend имеет пять unit-тестов для confidence/policy helper-ов, но не имеет
-  API/integration/SSE/ingestion тестов; frontend test runner отсутствует. Golden RAG
-  evaluator требует заранее загруженных indexed documents и не поднимает fixture сам.
+- Автоматический backend unit/API/integration/SSE/ingestion/RAG test suite отсутствует;
+  frontend test runner также не входит в текущий репозиторий.
 - удаление KB-документа serializes с ingestion через process lock и `SELECT FOR UPDATE`:
   Qdrant document points и object-storage object очищаются до удаления SQL-записи.
   Поставленная в очередь ingestion-задача считает отсутствующий документ терминально
@@ -381,14 +380,13 @@ flowchart TB
 | Каналы              | REST для web MVP; `IChannelAdapter` + webhooks — Roadmap                    | MVP использует только собственный frontend; adapter-контракт и webhooks Bitrix24/Redmine ещё не реализованы                              |
 | Генерация + Vision  | GigaChat API: Lite / Pro / Max / Ultra через `langchain-gigachat`           | Активная модель задаётся backend-политикой и отображается в админке; единый `GigaChatProvider` скрывает различия моделей от RAG/backend |
 | Embeddings          | **Локально `BAAI/bge-m3`** через `FlagEmbedding` / `sentence-transformers`  | Бесплатно локально; RU/multilingual; dense+sparse representations для hybrid retrieval                                                  |
-| Оркестрация         | LangChain Core / LCEL + `langchain-gigachat`                                | Простые последовательные/параллельные Runnable-цепочки без agent executor; прозрачный контроль latency и числа GigaChat-вызовов         |
+| Оркестрация         | LangChain Core / LCEL + `langchain-gigachat`                                | Простые контролируемые Runnable-вызовы без agent executor; прозрачный контроль latency и числа GigaChat-вызовов         |
 | Векторная БД        | Qdrant                                                                      | Hybrid search, payload-фильтры, Docker-friendly                                                                                         |
 | РСУБД               | PostgreSQL                                                                  | Диалоги, тикеты, метаданные БЗ, логи, метрики                                                                                           |
 | Фоновые задачи      | FastAPI `BackgroundTasks` / простой in-process worker                       | Для MVP достаточно для переиндексации небольшого объёма документов без отдельной очереди                                                |
 | Объектное хранилище | LocalObjectStorage по умолчанию; опционально S3 через `aioboto3`            | Скриншоты, исходные документы; MinIO не входит в текущий Compose                                                                        | Быстро извлекает текст/коды ошибки локально перед retrieval; GigaChat всё равно получает исходное изображение и выполняет смысловой Vision-анализ |
 | Наблюдаемость       | Application logs + базовые метрики backend                                  | Latency, ошибки, confidence, источники ответа и эскалации без внешнего SaaS                                                             |
-| Проверка RAG        | `tests/rag/evaluate_rag.py` + `tests/rag/rag_golden.json`                   | Скрипт прогоняет тестовые вопросы через retrieval и показывает, попал ли ожидаемый источник в top-k                                     |
-| Деплой              | Docker Compose (демо) → Kubernetes (прод)                                   | Скорость на хакатоне, понятный путь роста                                                                                               |
+| Деплой              | Docker Compose для dev и production; Caddy для TLS                            | Один воспроизводимый стек с внутренними сервисами и единой внешней точкой входа; Kubernetes не входит в текущий репозиторий             |
 
 ### LangChain-first правило разработки
 
@@ -418,7 +416,7 @@ flowchart TB
 | -------------------------- | ----------------------------------------------------------------------- |
 | Local BGE-M3 embedding     | измеряем на целевом железе                                              |
 | Поиск в Qdrant             | целевой порядок десятки миллисекунд                                     |
-    | GigaChat до первого токена | измеряем на API; user UI получает первый answer chunk сразу через SSE после скрытого confidence call |
+    | GigaChat до первого токена | измеряем на API; user UI получает первый answer chunk сразу через SSE после технического confidence call |
 | End-to-end                 | целевой KPI заказчика <5 с; обязательно подтвердить экспериментально    |
 
 _Открытый вопрос для приёмки: считать SLA «<5 сек» как время до первого токена (со стримингом) или до полного ответа — уточнить у В.В. Донцовой._
@@ -434,7 +432,6 @@ _Открытый вопрос для приёмки: считать SLA «<5 с
 | % обработанных без эскалации | count(escalated=false) / total                                                        | Снижение обращений к операторам на 30–40%             |
 | Среднее время ответа         | `MetricEvent.latency_ms` для полного user turn: от начала background processing до answer/escalation/error; текущий API считает только average, p50/p95 не реализованы | <5 сек                                                |
 | Количество эскалаций         | count(escalated=true) / период                                                        | Тренд к снижению                                      |
-| Проверка retrieval           | `tests/rag/evaluate_rag.py`: сколько golden-вопросов нашли ожидаемый источник в top-3 | Используем как внутреннюю проверку при изменениях RAG |
 
 `MetricEvent.event_type` различает `user_turn`, `operator_template` и
 `knowledge_card`; monitoring KPI агрегирует только `user_turn`, чтобы ручные
@@ -471,7 +468,7 @@ answer не запускался, сохраняется usage только conf
 | Работающий AI-агент   | Собственный web-чат на MVP; backend сразу совместим с будущими Bitrix24/Redmine-адаптерами |
 | БЗ по продуктам 1С    | Обязательный раздел «Документация 1С», индексируемый в Qdrant                              |
 | Анализ скриншотов     | Встроен в каждый диалог, GigaChat Vision → извлечённый контекст → RAG                      |
-| Админ-панель          | Управление разделами/документами, ползунок confidence, мониторинг и логи                   |
+| Админ-панель          | Управление разделами/документами, настройки confidence, агрегированный monitoring без log viewer |
 | Обновление знаний     | Загрузка новых документов и переиндексация; закрытые кейсы как кандидаты в БЗ              |
 | Документация          | `ARCHITECTURE.md`, Swagger UI `/docs` и ReDoc `/redoc`                                     |
 | Метрики эффективности | % без эскалации, среднее время ответа, количество эскалаций, confidence                    |
@@ -561,7 +558,7 @@ dialog_confidence = 1.0
 Пользователь может в любом сообщении отправить:
 
 - текст;
-- screenshot PNG/JPEG;
+- screenshot PNG/JPEG/TIFF/BMP;
 - поддерживаемый документ/файл.
 
 Вложения являются обычной частью сообщения и доступны во всех чатах по умолчанию.
@@ -591,7 +588,7 @@ dialog_confidence = 1.0
     CALL #1 — structured ConfidenceAssessment
     hardcoded confidence prompt (constrained sampling)
             ↓
-    confidence event (hidden technical details)
+    technical confidence SSE event (not rendered in user UI)
     ├── low-confidence streak < 3 → CALL #2 user answer, stream tokens through SSE
     └── low-confidence streak = 3 → no CALL #2; operator_support
 ```
@@ -1235,12 +1232,11 @@ sequenceDiagram
 
     U->>API: message + optional attachment
 
-    par Prompt branch
-        API->>EMB: embed(user prompt + recent history)
-        EMB-->>API: prompt dense/sparse query
-    and Screenshot branch
-        API->>G: CALL #0 screenshot parse
-        G-->>API: extracted text + visual summary
+    API->>G: CALL #0 screenshot parse (if image exists)
+    G-->>API: extracted text + visual summary
+    API->>EMB: embed(user prompt + recent history)
+    EMB-->>API: prompt dense/sparse query
+    opt screenshot text or visual summary exists
         API->>EMB: embed(parsed screenshot)
         EMB-->>API: screenshot dense/sparse query
     end
@@ -1263,6 +1259,10 @@ sequenceDiagram
 ```
 
 ## 12. RAG: ingestion, retrieval и управление контекстом
+
+В runtime сначала выполняется screenshot parse (если есть изображение), затем
+последовательно строятся prompt/screenshot query embeddings и выполняется единый
+retrieval. Эти ветки не являются параллельными LLM/embedding-задачами.
 
 ```text
 Постоянная БЗ:
@@ -2562,17 +2562,18 @@ tiff
 bmp
 ```
 
-Аудиоформаты API также поддерживаются, но они не входят в требования нашего MVP.
+Хотя GigaChat API и wrapper могут поддерживать аудио, текущий backend validator и
+frontend composer аудио не принимают: audio не входит в MVP и не является допустимым
+runtime attachment этого репозитория.
 
 #### Ограничения размера
 
 ```text
 text document: <= 40 MB
 image:         <= 15 MB
-audio:         <= 35 MB
 ```
 
-Общий размер запроса с изображениями/аудио должен быть меньше 80 MB.
+Общий размер запроса с runtime-вложениями должен быть меньше 80 MB.
 
 Ограничения GigaChat API дополнительно допускают:
 
@@ -3289,27 +3290,12 @@ langchain-gigachat
 gigachat SDK (implementation detail)
 ```
 
-### Простая проверка RAG
+### Проверка RAG
 
-RAG проверяем отдельно от generation:
-
-```text
-tests/rag/rag_golden.json
-tests/rag/evaluate_rag.py
-```
-
-В репозитории сейчас 12 golden-вопросов с ожидаемым документом.
-
-Скрипт выполняет тот же retrieval, что production-код, и показывает:
-
-```text
-OK / FAIL
-expected document in top-3
-```
-
-Без LangSmith/RAGAS и отдельной evaluation-инфраструктуры в MVP.
-Evaluator не создаёт fixture-документы: для непустого результата нужны запущенные
-PostgreSQL/Qdrant и заранее загруженные документы со статусом `indexed`.
+В текущем репозитории отдельный golden RAG evaluator и автоматический retrieval
+benchmark отсутствуют. RAG проверяется через unit/regression tests на уровне сервисов
+и ручную загрузку indexed-документов в dev Compose. LangSmith, RAGAS и отдельная
+evaluation-инфраструктура в MVP не используются.
 
 ## 14. Скриншоты и runtime attachments
 
@@ -3645,11 +3631,12 @@ type CurrentUser = {
 Role guard отвечает только за UX/navigation. Backend повторно проверяет role на каждом endpoint.
 
 Для SPA + native `EventSource` используется same-origin auth через HttpOnly cookie.
-В dev Compose `AUTH_COOKIE_SECURE=false`, в production settings требуют secure cookie,
-но текущий production Compose публикует nginx только по HTTP на порту 80 и требует
-внешний TLS reverse proxy. Единственный реализованный login —
-`POST /api/auth/demo-login` при `DEMO_AUTH_ENABLED=true`; production identity provider
-не входит в текущий код. GigaChat credentials никогда не попадают в browser.
+В dev Compose `AUTH_COOKIE_SECURE=false`. Production Compose публикует только Caddy
+на `80/443`, автоматически терминирует TLS и принудительно задаёт secure cookie.
+Единственный реализованный login — `POST /api/auth/demo-login` при
+`DEMO_AUTH_ENABLED=true`; production Compose его отключает, потому что production
+identity provider не входит в текущий код. GigaChat credentials никогда не попадают
+в browser.
 
 Dev:
 
@@ -5093,8 +5080,8 @@ User/operator detail и queue queries дополнительно делают re
 - Admin destructive endpoints недоступны user/operator.
 - Attachment URL выдаётся backend только авторизованному пользователю с доступом к Dialog.
 - Markdown/LLM answer рендерится без небезопасного raw HTML.
-- В dev cookie не `Secure`; production требует `Secure`, но TLS termination не входит
-  в текущий nginx/Compose и должен быть предоставлен внешним reverse proxy.
+- В dev cookie не `Secure`; production Compose работает через Caddy с автоматическим
+  TLS и принудительно включает `Secure` cookie.
 
 # Часть IV — План разработки и справка
 
@@ -5106,7 +5093,7 @@ PostgreSQL models, schema creation on startup, settings, system prompts, баз�
 
 ### Backend B2 — RAG
 
-Docling, chunking, BGE-M3, Qdrant, hybrid retrieval, `rag_top_k`, enable/disable документов и разделов, golden retrieval test.
+Docling, chunking, BGE-M3, Qdrant, hybrid retrieval, `rag_top_k` и enable/disable документов и разделов.
 
 ### Backend B3 — GigaChatProvider
 
@@ -5181,13 +5168,9 @@ System Prompts, AI Settings, Monitoring.
 │   │   ├── providers/
 │   │   ├── contracts/
 │   │   └── models/
-├── tests/
-│   ├── test_confidence_policy.py  # 5 unit tests
-│   └── rag/
-│       ├── evaluate_rag.py        # requires running stack + indexed KB
-│       └── rag_golden.json        # 12 retrieval cases
 ├── docker-compose.yml            # production
 ├── docker-compose.dev.yml        # hot reload development
+├── Caddyfile                      # production TLS/reverse proxy
 ├── .env.example                  # common root runtime configuration template
 ├── ARCHITECTURE.md
 ├── README.md
@@ -5196,9 +5179,8 @@ System Prompts, AI Settings, Monitoring.
 
 Каталоги `backend/app/channels` и `frontend/src/shared/types` в текущем репозитории
 отсутствуют: adapters являются Roadmap, а DTO-типы находятся в `frontend/src/api/types.ts`.
-`Problems` и `files/` сейчас являются untracked workspace artifacts и не участвуют в
-startup, Compose, seed или тестах; они не являются частью tracked архитектурного
-контракта.
+`molvest_support_redesign.html` — отдельный статический design prototype, не runtime
+frontend: актуальным UI является React SPA в `frontend/src`.
 
 ### 32.1 Реальные проверки и ограничения запуска
 
@@ -5206,17 +5188,22 @@ startup, Compose, seed или тестах; они не являются час�
   `backend/.venv` и не запускает unit-тесты.
 - `make check-frontend` запускает ESLint и TypeScript typecheck; отдельного frontend
   test runner и coverage нет.
-- `make rag-check` требует уже работающих PostgreSQL/Qdrant и заранее загруженных
-  indexed documents; seed по умолчанию документы не создаёт.
 - `docker-compose.dev.yml` предназначен для демо/hot reload. Production Compose
   публикует только Caddy на TCP `80`/`443` и UDP `443`; Caddy автоматически получает
   и обновляет TLS-сертификат для `DOMAIN`, затем проксирует SPA в приватную сеть.
-  PostgreSQL, Qdrant, backend и frontend nginx не имеют host-портов. `AUTH_COOKIE_SECURE`
-  принудительно включён; единственный `.env.example` требует заменить
+  PostgreSQL, Qdrant, backend и frontend nginx не имеют host-портов. Dev Compose
+  публикует свои сервисные порты только на loopback `127.0.0.1`; production использует
+  отдельные `edge`, `proxy` и `data` Docker networks, поэтому frontend не имеет прямого
+  доступа к PostgreSQL/Qdrant. `AUTH_COOKIE_SECURE`
+  принудительно включён; единственный `.env.example` требует задать
   `POSTGRES_PASSWORD`/`JWT_SECRET` перед deployment, а production Compose отключает
-  demo auth и seed. Backend `/health` не является dependency-aware readiness.
-- S3-compatible storage provider присутствует в коде, но MinIO service и S3-параметры
-  не входят в текущие Compose/env templates; демо использует named local volume.
+  demo auth и seed. На чистом production volume seed users/sections/prompts/settings
+  не создаются; Compose healthchecks проверяют Qdrant/frontend/Caddy, но backend
+  `/health` остаётся liveness endpoint и не является dependency-aware readiness.
+  FastAPI Swagger/ReDoc/OpenAPI включены в development и отключены в production.
+- S3-compatible storage provider присутствует в коде, но MinIO service не входит в
+  текущий Compose. S3 endpoint/credentials документированы в едином `.env.example`,
+  а demo и production по умолчанию используют named local volume.
 - Python contract проекта — `>=3.11,<3.12`; Docker использует Python 3.11. Локальный
   ignored virtualenv должен соответствовать этому ограничению.
 
