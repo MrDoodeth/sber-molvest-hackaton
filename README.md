@@ -388,7 +388,7 @@ dev/prod Compose используют встроенные defaults. Подро�
 | `EMBEDDING_DEVICE` | Optional device; default `cpu`. `cuda` требует отдельного GPU image/runtime. |
 | `EMBEDDING_MODEL_PATH` | Optional BGE-M3 path; default `/opt/models/bge-m3`. |
 | `DOCLING_ARTIFACTS_PATH` | Optional Docling artifacts path; default `/opt/models/docling`. |
-| `KB_INDEX_CONCURRENCY` | Число изолированных Docling worker и одновременно индексируемых документов; default `2`, допустимо от `1` до `4`. Уменьшите до `1` при дефиците RAM. |
+| `KB_INDEX_CONCURRENCY` | Число выделенных Docling worker-потоков и одновременно индексируемых документов; default `2`, допустимо от `1` до `4`. Уменьшите до `1` при дефиците CPU/RAM. |
 | `QDRANT_URL` | Optional Qdrant URL; default `http://qdrant:6333`. |
 | `QDRANT_API_KEY` | Пусто для локального Qdrant либо API key защищённого внешнего Qdrant. |
 | `GIGACHAT_CREDENTIALS` | Authorization Key из `sber.creds`; пустое значение отключает GigaChat generation. Не коммитьте credentials. |

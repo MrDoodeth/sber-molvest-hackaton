@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 import asyncio
-from concurrent.futures import ProcessPoolExecutor
-from multiprocessing import get_context
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import local
 from typing import Any
 
 from app.providers.interfaces import DocumentParsingError, ParsedChunk
 
 WorkerKey = tuple[int, str, str | None]
-_worker_components: dict[WorkerKey, tuple[Any, Any]] = {}
+_worker_state = local()
 
 
 def _load_components(
@@ -52,9 +52,13 @@ def _worker_parser(
     max_tokens: int, model_path: str, artifacts_path: str | None
 ) -> tuple[Any, Any]:
     key = (max_tokens, model_path, artifacts_path)
-    if key not in _worker_components:
-        _worker_components[key] = _load_components(*key)
-    return _worker_components[key]
+    components = getattr(_worker_state, "components", None)
+    if components is None:
+        components = {}
+        _worker_state.components = components
+    if key not in components:
+        components[key] = _load_components(*key)
+    return components[key]
 
 
 def _parse_in_worker(
@@ -109,9 +113,9 @@ class DoclingHybridParser:
         self._max_tokens = max_tokens
         self._model_path = Path(model_path)
         self._artifacts_path = Path(artifacts_path) if artifacts_path else None
-        self._executor = ProcessPoolExecutor(
+        self._executor = ThreadPoolExecutor(
             max_workers=workers,
-            mp_context=get_context("spawn"),
+            thread_name_prefix="docling",
         )
 
     def _worker_args(self) -> tuple[int, str, str | None]:
