@@ -29,12 +29,14 @@ RUN update-ca-certificates
 
 WORKDIR /app
 COPY pyproject.toml ./
-COPY app ./app
 COPY --from=bge-model /opt/models/bge-m3 /opt/models/bge-m3
-RUN pip install --upgrade pip==25.2 \
+RUN pip install --upgrade pip==25.2 hatchling==1.27.0 \
     && pip install --index-url https://download.pytorch.org/whl/cpu \
         torch==2.8.0 torchvision==0.23.0 \
-    && pip install .
+    && pip install $(python -c "import tomllib; excluded = {'docling', 'torch', 'torchvision'}; dependencies = tomllib.load(open('pyproject.toml', 'rb'))['project']['dependencies']; print(' '.join(dependency for dependency in dependencies if dependency.split('==', 1)[0].lower() not in excluded))")
+
+# Keep Docling and its model artifacts in layers that only change with pyproject.toml.
+RUN pip install docling==2.48.0
 
 RUN mkdir -p /opt/models/docling/ds4sd--docling-layout-old \
     /opt/models/docling/ds4sd--docling-models \
@@ -51,6 +53,9 @@ LayoutModel.download_models(local_dir=base / "ds4sd--docling-layout-old")
 TableStructureModel.download_models(local_dir=base / "ds4sd--docling-models")
 EasyOcrModel.download_models(local_dir=base / "EasyOcr")
 PY
+
+COPY app ./app
+RUN pip install --no-deps --no-build-isolation .
 
 RUN useradd --create-home --uid 10001 appuser \
     && mkdir -p /app/var/storage \
