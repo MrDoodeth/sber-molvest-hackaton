@@ -27,11 +27,6 @@ class AppError(Exception):
         self.details = details
 
 
-class UnauthorizedError(AppError):
-    def __init__(self, message: str = "Требуется авторизация") -> None:
-        super().__init__(401, "unauthorized", message)
-
-
 class ForbiddenError(AppError):
     def __init__(self, message: str = "Недостаточно прав") -> None:
         super().__init__(403, "forbidden", message)

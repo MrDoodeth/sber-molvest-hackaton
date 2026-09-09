@@ -5,7 +5,6 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { ApiError } from "../../api/client";
-import { authApi } from "../../api/auth";
 import { dialogsApi } from "../../api/dialogs";
 import { operatorApi } from "../../api/operator";
 import { queryKeys } from "../../api/queryKeys";
@@ -77,10 +76,6 @@ export default function OperatorWorkspace() {
   const [failedAttempt, setFailedAttempt] = useState<SendAttempt>();
   const [closeOpen, setCloseOpen] = useState(false);
   const [templates, setTemplates] = useState<Record<string, TemplateState>>({});
-  const me = useQuery({
-    queryKey: queryKeys.me(),
-    queryFn: ({ signal }) => authApi.me(signal),
-  });
   const detail = useQuery({
     queryKey: queryKeys.dialog.detail(dialogId ?? ""),
     queryFn: ({ signal }) => operatorApi.detail(dialogId!, signal),
@@ -98,7 +93,8 @@ export default function OperatorWorkspace() {
     refetchInterval: 2500,
     refetchOnMount: "always",
   });
-  const events = useOperatorDialogEvents(dialogId, me.data?.id);
+  const demoOperatorId = "10000000-0000-4000-8000-000000000002";
+  const events = useOperatorDialogEvents(dialogId, demoOperatorId);
   const allMessages = messages.data
     ? mergePersistedMessages(...messages.data.pages.map((page) => page.items))
     : [];
@@ -106,7 +102,7 @@ export default function OperatorWorkspace() {
     events.eventError ?? detail.data?.processingError ?? undefined;
   const isAssignedToMe = Boolean(
     detail.data?.assignedOperator?.id &&
-    detail.data.assignedOperator.id === me.data?.id,
+    detail.data.assignedOperator.id === demoOperatorId,
   );
   const template = dialogId ? templates[dialogId] : undefined;
   const templateText = template?.text ?? "";

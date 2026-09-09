@@ -6,7 +6,6 @@ from app.contracts.schemas import (
     AttachmentDto,
     CandidateRef,
     CaseCard,
-    CurrentUser,
     DialogDetail,
     DialogSummary,
     FeedbackDto,
@@ -33,10 +32,6 @@ from app.models import (
 
 def user_ref(user: User) -> UserRef:
     return UserRef(id=user.id, display_name=user.display_name)
-
-
-def current_user(user: User) -> CurrentUser:
-    return CurrentUser(id=user.id, role=user.role, display_name=user.display_name)
 
 
 def attachment_dto(attachment: Attachment) -> AttachmentDto:

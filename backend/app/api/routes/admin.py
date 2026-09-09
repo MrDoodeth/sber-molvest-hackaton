@@ -6,8 +6,8 @@ from typing import Literal
 
 from fastapi import APIRouter, Body, Depends, Query
 
-from app.api.deps import get_container, get_current_user
-from app.api.openapi import PROTECTED_RESPONSES
+from app.api.deps import get_container, get_request_actor
+from app.api.openapi import API_RESPONSES
 from app.contracts.schemas import (
     AdminDialogDetail,
     AdminDialogPage,
@@ -25,7 +25,7 @@ from app.core.errors import ForbiddenError
 from app.models import User
 from app.services.container import ApplicationContainer
 
-router = APIRouter(prefix="/admin", responses=PROTECTED_RESPONSES)
+router = APIRouter(prefix="/admin", responses=API_RESPONSES)
 
 
 def require_admin(user: User) -> None:
@@ -35,7 +35,7 @@ def require_admin(user: User) -> None:
 
 @router.get("/prompts", response_model=list[PromptDto], tags=["Prompts"])
 async def prompts(
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> list[PromptDto]:
     require_admin(user)
@@ -47,7 +47,7 @@ async def prompts(
 async def update_prompt(
     prompt_type: PromptType,
     payload: PromptUpdate,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> PromptDto:
     require_admin(user)
@@ -59,7 +59,7 @@ async def update_prompt(
 
 @router.get("/settings", response_model=AdminSettingsResponse, tags=["Settings"])
 async def settings(
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> AdminSettingsResponse:
     require_admin(user)
@@ -70,7 +70,7 @@ async def settings(
 @router.put("/settings", response_model=AdminSettingsResponse, tags=["Settings"])
 async def update_settings(
     payload: AdminSettingsUpdate,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> AdminSettingsResponse:
     require_admin(user)
@@ -92,7 +92,7 @@ async def admin_dialogs(
     resolved_by: Literal["ai", "operator"] | None = None,
     has_attachment: bool | None = None,
     moderation: Literal["moderated", "unmoderated"] | None = None,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> AdminDialogPage:
     if closed_on is not None:
@@ -119,7 +119,7 @@ async def admin_dialogs(
 )
 async def admin_dialog_detail(
     dialog_id: uuid.UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> AdminDialogDetail:
     return await container.admin.dialog_detail(user, dialog_id)
@@ -132,7 +132,7 @@ async def admin_dialog_detail(
 )
 async def create_candidate(
     dialog_id: uuid.UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> KnowledgeCandidateDto:
     return await container.moderation.create_by_admin(user, dialog_id)
@@ -145,7 +145,7 @@ async def create_candidate(
 )
 async def candidate(
     candidate_id: uuid.UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> KnowledgeCandidateDto:
     return await container.moderation.get_candidate(user, candidate_id)
@@ -159,7 +159,7 @@ async def candidate(
 async def patch_candidate(
     candidate_id: uuid.UUID,
     payload: CandidatePatch,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> KnowledgeCandidateDto:
     return await container.moderation.patch_candidate(
@@ -175,7 +175,7 @@ async def patch_candidate(
 async def approve_candidate(
     candidate_id: uuid.UUID,
     payload: CandidateApproveRequest | None = Body(default=None),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> KnowledgeCandidateDto:
     return await container.moderation.approve(
@@ -190,7 +190,7 @@ async def approve_candidate(
 )
 async def generate_candidate_card(
     candidate_id: uuid.UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> KnowledgeCandidateDto:
     return await container.moderation.generate_card(user, candidate_id)
@@ -203,7 +203,7 @@ async def generate_candidate_card(
 )
 async def reject_candidate(
     candidate_id: uuid.UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> KnowledgeCandidateDto:
     return await container.moderation.reject(user, candidate_id)
@@ -217,7 +217,7 @@ async def reject_candidate(
 )
 async def delete_dialog(
     dialog_id: uuid.UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> None:
     await container.moderation.hard_delete_dialog(user, dialog_id)
@@ -226,7 +226,7 @@ async def delete_dialog(
 @router.get("/monitoring", response_model=MonitoringResponse, tags=["Monitoring"])
 async def monitoring(
     period: MonitoringPeriod = MonitoringPeriod.DAYS_7,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> MonitoringResponse:
     return await container.admin.monitoring(user, period)

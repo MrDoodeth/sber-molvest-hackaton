@@ -47,14 +47,6 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://molvest:molvest@localhost:5432/molvest"
     seed_on_startup: bool = True
 
-    jwt_secret: SecretStr = SecretStr("local-development-secret-change-in-production")
-    jwt_algorithm: Literal["HS256", "HS384", "HS512"] = "HS256"
-    jwt_ttl_minutes: int = Field(default=480, ge=1)
-    auth_cookie_name: str = "molvest_session"
-    auth_cookie_secure: bool = False
-    auth_cookie_samesite: Literal["lax", "strict"] = "lax"
-    demo_auth_enabled: bool = True
-
     cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=list)
     sse_heartbeat_seconds: float = Field(default=15.0, gt=0)
     dialog_idle_timeout_hours: float = Field(default=24.0, gt=0)
@@ -95,10 +87,8 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_security(self) -> Settings:
         if "*" in self.cors_origins:
-            raise ValueError("CORS wildcard is incompatible with credentialed cookies")
+            raise ValueError("CORS wildcard is not allowed")
         if self.environment == "production":
-            self.auth_cookie_secure = True
-            self.demo_auth_enabled = False
             if "change-me-before-production" in self.database_url:
                 raise ValueError("POSTGRES_PASSWORD must be changed in production")
         if self.storage_backend == "s3" and (

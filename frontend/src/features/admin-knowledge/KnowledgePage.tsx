@@ -34,7 +34,7 @@ import {
   Switch,
   useToast,
 } from "../../shared/ui";
-import { cn, formatRelativeDate, truncateTitle } from "../../shared/utils";
+import { cn, formatRelativeDate, truncateTitle, withDemoRole } from "../../shared/utils";
 
 const indexTone: Record<
   IndexStatus,
@@ -437,10 +437,10 @@ export default function KnowledgePage() {
                         <td className="min-w-0 px-2 py-4 sm:px-5">
                           <div className="flex min-w-0 items-center gap-2 sm:gap-3">
                             <a
-                              href={
+                              href={withDemoRole(
                                 document.downloadUrl ||
-                                knowledgeApi.documentDownloadUrl(document.id)
-                              }
+                                knowledgeApi.documentDownloadUrl(document.id),
+                              )}
                               download
                               className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-[#eef2fa] text-slate-500 transition hover:bg-molvest-100 hover:text-molvest-700 focus-visible:outline-2 focus-visible:outline-molvest-400"
                               title={`Скачать ${document.title}`}

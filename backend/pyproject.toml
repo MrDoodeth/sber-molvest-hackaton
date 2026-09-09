@@ -17,7 +17,6 @@ dependencies = [
   "langchain-gigachat==0.5.1",
   "pydantic==2.11.7",
   "pydantic-settings==2.10.1",
-  "PyJWT==2.10.1",
   "python-multipart==0.0.20",
   "qdrant-client==1.15.1",
   "SQLAlchemy==2.0.43",

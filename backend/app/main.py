@@ -7,7 +7,6 @@ from datetime import timedelta
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.deps import cookie_jwt_scheme
 from app.api.openapi import OPENAPI_TAGS
 from app.api.router import api_router
 from app.core.config import Settings
@@ -23,7 +22,6 @@ def create_app(
 ) -> FastAPI:
     actual_settings = settings or Settings()
     actual_container = container or build_container(actual_settings)
-    cookie_jwt_scheme.model.name = actual_settings.auth_cookie_name
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -57,7 +55,7 @@ def create_app(
         title=actual_settings.app_name,
         version="0.1.0",
         description=(
-            "Async FastAPI backend for the Molvest 1C support MVP: cookie RBAC, "
+            "Async FastAPI backend for the Molvest 1C support MVP: demo role context, "
             "dialogs and role-separated SSE, GigaChat generation, hybrid RAG, "
             "knowledge moderation and monitoring. REST JSON uses snake_case."
         ),
@@ -82,9 +80,9 @@ def create_app(
         app.add_middleware(
             CORSMiddleware,
             allow_origins=actual_settings.cors_origins,
-            allow_credentials=True,
+            allow_credentials=False,
             allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-            allow_headers=["Content-Type", "Last-Event-ID"],
+            allow_headers=["Content-Type", "Last-Event-ID", "X-Molvest-Role"],
         )
     app.include_router(api_router)
     return app

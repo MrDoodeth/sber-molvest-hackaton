@@ -217,10 +217,9 @@ seed не скачивает внешний массив документов.
   Единый `.env.example` содержит только GigaChat credentials. Остальные runtime
   defaults и dev host ports заданы в Compose; `docker-compose.dev.yml` использует dev
   defaults, а `docker-compose.yml` — production defaults и Caddy domain.
-  а `docker-compose.yml` публикует только Caddy и жёстко задаёт production security
-  defaults независимо от demo-значений шаблона. Auth/demo settings не являются
-  environment variables: development использует внутренние defaults, production
-  отключает demo login по `ENVIRONMENT=production`.
+   а `docker-compose.yml` публикует только Caddy и жёстко задаёт production
+   defaults независимо от demo-значений шаблона. Authentication settings не
+   являются environment variables; demo actor context используется в обоих режимах.
 
 ### 3.1. Текущее состояние реализации
 
@@ -260,8 +259,8 @@ seed не скачивает внешний массив документов.
 - фоновый sweeper каждые `DIALOG_IDLE_SCAN_SECONDS` закрывает неактивные Dialog в
   режиме `ai_support` после `DIALOG_IDLE_TIMEOUT_HOURS` без новых user/assistant
   сообщений; такие тикеты остаются `unrated` и отображаются как решённые AI.
-- demo-auth/seed-пользователи остаются намеренным MVP-режимом для демонстрации и не
-  являются текущей P0-задачей; production identity provider — отдельный roadmap.
+- seed-пользователи остаются намеренным demo-режимом для user/operator/admin контуров;
+  authentication в текущем MVP отсутствует.
 - формального `IChannelAdapter`, `IncomingMessage`/`OutgoingMessage` и каталогов
   `backend/app/channels` в текущем репозитории нет; все создаваемые через API Dialog
   имеют `channel=web`.
@@ -425,7 +424,7 @@ flowchart TB
 
 _Открытый вопрос для приёмки: считать SLA «<5 сек» как время до первого токена (со стримингом) или до полного ответа — уточнить у В.В. Донцовой._
 
-**Безопасность и данные:** self-hosted Qdrant/Postgres и local storage по умолчанию (либо внешний S3 через provider); JWT + роли user/operator/admin. В dev MVP единственный login — внутренний demo endpoint с Settings defaults; production login/auth provisioning и отзыв уже выданных JWT отсутствуют. GigaChat credentials находятся только на backend. В Docker/Linux устанавливаем доверенный сертификат НУЦ Минцифры или задаём `ca_bundle_file`; SSL verification не отключаем. Runtime-файлы удаляются из GigaChat File Storage при close/hard delete, а не обязательно сразу после каждого generation-call. PII не пишем в технические логи без необходимости.
+**Безопасность и данные:** self-hosted Qdrant/Postgres и local storage по умолчанию (либо внешний S3 через provider); authentication в MVP отсутствует. User/operator/admin контуры используют незащищённый `X-Molvest-Role` demo actor context и не являются публичным security boundary. GigaChat credentials находятся только на backend. В Docker/Linux устанавливаем доверенный сертификат НУЦ Минцифры или задаём `ca_bundle_file`; SSL verification не отключаем. Runtime-файлы удаляются из GigaChat File Storage при close/hard delete, а не обязательно сразу после каждого generation-call. PII не пишем в технические логи без необходимости.
 
 **Масштабирование:** на MVP отдельная очередь задач не нужна. Индексация запускается через FastAPI `BackgroundTasks` / простой in-process worker, а документы в `uploaded/processing` восстанавливаются при старте. Один пользовательский AI-turn глобально защищён PostgreSQL advisory admission lock, а локальный `TurnCoordinator` добавляет process-local guard. `GenerationGate` сериализует provider work только внутри одного процесса; `EventBroker` и SSE также работают только внутри процесса. Распределённая очередь для всех generation/file/vision вызовов и внешний broker для SSE при нескольких replicas остаются Roadmap.
 
@@ -3579,7 +3578,7 @@ chat primitives
 API client
 DTO/types
 query keys
-auth/session
+   demo actor context
 ```
 
 Внутренние компоненты `admin` не импортируются напрямую в `operator`, и наоборот.
@@ -3616,28 +3615,9 @@ Server data остаётся в React Query; не дублируем REST-fetch 
 
 ### 18.3 Auth и role guards
 
-Frontend bootstrap:
-
-```text
-GET /api/me
-```
-
-Ответ:
-
-```ts
-type CurrentUser = {
-  id: string;
-  role: "user" | "operator" | "admin";
-  displayName: string;
-};
-```
-
-Role guard отвечает только за UX/navigation. Backend повторно проверяет role на каждом endpoint.
-
-Для SPA + native `EventSource` используется same-origin auth через HttpOnly cookie.
-В dev demo login использует внутренние Settings defaults для cookie JWT. Production
-не включает login/auth provisioning: `ENVIRONMENT=production` принудительно отключает
-demo endpoint, а production identity provider не входит в текущий код. Production
+Frontend открывает контуры напрямую. Для API запросов frontend передаёт
+`X-Molvest-Role: user|operator|admin`; backend разрешает этот заголовок только как
+demo actor context. Это не authentication и не security boundary. Production
 публикует только Caddy на `80/443` и автоматически терминирует TLS. GigaChat
 credentials никогда не попадают в browser.
 
@@ -3713,7 +3693,6 @@ Streaming token не записываем в Query Cache на каждый chunk
 src/api/
 ├── client.ts
 ├── queryKeys.ts
-├── auth.ts
 ├── dialogs.ts
 ├── operator.ts
 ├── knowledge.ts
@@ -3989,9 +3968,7 @@ OpenAPI-схема FastAPI и Swagger UI `/docs` — источник истин
 
 | Method | Endpoint                                            | Назначение                                                    |
 | ------ | --------------------------------------------------- | ------------------------------------------------------------- |
-| GET    | `/api/me`                                           | текущий пользователь + role                                   |
-| POST   | `/api/auth/demo-login`                              | dev demo login по роли; отключён при `ENVIRONMENT=production` |
-| POST   | `/api/auth/logout`                                  | удалить HttpOnly session cookie; JWT server-side не отзывается |
+| Header | `X-Molvest-Role`                                    | demo actor: `user`, `operator` или `admin`                    |
 | GET    | `/api/dialogs`                                      | dialogs текущего user                                         |
 | POST   | `/api/dialogs`                                      | создать новый Dialog                                          |
 | GET    | `/api/dialogs/{dialogId}`                           | metadata Dialog, включая `is_processing` и `processing_error` |
@@ -4984,8 +4961,6 @@ frontend/
 │   ├── app/
 │   │   ├── router.tsx
 │   │   ├── providers.tsx
-│   │   ├── guards/
-│   │   │   └── RoleGuard.tsx
 │   │   └── layouts/
 │   │       ├── RootLayout.tsx
 │   │       ├── UserLayout.tsx
@@ -4995,7 +4970,6 @@ frontend/
 │   ├── api/
 │   │   ├── client.ts
 │   │   ├── queryKeys.ts
-│   │   ├── auth.ts
 │   │   ├── dialogs.ts
 │   │   ├── operator.ts
 │   │   ├── knowledge.ts
@@ -5083,8 +5057,7 @@ User/operator detail и queue queries дополнительно делают re
 - Admin destructive endpoints недоступны user/operator.
 - Attachment URL выдаётся backend только авторизованному пользователю с доступом к Dialog.
 - Markdown/LLM answer рендерится без небезопасного raw HTML.
-- В dev cookie не `Secure`; production Compose работает через Caddy с автоматическим
-  TLS и принудительно включает `Secure` cookie.
+- Production Compose работает через Caddy с автоматическим TLS.
 
 # Часть IV — План разработки и справка
 
@@ -5199,11 +5172,11 @@ frontend: актуальным UI является React SPA в `frontend/src`.
   PostgreSQL, Qdrant и backend не имеют host-портов. Caddy сам собирает и раздаёт
   production static frontend bundle. Dev Compose
   публикует свои сервисные порты только на loopback `127.0.0.1`; production использует
-  отдельные `edge`, `proxy` и `data` Docker networks, поэтому Caddy не имеет прямого
-  доступа к PostgreSQL/Qdrant. Auth/demo settings не являются env variables;
-  production отключает login и seed. На чистом production volume seed
-  users/sections/prompts/settings не создаются; Compose healthchecks проверяют Qdrant
-  и Caddy, но backend
+   отдельные `edge`, `proxy` и `data` Docker networks: Caddy видит backend только
+   через `proxy`, но не имеет прямого доступа к PostgreSQL/Qdrant. Authentication
+   settings не являются env variables; seed включён и на чистом production volume
+   создаёт demo users/sections/prompts/settings. Compose healthchecks проверяют Qdrant
+   и Caddy, но backend
   `/health` остаётся liveness endpoint и не является dependency-aware readiness.
   FastAPI Swagger/ReDoc/OpenAPI включены в development и отключены в production.
 - S3-compatible storage provider присутствует в коде, но MinIO service не входит в

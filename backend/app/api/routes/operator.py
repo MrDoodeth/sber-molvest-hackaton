@@ -5,11 +5,11 @@ import uuid
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 
-from app.api.deps import get_container, get_current_user
+from app.api.deps import get_container, get_request_actor
 from app.api.openapi import (
+    API_RESPONSES,
     OPERATOR_DIALOG_SSE_RESPONSE,
     OPERATOR_QUEUE_SSE_RESPONSE,
-    PROTECTED_RESPONSES,
 )
 from app.api.sse import SSE_HEADERS, event_stream, operator_dialog_event_stream
 from app.contracts.schemas import (
@@ -26,14 +26,14 @@ from app.services.container import ApplicationContainer
 router = APIRouter(
     prefix="/operator",
     tags=["Operator"],
-    responses=PROTECTED_RESPONSES,
+    responses=API_RESPONSES,
 )
 
 
 @router.get("/dialogs", response_model=list[DialogSummary])
 async def operator_dialogs(
     scope: str = Query(pattern="^(unassigned|mine)$"),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> list[DialogSummary]:
     return await container.dialogs.operator_queue(user, scope)
@@ -47,7 +47,7 @@ async def operator_dialogs(
 )
 async def claim_dialog(
     dialog_id: uuid.UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> DialogDetail:
     return await container.dialogs.claim(user, dialog_id)
@@ -62,7 +62,7 @@ async def claim_dialog(
 )
 async def generate_template(
     dialog_id: uuid.UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> OperatorTemplateDto:
     return await container.dialogs.generate_operator_template(user, dialog_id)
@@ -76,7 +76,7 @@ async def generate_template(
 )
 async def operator_events(
     request: Request,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> StreamingResponse:
     if user.role != UserRole.OPERATOR:
@@ -102,7 +102,7 @@ async def operator_events(
 async def operator_dialog_events(
     dialog_id: uuid.UUID,
     request: Request,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> StreamingResponse:
     await container.dialogs.assert_operator_sse_access(user, dialog_id)

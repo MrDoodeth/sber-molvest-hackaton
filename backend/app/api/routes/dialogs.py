@@ -16,8 +16,8 @@ from fastapi import (
 )
 from fastapi.responses import StreamingResponse
 
-from app.api.deps import get_container, get_current_user
-from app.api.openapi import PROTECTED_RESPONSES, USER_SSE_RESPONSE
+from app.api.deps import get_container, get_request_actor
+from app.api.openapi import API_RESPONSES, USER_SSE_RESPONSE
 from app.api.sse import SSE_HEADERS, event_stream
 from app.contracts.schemas import (
     DialogDetail,
@@ -40,12 +40,12 @@ from app.services.attachments import (
 from app.services.broker import user_dialog_channel
 from app.services.container import ApplicationContainer
 
-router = APIRouter(tags=["Dialogs"], responses=PROTECTED_RESPONSES)
+router = APIRouter(tags=["Dialogs"], responses=API_RESPONSES)
 
 
 @router.get("/dialogs", response_model=list[DialogSummary])
 async def list_dialogs(
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> list[DialogSummary]:
     return await container.dialogs.list_user_dialogs(user)
@@ -58,7 +58,7 @@ async def list_dialogs(
     status_code=201,
 )
 async def create_dialog(
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> DialogDetail:
     return await container.dialogs.create_dialog(user)
@@ -71,7 +71,7 @@ async def create_dialog(
 )
 async def get_dialog(
     dialog_id: uuid.UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> DialogDetail:
     return await container.dialogs.get_dialog(user, dialog_id)
@@ -82,7 +82,7 @@ async def list_messages(
     dialog_id: uuid.UUID,
     cursor: uuid.UUID | None = None,
     limit: int = Query(default=50, ge=1, le=200),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> MessagePage:
     return await container.dialogs.list_messages(user, dialog_id, cursor, limit)
@@ -126,7 +126,7 @@ async def send_message(
             "supported documents to 40 MB each."
         ),
     ),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> MessageDto:
     uploaded_files = attachments or []
@@ -195,7 +195,7 @@ async def send_message(
 )
 async def close_dialog(
     dialog_id: uuid.UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> DialogDetail:
     return await container.dialogs.close(user, dialog_id)
@@ -205,7 +205,7 @@ async def close_dialog(
 async def add_feedback(
     dialog_id: uuid.UUID,
     payload: FeedbackRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> FeedbackDto:
     feedback, _ = await container.moderation.add_feedback(
@@ -223,7 +223,7 @@ async def add_feedback(
 async def dialog_events(
     dialog_id: uuid.UUID,
     request: Request,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> StreamingResponse:
     await container.dialogs.assert_user_sse_access(user, dialog_id)
@@ -241,7 +241,7 @@ async def dialog_events(
 
 @router.get(
     "/attachments/{attachment_id}",
-    summary="Download an authorized dialog attachment",
+    summary="Download a dialog attachment",
     responses={
         200: {
             "description": "Original attachment bytes.",
@@ -255,7 +255,7 @@ async def dialog_events(
 )
 async def download_attachment(
     attachment_id: uuid.UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> Response:
     data, mime_type, file_name = await container.dialogs.read_attachment(

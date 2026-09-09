@@ -6,10 +6,6 @@ from app.contracts.schemas import ErrorResponse
 
 OPENAPI_TAGS: list[dict[str, str]] = [
     {
-        "name": "Auth",
-        "description": "HttpOnly cookie session, demo login and current user.",
-    },
-    {
         "name": "Dialogs",
         "description": (
             "User tickets, messages, attachments, feedback and user-safe SSE."
@@ -58,12 +54,7 @@ def _error(description: str, code: str, message: str) -> dict[str, Any]:
     }
 
 
-PROTECTED_RESPONSES: dict[int | str, dict[str, Any]] = {
-    401: _error(
-        "Authentication cookie is missing or expired.",
-        "unauthorized",
-        "Требуется авторизация",
-    ),
+API_RESPONSES: dict[int | str, dict[str, Any]] = {
     403: _error(
         "The role or resource guard denied access.", "forbidden", "Недостаточно прав"
     ),

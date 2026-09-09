@@ -3,7 +3,6 @@ import type { DocumentFilters } from "./knowledge";
 import type { MonitoringPeriod } from "./types";
 
 export const queryKeys = {
-  me: () => ["me"] as const,
   user: {
     dialogs: () => ["user", "dialogs"] as const,
   },

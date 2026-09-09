@@ -16,7 +16,6 @@ from app.core.enums import (
     IndexStatus,
     MessageAuthor,
     PromptType,
-    UserRole,
 )
 
 
@@ -36,14 +35,6 @@ class ErrorResponse(ApiModel):
 class UserRef(ApiModel):
     id: uuid.UUID
     display_name: str
-
-
-class CurrentUser(UserRef):
-    role: UserRole
-
-
-class DemoLoginRequest(ApiModel):
-    role: UserRole
 
 
 class SourceRef(ApiModel):

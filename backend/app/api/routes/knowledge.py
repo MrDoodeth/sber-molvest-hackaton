@@ -7,8 +7,8 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, File, UploadFile
 from fastapi.responses import Response
 
-from app.api.deps import get_container, get_current_user
-from app.api.openapi import PROTECTED_RESPONSES
+from app.api.deps import get_container, get_request_actor
+from app.api.openapi import API_RESPONSES
 from app.contracts.schemas import (
     KnowledgeDocumentDto,
     KnowledgeDocumentPatch,
@@ -27,7 +27,7 @@ from app.services.container import ApplicationContainer
 router = APIRouter(
     prefix="/admin/knowledge",
     tags=["Knowledge"],
-    responses=PROTECTED_RESPONSES,
+    responses=API_RESPONSES,
 )
 
 
@@ -38,7 +38,7 @@ def require_admin(user: User) -> None:
 
 @router.get("/sections", response_model=list[KnowledgeSectionDto])
 async def sections(
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> list[KnowledgeSectionDto]:
     require_admin(user)
@@ -48,7 +48,7 @@ async def sections(
 @router.post("/sections", response_model=KnowledgeSectionDto, status_code=201)
 async def create_section(
     payload: KnowledgeSectionCreate,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> KnowledgeSectionDto:
     require_admin(user)
@@ -59,7 +59,7 @@ async def create_section(
 async def patch_section(
     section_id: uuid.UUID,
     payload: KnowledgeSectionPatch,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> KnowledgeSectionDto:
     require_admin(user)
@@ -69,7 +69,7 @@ async def patch_section(
 @router.delete("/sections/{section_id}", status_code=204, response_model=None)
 async def delete_section(
     section_id: uuid.UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> None:
     require_admin(user)
@@ -79,7 +79,7 @@ async def delete_section(
 @router.get("/documents", response_model=KnowledgeDocumentsResponse)
 async def documents(
     section_id: uuid.UUID | None = None,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> KnowledgeDocumentsResponse:
     require_admin(user)
@@ -96,7 +96,7 @@ async def documents(
 async def upload_document(
     section_id: uuid.UUID,
     file: UploadFile = File(description="PDF, DOCX, HTML or Markdown; maximum 40 MB."),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> KnowledgeDocumentDto:
     require_admin(user)
@@ -133,7 +133,7 @@ async def upload_document(
 @router.get("/documents/{document_id}", response_model=KnowledgeDocumentDto)
 async def document(
     document_id: uuid.UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> KnowledgeDocumentDto:
     require_admin(user)
@@ -143,7 +143,7 @@ async def document(
 @router.get("/documents/{document_id}/download")
 async def download_document(
     document_id: uuid.UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> Response:
     require_admin(user)
@@ -163,7 +163,7 @@ async def download_document(
 async def patch_document(
     document_id: uuid.UUID,
     payload: KnowledgeDocumentPatch,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> KnowledgeDocumentDto:
     require_admin(user)
@@ -173,7 +173,7 @@ async def patch_document(
 @router.post("/documents/{document_id}/reindex", response_model=KnowledgeDocumentDto)
 async def reindex_document(
     document_id: uuid.UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> KnowledgeDocumentDto:
     require_admin(user)
@@ -183,7 +183,7 @@ async def reindex_document(
 @router.delete("/documents/{document_id}", status_code=204, response_model=None)
 async def delete_document(
     document_id: uuid.UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> None:
     require_admin(user)

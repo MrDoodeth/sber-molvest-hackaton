@@ -38,7 +38,11 @@ export function useEventSource<T extends TypedEvent>({
 
   useEffect(() => {
     if (!enabled) return;
-    const source = new EventSource(url, { withCredentials: true });
+    const role = typeof window !== "undefined" ? window.location.pathname.split("/")[1] : "user";
+    const eventUrl = role === "user" || role === "operator" || role === "admin"
+      ? `${url}${url.includes("?") ? "&" : "?"}role=${role}`
+      : url;
+    const source = new EventSource(eventUrl);
     const dispatch = (eventName: string, event: Event) => {
       if (!(event instanceof MessageEvent) || typeof event.data !== "string") return;
       const parsed = parseSsePayload<T>(eventName, event.data);

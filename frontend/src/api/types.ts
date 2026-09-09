@@ -15,10 +15,6 @@ export interface UserRef {
   displayName: string;
 }
 
-export interface CurrentUser extends UserRef {
-  role: Role;
-}
-
 export interface AttachmentDto {
   id: string;
   messageId: string;

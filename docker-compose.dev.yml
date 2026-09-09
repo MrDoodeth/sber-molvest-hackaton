@@ -5,15 +5,15 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-molvest}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-molvest}
-      POSTGRES_DB: ${POSTGRES_DB:-molvest}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-molvest123}
+      POSTGRES_DB: ${POSTGRES_DB:-molvestdb}
     ports:
-      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_dev_data:/var/lib/postgresql/data
     healthcheck:
       test:
-        ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+        ["CMD-SHELL", 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
       interval: 5s
       timeout: 3s
       retries: 10
@@ -23,8 +23,8 @@ services:
   qdrant:
     image: qdrant/qdrant:v1.15.1
     ports:
-      - "127.0.0.1:6333:6333"
-      - "127.0.0.1:6334:6334"
+      - "6333:6333"
+      - "6334:6334"
     volumes:
       - qdrant_dev_data:/qdrant/storage
     healthcheck:
@@ -53,7 +53,7 @@ services:
       - /app/app
     environment:
       ENVIRONMENT: ${ENVIRONMENT:-development}
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-molvest}:${POSTGRES_PASSWORD:-molvest}@postgres:5432/${POSTGRES_DB:-molvest}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-molvest}:${POSTGRES_PASSWORD:-molvest123}@postgres:5432/${POSTGRES_DB:-molvestdb}
       GIGACHAT_CREDENTIALS: ${GIGACHAT_CREDENTIALS:-}
       GIGACHAT_SCOPE: ${GIGACHAT_SCOPE:-GIGACHAT_API_PERS}
       GIGACHAT_CA_BUNDLE_FILE: /etc/ssl/certs/ca-certificates.crt

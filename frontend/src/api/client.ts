@@ -20,7 +20,6 @@ interface ErrorShape {
 }
 
 const PAYLOAD_TOO_LARGE_MESSAGE = "Файл слишком большой. Изображение — до 15 МБ, документ — до 40 МБ.";
-export const AUTH_EXPIRED_EVENT = "molvest:auth-expired";
 
 function isHtmlError(value: string): boolean {
   return /<\/?(?:html|head|body|title|h1)\b/i.test(value);
@@ -73,6 +72,12 @@ interface ApiRequestOptions extends Omit<RequestInit, "body"> {
 
 export async function apiRequest<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
   const headers = new Headers(options.headers);
+  if (typeof window !== "undefined") {
+    const role = window.location.pathname.split("/")[1];
+    if (role === "user" || role === "operator" || role === "admin") {
+      headers.set("X-Molvest-Role", role);
+    }
+  }
   let body = options.body;
 
   if (options.json !== undefined) {
@@ -84,7 +89,6 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
     ...options,
     headers,
     body,
-    credentials: "include",
   });
 
   const text = response.status === 204 ? "" : await response.text();
@@ -98,9 +102,6 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
   }
 
   if (!response.ok) {
-    if (response.status === 401 && typeof window !== "undefined") {
-      window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
-    }
     throw normalizeApiError(payload, response.status, response.statusText);
   }
 

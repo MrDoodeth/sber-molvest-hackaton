@@ -203,8 +203,8 @@ docker compose -f docker-compose.dev.yml up --build -d --wait
 | Backend liveness | <http://localhost:8000/health> |
 | Qdrant HTTP API | <http://localhost:6333> |
 
-На стартовой странице выберите demo-роль: пользователь, оператор или
-администратор. Demo login включён только в development Compose.
+На стартовой странице выберите demo-контур: пользователь, оператор или
+администратор. Authentication и login flow в MVP отсутствуют.
 
 ### Управление dev-стеком
 
@@ -358,19 +358,13 @@ git pull
 docker compose -f docker-compose.yml up --build -d --wait
 ```
 
-### Важное ограничение production authentication
+### Demo actor mode
 
-Production Compose не включает login/auth provisioning и использует
-`SEED_ON_STARTUP=false` по умолчанию.
-Это означает, что при чистом production volume не создаются demo users, системные
-sections, prompts и settings.
-В текущем коде единственный login — demo endpoint; production identity provider,
-регистрация пользователей, SSO и отзыв уже выданных JWT ещё не реализованы. Поэтому
-production Compose уже готов как TLS/private-network deployment baseline, но
-end-user authentication и первичное provisioning для реального публичного запуска
-требуют отдельной интеграции IdP/SSO.
-
-Не включайте demo login в публичной среде как замену identity provider.
+Проект работает без authentication: frontend открывает user/operator/admin контуры
+напрямую, а API получает выбранный demo actor через `X-Molvest-Role`. Этот заголовок
+не является механизмом безопасности и не должен использоваться для публичного
+разграничения доступа. Backend сохраняет три seeded actor-записи, чтобы корректно
+работали разные бизнес-сценарии MVP.
 
 ## Конфигурация
 
@@ -412,13 +406,14 @@ dev/prod Compose используют встроенные defaults. Подро�
 
 По умолчанию используется local object storage в Docker volume. MinIO в Compose не
 входит; для S3 нужно предоставить внешний endpoint и credentials. `SEED_ON_STARTUP`
-имеет default `true` в dev и `false` в production. PostgreSQL user/database (`molvest`),
+имеет default `true` и в dev, и в production. PostgreSQL user/database (`molvest`),
 Qdrant URL и остальные внутренние service defaults находятся в Compose и не требуют
 `.env`.
 
 `ENVIRONMENT` не является пользовательской переменной: dev Compose передаёт
-`development`, production Compose передаёт `production`. Backend использует режим,
-чтобы включить dev Swagger/demo defaults и отключить demo login в production.
+`development`, production Compose передаёт `production`. Backend использует режим
+для dev Swagger и service defaults; demo actor context остаётся доступным в обоих
+Compose-профилях.
 
 ## Проверки и тесты
 
@@ -472,16 +467,16 @@ backend/
   app/
     api/          FastAPI REST + SSE routes
     contracts/    Pydantic DTOs
-    core/         config, auth, database, locks
+    core/         config, database, locks
     models/       SQLAlchemy entities
     providers/    GigaChat, embeddings, Docling, Qdrant, storage
     services/     dialogs, RAG, KB, moderation, settings, tasks
   Dockerfile
 frontend/
   src/
-    app/          router, layouts, providers, guards
+    app/          router, layouts, providers
     api/          REST client, DTOs, query keys
-    features/     auth, user, operator and admin screens
+    features/     user, operator and admin screens
     shared/       chat, hooks and UI primitives
   Dockerfile      development Vite image
   Dockerfile.caddy production static frontend + Caddy image

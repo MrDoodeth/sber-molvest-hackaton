@@ -1,10 +1,8 @@
 import { lazy, Suspense } from "react";
 import { createBrowserRouter, Navigate } from "react-router-dom";
-import RoleGuard from "./guards/RoleGuard";
 import RootLayout from "./layouts/RootLayout";
 import { PageLoader } from "../shared/ui";
 
-const LoginPage = lazy(() => import("../features/auth/LoginPage"));
 const UserLayout = lazy(() => import("./layouts/UserLayout"));
 const OperatorLayout = lazy(() => import("./layouts/OperatorLayout"));
 const AdminLayout = lazy(() => import("./layouts/AdminLayout"));
@@ -31,10 +29,10 @@ export const router = createBrowserRouter([
   {
     element: <RootLayout />,
     children: [
-      { index: true, element: suspended(<LoginPage />) },
+      { index: true, element: <Navigate to="/user" replace /> },
       {
         path: "user",
-        element: <RoleGuard allow="user">{suspended(<UserLayout />)}</RoleGuard>,
+        element: suspended(<UserLayout />),
         children: [
           { index: true, element: suspended(<UserHomePage />) },
           { path: "new", element: suspended(<NewUserDialogPage />) },
@@ -43,7 +41,7 @@ export const router = createBrowserRouter([
       },
       {
         path: "operator",
-        element: <RoleGuard allow="operator">{suspended(<OperatorLayout />)}</RoleGuard>,
+        element: suspended(<OperatorLayout />),
         children: [
           { index: true, element: suspended(<OperatorWorkspace />) },
           { path: "dialogs/:dialogId", element: suspended(<OperatorWorkspace />) },
@@ -51,7 +49,7 @@ export const router = createBrowserRouter([
       },
       {
         path: "admin",
-        element: <RoleGuard allow="admin">{suspended(<AdminLayout />)}</RoleGuard>,
+        element: suspended(<AdminLayout />),
         children: [
           { index: true, element: <Navigate to="dialogs" replace /> },
           { path: "dialogs", element: suspended(<AdminDialogsPage />) },

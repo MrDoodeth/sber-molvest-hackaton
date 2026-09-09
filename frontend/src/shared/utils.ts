@@ -124,10 +124,20 @@ export function safeAttachmentUrl(attachment: Pick<AttachmentDto, "url">): strin
   try {
     const url = new URL(attachment.url, window.location.origin);
     if (url.origin !== window.location.origin || !url.pathname.startsWith("/api/")) return undefined;
-    return `${url.pathname}${url.search}`;
+    return withDemoRole(`${url.pathname}${url.search}`);
   } catch {
     return undefined;
   }
+}
+
+export function withDemoRole(path: string): string {
+  if (typeof window === "undefined") return path;
+  const url = new URL(path, window.location.origin);
+  const role = window.location.pathname.split("/")[1];
+  if (role === "user" || role === "operator" || role === "admin") {
+    url.searchParams.set("role", role);
+  }
+  return `${url.pathname}${url.search}${url.hash}`;
 }
 
 export function getErrorMessage(error: unknown): string {

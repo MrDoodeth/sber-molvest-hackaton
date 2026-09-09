@@ -6,13 +6,13 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-molvest}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-molvest-production}
-      POSTGRES_DB: ${POSTGRES_DB:-molvest}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-molvest-production-123}
+      POSTGRES_DB: ${POSTGRES_DB:-molvestdb}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test:
-        ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+        ["CMD-SHELL", 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
       interval: 5s
       timeout: 3s
       retries: 10
@@ -41,7 +41,7 @@ services:
       dockerfile: Dockerfile
     environment:
       ENVIRONMENT: ${ENVIRONMENT:-production}
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-molvest}:${POSTGRES_PASSWORD:-molvest-production}@postgres:5432/${POSTGRES_DB:-molvest}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-molvest}:${POSTGRES_PASSWORD:-molvest-production-123}@postgres:5432/${POSTGRES_DB:-molvestdb}
       GIGACHAT_CREDENTIALS: ${GIGACHAT_CREDENTIALS:-}
       GIGACHAT_SCOPE: ${GIGACHAT_SCOPE:-GIGACHAT_API_PERS}
       GIGACHAT_CA_BUNDLE_FILE: /etc/ssl/certs/ca-certificates.crt
@@ -62,7 +62,7 @@ services:
       S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
       S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
       S3_USE_SSL: ${S3_USE_SSL:-true}
-      SEED_ON_STARTUP: ${SEED_ON_STARTUP:-false}
+      SEED_ON_STARTUP: ${SEED_ON_STARTUP:-true}
     expose:
       - "8000"
     volumes:
@@ -101,12 +101,16 @@ services:
         condition: service_healthy
     healthcheck:
       test:
-        ["CMD-SHELL", "wget --header='Host: $${DOMAIN}' --spider --quiet http://localhost/"]
+        [
+          "CMD-SHELL",
+          "wget --header='Host: $${DOMAIN}' --spider --quiet http://localhost/",
+        ]
       interval: 10s
       timeout: 3s
       retries: 10
     networks:
       - edge
+      - proxy
 
 volumes:
   postgres_data:
