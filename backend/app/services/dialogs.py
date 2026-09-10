@@ -4,7 +4,8 @@ import asyncio
 import logging
 import time
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
 
@@ -79,6 +80,7 @@ from app.services.tasks import TaskSupervisor
 
 logger = logging.getLogger(__name__)
 LOW_CONFIDENCE_ESCALATION_STREAK = 3
+AI_PROCESSING_ADVISORY_LOCK_KEY = 712031045
 _OPERATOR_REQUEST_MARKERS = (
     "подключите оператора",
     "подключите живого оператора",
@@ -181,11 +183,31 @@ class DialogService:
             finally:
                 self._processing_message_ids.discard(message_id)
                 self._turn_coordinator.release(dialog_id, message_id)
-                await self._schedule_next_pending_turn()
+                if self._tasks.accepting:
+                    await self._schedule_next_pending_turn()
 
-        self._tasks.spawn(run())
+        if not self._tasks.spawn(run()):
+            self._processing_message_ids.discard(message_id)
+            self._turn_coordinator.release(dialog_id, message_id)
 
     async def recover_pending_turns(self) -> None:
+        async with self._processing_lock() as acquired:
+            if not acquired:
+                return
+            await self._recover_processing_rows()
+        await self._schedule_next_pending_turn()
+
+    async def recover_pending_turns_loop(self, scan_interval_seconds: float) -> None:
+        while True:
+            try:
+                await self.recover_pending_turns()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("AI turn recovery sweep failed")
+            await asyncio.sleep(scan_interval_seconds)
+
+    async def _recover_processing_rows(self) -> None:
         async with self._session_factory() as session:
             triggers = list(
                 await session.scalars(
@@ -215,7 +237,28 @@ class DialogService:
                     changed = True
             if changed:
                 await session.commit()
-        await self._schedule_next_pending_turn()
+
+    @asynccontextmanager
+    async def _processing_lock(self) -> AsyncIterator[bool]:
+        async with self._session_factory() as session:
+            bind = session.bind
+            if bind is None or bind.dialect.name != "postgresql":
+                yield True
+                return
+            acquired = bool(
+                await session.scalar(
+                    text("SELECT pg_try_advisory_lock(:lock_key)"),
+                    {"lock_key": AI_PROCESSING_ADVISORY_LOCK_KEY},
+                )
+            )
+            try:
+                yield acquired
+            finally:
+                if acquired:
+                    await session.execute(
+                        text("SELECT pg_advisory_unlock(:lock_key)"),
+                        {"lock_key": AI_PROCESSING_ADVISORY_LOCK_KEY},
+                    )
 
     async def create_dialog(self, user: User) -> DialogDetail:
         if user.role != UserRole.USER:
@@ -297,9 +340,7 @@ class DialogService:
         limit: int,
     ) -> MessagePage:
         async with self._session_factory() as session:
-            # Hold the dialog row lock through attachment storage and commit so
-            # another worker cannot close the dialog between validation and save.
-            dialog = await session.get(Dialog, dialog_id, with_for_update=True)
+            dialog = await session.get(Dialog, dialog_id)
             if dialog is None:
                 raise NotFoundError("Диалог не найден")
             self._assert_read_access(requester, dialog)
@@ -389,7 +430,8 @@ class DialogService:
             raise ForbiddenError("Эта роль не может отправлять сообщения")
 
         async with self._session_factory() as session:
-            dialog = await session.get(Dialog, dialog_id)
+            # Serialize validation and commit with close() across all workers.
+            dialog = await session.get(Dialog, dialog_id, with_for_update=True)
             if dialog is None:
                 raise NotFoundError("Диалог не найден")
             existing = await session.scalar(
@@ -514,7 +556,7 @@ class DialogService:
                             message_id=message.id,
                             storage_key=storage_key,
                             mime_type=upload.mime_type,
-                            size_bytes=len(upload.data),
+                            size_bytes=upload.size_bytes,
                         )
                     )
                     stored_keys.append(storage_key)
@@ -952,6 +994,13 @@ class DialogService:
             )
 
     async def process_user_message(self, message_id: uuid.UUID) -> None:
+        async with self._processing_lock() as acquired:
+            if not acquired:
+                return
+            await self._recover_processing_rows()
+            await self._process_user_message_owned(message_id)
+
+    async def _process_user_message_owned(self, message_id: uuid.UUID) -> None:
         started = time.monotonic()
         dialog_id: uuid.UUID | None = None
         confidence: float | None = None
@@ -1147,6 +1196,9 @@ class DialogService:
                         runtime_settings,
                         prompt_content,
                     )
+        except asyncio.CancelledError:
+            await self._mark_turn_pending(message_id)
+            raise
         except ProviderError as exc:
             await self._mark_turn_failed(message_id, str(exc))
             if dialog_id is not None:
@@ -1560,6 +1612,22 @@ class DialogService:
                 await session.commit()
         except Exception:
             logger.exception("Unable to persist processing failure for %s", message_id)
+
+    async def _mark_turn_pending(self, message_id: uuid.UUID) -> None:
+        try:
+            async with self._session_factory() as session:
+                trigger = await session.get(Message, message_id, with_for_update=True)
+                if (
+                    trigger is None
+                    or trigger.author_type != MessageAuthor.USER
+                    or trigger.processing_status != MessageProcessingStatus.PROCESSING
+                ):
+                    return
+                trigger.processing_status = MessageProcessingStatus.PENDING
+                trigger.processing_error = None
+                await session.commit()
+        except Exception:
+            logger.exception("Unable to requeue cancelled turn %s", message_id)
 
     async def _record_metric(
         self,

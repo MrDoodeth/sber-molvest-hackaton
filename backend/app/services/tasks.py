@@ -12,18 +12,27 @@ class TaskSupervisor:
     def __init__(self) -> None:
         self._tasks: set[asyncio.Task[object]] = set()
         self._cancel_on_shutdown: set[asyncio.Task[object]] = set()
+        self._closing = False
+
+    @property
+    def accepting(self) -> bool:
+        return not self._closing
 
     def spawn(
         self,
         awaitable: Coroutine[Any, Any, object],
         *,
         cancel_on_shutdown: bool = False,
-    ) -> None:
+    ) -> bool:
+        if self._closing:
+            awaitable.close()
+            return False
         task: asyncio.Task[object] = asyncio.create_task(awaitable)
         self._tasks.add(task)
         if cancel_on_shutdown:
             self._cancel_on_shutdown.add(task)
         task.add_done_callback(self._done)
+        return True
 
     def _done(self, task: asyncio.Task[object]) -> None:
         self._tasks.discard(task)
@@ -42,6 +51,7 @@ class TaskSupervisor:
             await asyncio.gather(*tuple(self._tasks), return_exceptions=True)
 
     async def shutdown(self, grace_seconds: float = 10.0) -> None:
+        self._closing = True
         if not self._tasks:
             return
         for task in tuple(self._cancel_on_shutdown):

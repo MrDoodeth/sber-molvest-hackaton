@@ -35,7 +35,7 @@ from app.services.attachments import (
     MAX_RUNTIME_IMAGES,
     MAX_RUNTIME_REQUEST_BYTES,
     ValidatedUpload,
-    validate_upload,
+    validate_upload_stream,
 )
 from app.services.broker import user_dialog_channel
 from app.services.container import ApplicationContainer
@@ -155,22 +155,10 @@ async def send_message(
                     "Суммарный размер вложений должен быть менее 80 МБ",
                     {"max_bytes": MAX_RUNTIME_REQUEST_BYTES},
                 )
-            individual_limit = (
-                container.settings.runtime_image_max_bytes
-                if (attachment.content_type or "").startswith("image/")
-                else container.settings.runtime_document_max_bytes
-            )
-            remaining = MAX_RUNTIME_REQUEST_BYTES - total_bytes
-            data = await attachment.read(min(individual_limit, remaining) + 1)
-            if len(data) >= remaining:
-                raise UnprocessableError(
-                    "Суммарный размер вложений должен быть менее 80 МБ",
-                    {"max_bytes": MAX_RUNTIME_REQUEST_BYTES},
-                )
-            upload = validate_upload(
+            upload = await validate_upload_stream(
                 file_name=attachment.filename,
                 content_type=attachment.content_type,
-                data=data,
+                upload=attachment,
                 permanent=False,
                 settings=container.settings,
             )
@@ -181,7 +169,12 @@ async def send_message(
                         "Можно прикрепить только одно изображение за сообщение",
                         {"max_images": MAX_RUNTIME_IMAGES},
                     )
-            total_bytes += len(upload.data)
+            total_bytes += upload.size_bytes
+            if total_bytes >= MAX_RUNTIME_REQUEST_BYTES:
+                raise UnprocessableError(
+                    "Суммарный размер вложений должен быть менее 80 МБ",
+                    {"max_bytes": MAX_RUNTIME_REQUEST_BYTES},
+                )
             validated.append(upload)
     message, created = await container.dialogs.persist_message(
         requester=user,

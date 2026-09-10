@@ -69,7 +69,7 @@ def build_container(
     storage: ObjectStorage | None = None,
 ) -> ApplicationContainer:
     engine, session_factory = create_database(settings.database_url)
-    generation_gate = GenerationGate()
+    generation_gate = GenerationGate(engine)
     turn_coordinator = TurnCoordinator()
     actual_llm = llm_provider or GigaChatProvider(settings, generation_gate)
     actual_embedding = embedding_provider or BgeM3EmbeddingProvider(
@@ -79,6 +79,7 @@ def build_container(
     actual_vector = vector_store or QdrantHybridVectorStore(
         settings.qdrant_url,
         settings.qdrant_api_key.get_secret_value() if settings.qdrant_api_key else None,
+        timeout_seconds=settings.qdrant_timeout_seconds,
     )
     actual_parser = document_parser or DoclingHybridParser(
         model_path=settings.embedding_model_path,
@@ -97,15 +98,30 @@ def build_container(
             access_key_id=settings.s3_access_key_id.get_secret_value(),
             secret_access_key=settings.s3_secret_access_key.get_secret_value(),
             use_ssl=settings.s3_use_ssl,
+            operation_timeout_seconds=settings.storage_operation_timeout_seconds,
+            connect_timeout_seconds=settings.s3_connect_timeout_seconds,
+            read_timeout_seconds=settings.s3_read_timeout_seconds,
         )
     else:
-        actual_storage = LocalObjectStorage(settings.local_storage_path)
-    broker = EventBroker()
+        actual_storage = LocalObjectStorage(
+            settings.local_storage_path,
+            timeout_seconds=settings.storage_operation_timeout_seconds,
+        )
+    broker = EventBroker(
+        settings.redis_url,
+        connect_timeout_seconds=settings.redis_connect_timeout_seconds,
+        socket_timeout_seconds=settings.redis_socket_timeout_seconds,
+    )
     tasks = TaskSupervisor()
     settings_service = SettingsService()
     prompt_service = PromptService()
     attachment_service = AttachmentService(actual_storage, actual_llm, settings)
-    rag_cache = RAGCache(settings.redis_url, settings.rag_cache_ttl_seconds)
+    rag_cache = RAGCache(
+        settings.redis_url,
+        settings.rag_cache_ttl_seconds,
+        connect_timeout_seconds=settings.redis_connect_timeout_seconds,
+        socket_timeout_seconds=settings.redis_socket_timeout_seconds,
+    )
     rag_service = RAGService(actual_embedding, actual_vector, rag_cache)
     context_builder = ContextBuilder()
     generation_context = GenerationContextService(

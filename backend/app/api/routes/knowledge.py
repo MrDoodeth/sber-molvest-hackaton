@@ -21,7 +21,7 @@ from app.core.constants import DEFAULT_CASE_SECTION_ID, DOCUMENTATION_SECTION_ID
 from app.core.enums import DocumentSourceType, UserRole
 from app.core.errors import ForbiddenError, UnprocessableError
 from app.models import User
-from app.services.attachments import validate_upload
+from app.services.attachments import validate_upload_stream
 from app.services.container import ApplicationContainer
 
 router = APIRouter(
@@ -104,11 +104,10 @@ async def upload_document(
         raise UnprocessableError(
             "Раздел «Журнал обращений» заполняется только одобренными кейсами"
         )
-    data = await file.read(container.settings.permanent_document_max_bytes + 1)
-    upload = validate_upload(
+    upload = await validate_upload_stream(
         file_name=file.filename,
         content_type=file.content_type,
-        data=data,
+        upload=file,
         permanent=True,
         settings=container.settings,
     )

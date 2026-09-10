@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     sse_heartbeat_seconds: float = Field(default=15.0, gt=0)
     dialog_idle_timeout_hours: float = Field(default=24.0, gt=0)
     dialog_idle_scan_seconds: float = Field(default=300.0, gt=0)
+    ai_turn_recovery_scan_seconds: float = Field(default=15.0, gt=0)
 
     storage_backend: Literal["local", "s3"] = "local"
     local_storage_path: Path = Path("./var/storage")
@@ -60,11 +61,17 @@ class Settings(BaseSettings):
     s3_access_key_id: SecretStr | None = None
     s3_secret_access_key: SecretStr | None = None
     s3_use_ssl: bool = True
+    storage_operation_timeout_seconds: float = Field(default=60.0, gt=0)
+    s3_connect_timeout_seconds: float = Field(default=10.0, gt=0)
+    s3_read_timeout_seconds: float = Field(default=60.0, gt=0)
 
     qdrant_url: str = "http://localhost:6333"
     qdrant_api_key: SecretStr | None = None
+    qdrant_timeout_seconds: int = Field(default=10, ge=1)
     redis_url: str | None = None
     rag_cache_ttl_seconds: int = Field(default=900, ge=1)
+    redis_connect_timeout_seconds: float = Field(default=2.0, gt=0)
+    redis_socket_timeout_seconds: float = Field(default=2.0, gt=0)
     embedding_device: str = "cpu"
     embedding_model_path: Path = Path("/opt/models/bge-m3")
     docling_artifacts_path: Path | None = None
@@ -75,10 +82,12 @@ class Settings(BaseSettings):
     gigachat_ca_bundle_file: Path | None = None
     gigachat_max_retries: int = Field(default=3, ge=0)
     gigachat_retry_backoff_factor: float = Field(default=0.5, ge=0)
+    gigachat_timeout_seconds: float = Field(default=120.0, gt=0)
 
     runtime_image_max_bytes: int = 15 * 1024 * 1024
     runtime_document_max_bytes: int = 40 * 1024 * 1024
     permanent_document_max_bytes: int = 40 * 1024 * 1024
+    upload_max_concurrency: int = Field(default=2, ge=1, le=16)
 
     @field_validator("cors_origins", mode="before")
     @classmethod

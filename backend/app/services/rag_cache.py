@@ -13,8 +13,24 @@ RAG_CACHE_VERSION_KEY = "rag_cache_version"
 
 
 class RAGCache:
-    def __init__(self, url: str | None, ttl_seconds: int) -> None:
-        self._client = Redis.from_url(url, decode_responses=True) if url else None
+    def __init__(
+        self,
+        url: str | None,
+        ttl_seconds: int,
+        *,
+        connect_timeout_seconds: float = 2.0,
+        socket_timeout_seconds: float = 2.0,
+    ) -> None:
+        self._client = (
+            Redis.from_url(
+                url,
+                decode_responses=True,
+                socket_connect_timeout=connect_timeout_seconds,
+                socket_timeout=socket_timeout_seconds,
+            )
+            if url
+            else None
+        )
         self._ttl_seconds = ttl_seconds
 
     async def get(self, key: str) -> list[VectorHit] | None:

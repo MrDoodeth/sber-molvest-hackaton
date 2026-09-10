@@ -4,7 +4,7 @@ import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, BinaryIO, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
@@ -57,6 +57,8 @@ class VectorStore(Protocol):
 
 class ObjectStorage(Protocol):
     async def put(self, key: str, data: bytes, content_type: str) -> None: ...
+
+    async def put_file(self, key: str, source: BinaryIO, content_type: str) -> None: ...
 
     async def get(self, key: str) -> bytes: ...
 

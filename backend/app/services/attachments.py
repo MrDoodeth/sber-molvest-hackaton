@@ -3,7 +3,10 @@ from __future__ import annotations
 import re
 import uuid
 from dataclasses import dataclass
+from hashlib import sha256
+from io import BytesIO
 from pathlib import PurePath
+from typing import BinaryIO, Protocol
 
 from app.core.config import Settings
 from app.core.errors import UnprocessableError
@@ -58,7 +61,9 @@ class ValidatedUpload:
     file_name: str
     extension: str
     mime_type: str
-    data: bytes
+    source: BinaryIO
+    size_bytes: int
+    sha256: str
 
     @property
     def is_screenshot(self) -> bool:
@@ -83,6 +88,68 @@ def validate_upload(
     permanent: bool,
     settings: Settings,
 ) -> ValidatedUpload:
+    safe_name, extension, mime_type, max_size = _upload_metadata(
+        file_name, content_type, permanent, settings
+    )
+    _validate_size(len(data), max_size)
+    _validate_signature(mime_type, data[:16])
+    return ValidatedUpload(
+        file_name=safe_name,
+        extension=extension,
+        mime_type=mime_type,
+        source=BytesIO(data),
+        size_bytes=len(data),
+        sha256=sha256(data).hexdigest(),
+    )
+
+
+class AsyncUpload(Protocol):
+    file: BinaryIO
+
+    async def read(self, size: int = -1) -> bytes: ...
+
+    async def seek(self, offset: int) -> None: ...
+
+
+async def validate_upload_stream(
+    *,
+    file_name: str | None,
+    content_type: str | None,
+    upload: AsyncUpload,
+    permanent: bool,
+    settings: Settings,
+) -> ValidatedUpload:
+    safe_name, extension, mime_type, max_size = _upload_metadata(
+        file_name, content_type, permanent, settings
+    )
+    digest = sha256()
+    prefix = b""
+    size = 0
+    while chunk := await upload.read(1024 * 1024):
+        size += len(chunk)
+        _validate_size(size, max_size)
+        digest.update(chunk)
+        if len(prefix) < 16:
+            prefix = (prefix + chunk)[:16]
+    _validate_size(size, max_size)
+    _validate_signature(mime_type, prefix)
+    await upload.seek(0)
+    return ValidatedUpload(
+        file_name=safe_name,
+        extension=extension,
+        mime_type=mime_type,
+        source=upload.file,
+        size_bytes=size,
+        sha256=digest.hexdigest(),
+    )
+
+
+def _upload_metadata(
+    file_name: str | None,
+    content_type: str | None,
+    permanent: bool,
+    settings: Settings,
+) -> tuple[str, str, str, int]:
     safe_name = safe_file_name(file_name)
     extension = PurePath(safe_name).suffix.lower()
     mime_type = (content_type or "").split(";", 1)[0].strip().lower()
@@ -92,37 +159,38 @@ def validate_upload(
             "Неподдерживаемый тип файла",
             {"file_name": safe_name, "mime_type": mime_type},
         )
-    if not data:
-        raise UnprocessableError("Файл пуст")
     if permanent:
         max_size = settings.permanent_document_max_bytes
     elif mime_type.startswith("image/"):
         max_size = settings.runtime_image_max_bytes
     else:
         max_size = settings.runtime_document_max_bytes
-    if len(data) > max_size:
+    return safe_name, extension, mime_type, max_size
+
+
+def _validate_size(size: int, max_size: int) -> None:
+    if size == 0:
+        raise UnprocessableError("Файл пуст")
+    if size > max_size:
         raise UnprocessableError(
             "Файл превышает допустимый размер",
-            {"max_bytes": max_size, "actual_bytes": len(data)},
+            {"max_bytes": max_size, "actual_bytes": size},
         )
-    if mime_type == "image/png" and not data.startswith(b"\x89PNG\r\n\x1a\n"):
+
+
+def _validate_signature(mime_type: str, prefix: bytes) -> None:
+    if mime_type == "image/png" and not prefix.startswith(b"\x89PNG\r\n\x1a\n"):
         raise UnprocessableError("Содержимое файла не является PNG")
-    if mime_type == "image/jpeg" and not data.startswith(b"\xff\xd8\xff"):
+    if mime_type == "image/jpeg" and not prefix.startswith(b"\xff\xd8\xff"):
         raise UnprocessableError("Содержимое файла не является JPEG")
     if mime_type == "image/tiff" and not (
-        data.startswith(b"II*\x00") or data.startswith(b"MM\x00*")
+        prefix.startswith(b"II*\x00") or prefix.startswith(b"MM\x00*")
     ):
         raise UnprocessableError("Содержимое файла не является TIFF")
-    if mime_type == "image/bmp" and not data.startswith(b"BM"):
+    if mime_type == "image/bmp" and not prefix.startswith(b"BM"):
         raise UnprocessableError("Содержимое файла не является BMP")
-    if mime_type == "application/pdf" and not data.startswith(b"%PDF"):
+    if mime_type == "application/pdf" and not prefix.startswith(b"%PDF"):
         raise UnprocessableError("Содержимое файла не является PDF")
-    return ValidatedUpload(
-        file_name=safe_name,
-        extension=extension,
-        mime_type=mime_type,
-        data=data,
-    )
 
 
 class AttachmentService:
@@ -142,7 +210,12 @@ class AttachmentService:
         # Keep the original filename in the last path segment while allowing
         # multiple files with the same name in one message.
         key = f"attachments/{message_id}/{uuid.uuid4()}/{upload.file_name}"
-        await self.storage.put(key, upload.data, upload.mime_type)
+        upload.source.seek(0)
+        put_file = getattr(self.storage, "put_file", None)
+        if callable(put_file):
+            await put_file(key, upload.source, upload.mime_type)
+        else:
+            await self.storage.put(key, upload.source.read(), upload.mime_type)
         return key
 
     async def cleanup_local(self, storage_keys: list[str]) -> None:

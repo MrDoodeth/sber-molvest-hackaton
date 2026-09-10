@@ -141,9 +141,10 @@ FastAPI modular monolith
   template. Интеграция идёт через `langchain-gigachat` и LangChain Core.
 - Документы разбираются Docling, чанки индексируются в BGE-M3 и Qdrant.
 - Все GigaChat generation, Vision и Files API операции проходят через
-  process-local `GenerationGate`, что соответствует ограничению одного потока
-  Freemium. Пользовательский AI-turn дополнительно защищён PostgreSQL advisory
-  lock и проверкой `pending/processing` trigger-сообщений.
+  re-entrant `GenerationGate` с process-local semaphore и PostgreSQL advisory
+  lock, что соответствует ограничению одного потока Freemium между workers.
+  Пользовательский AI-turn дополнительно использует отдельный advisory lock и
+  персистентные статусы `pending/processing`.
 - Текущий web-канал использует REST/SSE. Bitrix24/Redmine adapters пока не
   реализованы.
 
@@ -300,6 +301,9 @@ Reindex завершается `failed`, если после повторных 
 - documents: TXT/DOC/DOCX/PDF/EPUB/PPT/PPTX/XLSX, до 40 MB.
 
 Файлы проходят backend validation по расширению, MIME и базовым magic bytes.
+Upload читается чанками и передаётся в local/S3 storage как stream без второй полной
+копии содержимого в памяти; число одновременно разбираемых multipart-запросов
+ограничивается `UPLOAD_MAX_CONCURRENCY`.
 Изображения анализируются GigaChat Vision. Runtime originals хранятся в local или
 S3-compatible storage до закрытия/hard delete диалога; remote GigaChat file IDs
 удаляются при cleanup.
@@ -386,8 +390,17 @@ dev/prod Compose используют встроенные defaults. Подро�
 | `FRONTEND_PORT` | Optional dev host-порт Vite; default `5173`, bind только на `127.0.0.1`. |
 | `QDRANT_HTTP_PORT` | Optional dev host-порт Qdrant HTTP; default `6333`, bind только на `127.0.0.1`. |
 | `QDRANT_GRPC_PORT` | Optional dev host-порт Qdrant gRPC; default `6334`, bind только на `127.0.0.1`. |
-| `REDIS_URL` | URL Redis для shared RAG cache; Compose default `redis://redis:6379/0`. При недоступности Redis backend выполняет поиск напрямую в Qdrant. |
+| `REDIS_URL` | URL Redis для shared RAG cache и межworker SSE Pub/Sub; Compose default `redis://redis:6379/0`. RAG cache при ошибке выполняет поиск напрямую в Qdrant. |
 | `RAG_CACHE_TTL_SECONDS` | TTL cached Qdrant search hits; default `900`. Версия кэша фиксируется в PostgreSQL и меняется вместе с KB-изменениями. |
+| `REDIS_CONNECT_TIMEOUT_SECONDS` | Timeout подключения к Redis; default `2`. |
+| `REDIS_SOCKET_TIMEOUT_SECONDS` | Timeout операций Redis; default `2`. |
+| `QDRANT_TIMEOUT_SECONDS` | Timeout одного запроса Qdrant; default `10`. |
+| `GIGACHAT_TIMEOUT_SECONDS` | Timeout HTTP-операций GigaChat; default `120`. |
+| `STORAGE_OPERATION_TIMEOUT_SECONDS` | Общий deadline одной local/S3 storage-операции; default `60`. |
+| `S3_CONNECT_TIMEOUT_SECONDS` | Timeout подключения к S3; default `10`. |
+| `S3_READ_TIMEOUT_SECONDS` | Timeout чтения S3; default `60`. |
+| `AI_TURN_RECOVERY_SCAN_SECONDS` | Интервал поиска pending/orphaned AI-turns; default `15`. |
+| `UPLOAD_MAX_CONCURRENCY` | Максимум одновременно разбираемых multipart upload-запросов на worker; default `2`. |
 | `ENVIRONMENT` | Internal Compose mode: dev default `development`, prod default `production`. Не требуется задавать вручную. |
 | `CORS_ORIGINS` | Optional allowed origins; dev default `http://localhost:5173`, production default empty same-origin. `*` запрещён. |
 | `SSE_HEARTBEAT_SECONDS` | Optional positive number; default `15`. |
@@ -449,14 +462,15 @@ npm --prefix frontend run build
 - Схема создаётся через `Base.metadata.create_all`; Alembic/migrations отсутствуют.
   Изменения модели на persistent database могут потребовать ручной миграции или
   пересоздания volume.
-- Background tasks, ingestion recovery, GenerationGate и EventBroker работают
-  внутри процесса. Нет Celery, durable queue, cross-worker SSE replay или
-  внешнего pub/sub; полноценные replicas не поддерживаются.
+- AI-turn recovery использует персистентные статусы сообщений и PostgreSQL advisory
+  lock: несколько workers не обрабатывают один turn одновременно, а orphaned
+  `processing` возвращается в очередь периодическим sweeper. Отдельной durable
+  очереди Celery/RQ всё ещё нет.
 - Redis ускоряет повторные RAG-запросы, сохраняя только Qdrant search hits. Chunks и
   metadata всегда загружаются из PostgreSQL, а version кэша повышается в той же
   транзакции, что и изменения KB; после commit старые ключи не используются.
-- SSE использует native EventSource, heartbeat и polling fallback, но не реализует
-  replay по `Last-Event-ID`.
+- SSE использует Redis Pub/Sub для доставки между workers, native EventSource,
+  heartbeat и polling fallback, но не реализует replay по `Last-Event-ID`.
 - Monitoring отдаёт aggregate metrics, average latency и failed request count; p50/p95,
   raw logs, alerting и time-series charts не реализованы в UI.
 - RAG source snapshots сохраняются внутренне, но текущий `MessageDto` и frontend не

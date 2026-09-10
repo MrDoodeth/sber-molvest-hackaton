@@ -11,6 +11,7 @@ from app.api.openapi import OPENAPI_TAGS
 from app.api.router import api_router
 from app.core.config import Settings
 from app.core.errors import install_error_handlers
+from app.core.upload_limits import UploadConcurrencyMiddleware
 from app.models import Base
 from app.services.container import ApplicationContainer, build_container
 from app.services.seeds import seed_defaults
@@ -25,6 +26,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        await actual_container.broker.start()
         async with actual_container.engine.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)
         if actual_settings.seed_on_startup:
@@ -45,14 +47,24 @@ def create_app(
             ),
             cancel_on_shutdown=True,
         )
+        actual_container.tasks.spawn(
+            actual_container.dialogs.recover_pending_turns_loop(
+                actual_settings.ai_turn_recovery_scan_seconds
+            ),
+            cancel_on_shutdown=True,
+        )
         try:
             yield
         finally:
             await actual_container.tasks.shutdown()
+            await actual_container.broker.close()
             parser_close = getattr(actual_container.document_parser, "close", None)
             if callable(parser_close):
                 await parser_close()
             await actual_container.rag_cache.close()
+            vector_close = getattr(actual_container.vector_store, "close", None)
+            if callable(vector_close):
+                await vector_close()
             await actual_container.engine.dispose()
 
     app = FastAPI(
@@ -75,6 +87,10 @@ def create_app(
     )
     app.state.container = actual_container
     install_error_handlers(app)
+    app.add_middleware(
+        UploadConcurrencyMiddleware,
+        max_concurrency=actual_settings.upload_max_concurrency,
+    )
 
     @app.get("/health", include_in_schema=False)
     async def health() -> dict[str, str]:

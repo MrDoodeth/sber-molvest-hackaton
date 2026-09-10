@@ -163,6 +163,7 @@ class GigaChatProvider:
             "verify_ssl_certs": True,
             "max_retries": self._settings.gigachat_max_retries,
             "retry_backoff_factor": self._settings.gigachat_retry_backoff_factor,
+            "timeout": self._settings.gigachat_timeout_seconds,
         }
         if temperature is not None:
             options["temperature"] = temperature

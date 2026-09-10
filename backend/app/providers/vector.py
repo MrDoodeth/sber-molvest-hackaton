@@ -16,9 +16,12 @@ DENSE_RELEVANCE_THRESHOLD = 0.35
 
 
 class QdrantHybridVectorStore:
-    def __init__(self, url: str, api_key: str | None = None) -> None:
+    def __init__(
+        self, url: str, api_key: str | None = None, timeout_seconds: int = 10
+    ) -> None:
         self._url = url
         self._api_key = api_key
+        self._timeout_seconds = timeout_seconds
         self._client: Any | None = None
         self._collection_ready = False
         self._ready_lock = asyncio.Lock()
@@ -30,8 +33,16 @@ class QdrantHybridVectorStore:
             from qdrant_client import AsyncQdrantClient
         except ImportError as exc:
             raise VectorStoreError("qdrant-client is required for retrieval") from exc
-        self._client = AsyncQdrantClient(url=self._url, api_key=self._api_key)
+        self._client = AsyncQdrantClient(
+            url=self._url,
+            api_key=self._api_key,
+            timeout=self._timeout_seconds,
+        )
         return self._client
+
+    async def close(self) -> None:
+        if self._client is not None:
+            await self._client.close()
 
     async def ensure_collection(self) -> None:
         if self._collection_ready:

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import time
 import uuid
 from datetime import UTC, datetime
+from io import BytesIO
 from typing import Any
 
 from sqlalchemy import select
@@ -334,11 +336,14 @@ class ModerationService:
                     document_created = False
                     if document is None:
                         markdown = self._render_markdown(card)
+                        markdown_bytes = markdown.encode("utf-8")
                         upload = ValidatedUpload(
                             file_name=f"{candidate_id}.md",
                             extension=".md",
                             mime_type="text/markdown",
-                            data=markdown.encode("utf-8"),
+                            source=BytesIO(markdown_bytes),
+                            size_bytes=len(markdown_bytes),
+                            sha256=hashlib.sha256(markdown_bytes).hexdigest(),
                         )
                         created_document = await self._knowledge_base.create_document(
                             upload=upload,

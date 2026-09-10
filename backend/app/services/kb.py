@@ -305,8 +305,7 @@ class KnowledgeBaseService:
     ) -> KnowledgeDocumentDto:
         if source_type == DocumentSourceType.RESOLVED_CASE and schedule_ingestion:
             raise ConflictError("resolved_case создаётся только через модерацию")
-        digest = hashlib.sha256(upload.data).hexdigest()
-        key = storage_key or f"knowledge/{digest}{upload.extension}"
+        key = storage_key or f"knowledge/{upload.sha256}{upload.extension}"
         async with self._session_factory() as session:
             section = await session.get(
                 KnowledgeSection, section_id, with_for_update=True
@@ -322,7 +321,12 @@ class KnowledgeBaseService:
                     {"document_id": str(duplicate.id)},
                 )
             try:
-                await self._storage.put(key, upload.data, upload.mime_type)
+                upload.source.seek(0)
+                put_file = getattr(self._storage, "put_file", None)
+                if callable(put_file):
+                    await put_file(key, upload.source, upload.mime_type)
+                else:
+                    await self._storage.put(key, upload.source.read(), upload.mime_type)
             except StorageError as exc:
                 raise ServiceUnavailableError(
                     "Хранилище документов временно недоступно"

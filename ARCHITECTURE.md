@@ -272,9 +272,10 @@ seed не скачивает внешний массив документов.
 - формального `IChannelAdapter`, `IncomingMessage`/`OutgoingMessage` и каталогов
   `backend/app/channels` в текущем репозитории нет; все создаваемые через API Dialog
   имеют `channel=web`.
-- `EventBroker` для SSE хранит подписчиков только в памяти текущего процесса. Нет
-  replay по `Last-Event-ID`, межworker-доставки или внешнего pub/sub; при переполнении
-  очереди на 256 событий старые события отбрасываются.
+- `EventBroker` использует Redis Pub/Sub для межworker-доставки и раздаёт события в
+  локальные очереди подключённых SSE-клиентов. Replay по `Last-Event-ID` и
+  transactional outbox отсутствуют; при переполнении локальной очереди на 256
+  событий старые события отбрасываются.
 - `/health` является liveness endpoint и всегда возвращает `ok`; он не проверяет
   PostgreSQL, Qdrant, GigaChat или object storage. Qdrant в Compose ожидается только
   по `service_started`, а коллекция создаётся лениво при первом обращении.
@@ -342,7 +343,7 @@ flowchart TB
     subgraph DATA["Хранилища"]
         PG[("PostgreSQL")]
         VDB[("Qdrant")]
-        REDIS[("Redis RAG cache")]
+        REDIS[("Redis RAG cache + SSE Pub/Sub")]
         S3[("Local / optional S3-compatible storage")]
     end
 
@@ -398,14 +399,14 @@ flowchart TB
 | Слой                | Технология                                                                  | Почему                                                                                                                                  |
 | ------------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Frontend            | **React 18 + TypeScript + Vite + Tailwind + React Router v7 + React Query** | Один SPA для user/operator/admin; Router — маршрутизация, React Query — server state, Tailwind — UI                                     |
-| Realtime            | **SSE + REST**                                                              | REST отправляет команды/сообщения; SSE доставляет токены GigaChat и события состояния тикета                                            |
+| Realtime            | **SSE + REST + Redis Pub/Sub**                                              | REST хранит команды, Redis доставляет SSE между workers, БД остаётся source of truth                                                     |
 | Backend             | Python 3.11 + FastAPI (async)                                               | REST/SSE API, приём сообщений и файлов                                                                                                  |
 | Каналы              | REST для web MVP; `IChannelAdapter` + webhooks — Roadmap                    | MVP использует только собственный frontend; adapter-контракт и webhooks Bitrix24/Redmine ещё не реализованы                              |
 | Генерация + Vision  | GigaChat API: Lite / Pro / Max / Ultra через `langchain-gigachat`           | Активная модель задаётся backend-политикой и отображается в админке; единый `GigaChatProvider` скрывает различия моделей от RAG/backend |
 | Embeddings          | **Локально `BAAI/bge-m3`** через `FlagEmbedding` / `sentence-transformers`  | Бесплатно локально; RU/multilingual; dense+sparse representations для hybrid retrieval                                                  |
 | Оркестрация         | LangChain Core / LCEL + `langchain-gigachat`                                | Простые контролируемые Runnable-вызовы без agent executor; прозрачный контроль latency и числа GigaChat-вызовов         |
 | Векторная БД        | Qdrant                                                                      | Hybrid search, payload-фильтры, Docker-friendly                                                                                         |
-| RAG cache           | Redis                                                                       | Versioned Qdrant search hits; PostgreSQL подтверждает chunks и metadata на каждом retrieval                                            |
+| RAG cache / events  | Redis                                                                       | Versioned Qdrant hits и межworker SSE Pub/Sub; PostgreSQL подтверждает persisted state                                                   |
 | РСУБД               | PostgreSQL                                                                  | Диалоги, тикеты, метаданные БЗ, логи, метрики                                                                                           |
 | Фоновые задачи      | FastAPI `BackgroundTasks` / простой in-process worker                       | Для MVP достаточно для переиндексации небольшого объёма документов без отдельной очереди                                                |
 | Объектное хранилище | LocalObjectStorage по умолчанию; опционально S3 через `aioboto3`            | Скриншоты, исходные документы; MinIO не входит в текущий Compose                                                                        | Быстро извлекает текст/коды ошибки локально перед retrieval; GigaChat всё равно получает исходное изображение и выполняет смысловой Vision-анализ |
@@ -447,7 +448,12 @@ _Открытый вопрос для приёмки: считать SLA «<5 с
 
 **Безопасность и данные:** self-hosted Qdrant/Postgres и local storage по умолчанию (либо внешний S3 через provider); authentication в MVP отсутствует. User/operator/admin контуры используют незащищённый `X-Molvest-Role` demo actor context и не являются публичным security boundary. GigaChat credentials находятся только на backend. В Docker/Linux устанавливаем доверенный сертификат НУЦ Минцифры или задаём `ca_bundle_file`; SSL verification не отключаем. Runtime-файлы удаляются из GigaChat File Storage при close/hard delete, а не обязательно сразу после каждого generation-call. PII не пишем в технические логи без необходимости.
 
-**Масштабирование:** Redis разделяет только RAG cache между процессами; кэш versioned и согласован с PostgreSQL. Индексация, `GenerationGate`, `TurnCoordinator` и `EventBroker` остаются process-local, поэтому Redis не делает SSE или фоновые задачи multi-worker-safe. Распределённая очередь для generation/file/vision вызовов и внешний broker для SSE при нескольких replicas остаются Roadmap.
+**Масштабирование:** Redis разделяет RAG cache и доставляет SSE-события между
+процессами. `GenerationGate` и AI-turn ownership используют PostgreSQL advisory
+locks, а периодический dispatcher восстанавливает orphaned `processing` из
+персистентного состояния. Локальные locks остаются оптимизацией, не источником
+межworker-корректности. Redis Pub/Sub не хранит event log, поэтому replay и
+transactional outbox остаются Roadmap; REST/БД являются источником истины.
 
 ## 7. Метрики эффективности
 
@@ -3628,7 +3634,6 @@ Server data остаётся в React Query; не дублируем REST-fetch 
 ├── /user
 │   ├── index
 │   ├── /new
-│   ├── /history
 │   └── /dialogs/:dialogId
 │
 ├── /operator
@@ -3978,10 +3983,10 @@ operator_message
 
 ### 19.6 SSE reconnect
 
-Backend присваивает каждому событию SSE `id:`, но текущий `EventBroker` является
-in-process broker без event log/replay. `Last-Event-ID` не обрабатывается, счётчик
-событий сбрасывается при restart, а очередь подписчика ограничена 256 событиями и
-при переполнении отбрасывает старейшее.
+Backend присваивает каждому событию SSE глобально уникальный `id:` и передаёт его
+между workers через Redis Pub/Sub. Event log/replay отсутствует,
+`Last-Event-ID` не обрабатывается, а локальная очередь подписчика ограничена 256
+событиями и при переполнении отбрасывает старейшее.
 
 Frontend:
 
@@ -3990,8 +3995,8 @@ Frontend:
 - backend остаётся source of truth;
 - финальные persisted `message.id` предотвращают duplicate rendering.
 
-Такой reconnect надёжен только в пределах одного процесса и благодаря последующему
-refetch; межworker/replica доставка и replay остаются Roadmap.
+Межworker/replica доставка работает через Redis, но reconnect остаётся надёжным
+только благодаря последующему REST refetch; replay остаётся Roadmap.
 
 ---
 
@@ -4032,6 +4037,8 @@ Backend возвращает persisted user `Message` сразу. В `ai_support
 через SSE; в `operator_support` сообщение ожидает действий оператора. При этом
 backend admission не принимает новый user AI-turn, включая отправку в другом чате,
 пока существует любой активный `pending/processing` AI trigger.
+Периодический dispatcher под PostgreSQL advisory lock подбирает пропущенный
+`pending` turn и возвращает orphaned `processing` в очередь после падения worker.
 Так новый route успевает подключить `EventSource` до первого token event. Состояние
 trigger-message (`pending / processing / completed / failed`) хранится в БД, поэтому
 после reload frontend восстанавливает placeholder или показывает сохранённую ошибку
