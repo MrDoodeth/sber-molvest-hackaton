@@ -112,10 +112,11 @@ PNG/JPEG/TIFF/BMP; GigaChat Vision извлекает текст и визуал
 
 ```text
 React 18 + TypeScript + Vite SPA
+    ├── Public landing (/)
     ├── User panel
     ├── Operator panel
     └── Admin panel
-             │ REST + SSE
+             │ REST + SSE via Redis Pub/Sub
              ▼
 FastAPI modular monolith
     ├── DialogService
@@ -128,7 +129,7 @@ FastAPI modular monolith
              │
     ┌────────┼─────────┬──────────────┐
     ▼        ▼         ▼              ▼
- PostgreSQL Qdrant  Local/S3       GigaChat
+  PostgreSQL Qdrant  Redis  Local/S3  GigaChat
 ```
 
 Ключевые решения:
@@ -148,6 +149,9 @@ FastAPI modular monolith
   персистентные статусы `pending/processing`.
 - Текущий web-канал использует REST/SSE. Bitrix24/Redmine adapters пока не
   реализованы.
+- Внешние вызовы имеют configurable timeouts, заданные через Compose fallback-
+  переменные; runtime и permanent uploads читаются чанками и ограничиваются по
+  числу одновременно обрабатываемых multipart-запросов.
 
 Полный архитектурный контракт, data model, API tables и sequence diagrams находятся
 в [`ARCHITECTURE.md`](ARCHITECTURE.md).

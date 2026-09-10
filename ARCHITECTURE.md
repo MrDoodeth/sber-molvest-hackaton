@@ -57,7 +57,7 @@
 - **Backend — модульный монолит на FastAPI**, не микросервисы: меньше DevOps-расходов на хакатон, модули (RAG, Vision, Escalation, KB) изолированы и готовы к выносу в отдельные сервисы позже.
 - **GigaChat — центральная генеративная модель:** используем API для формирования финального ответа и анализа приложенных скриншотов. Для MVP основной кандидат — `GigaChat (активная модель)`.
 - **Embeddings делаем локально:** Freemium предоставляет бесплатные токены генерации, но векторное представление текста оплачивается отдельно. Поэтому retrieval не зависит от платного Embeddings API; основной локальный кандидат — `BAAI/bge-m3`.
-- **Критичное ограничение Freemium — 1 поток генерации.** Все GigaChat generation, vision и Files API операции проходят через единый re-entrant `GenerationGate` внутри процесса. Обычный пользовательский turn использует два последовательных GigaChat generation-call с одним `GenerationContext`: structured `confidence` и streaming user answer. При screenshot его parse выполняется до retrieval в том же атомарном turn. Confidence публикуется отдельным техническим SSE-событием: пользовательский UI его не показывает, но браузер получает и обрабатывает значение; operator/admin UI могут его отображать. Первый и второй подряд низкий confidence всё равно запускают streaming answer, а третий подряд ниже порога эскалирует без второго call. Ручной шаблон оператора выполняется отдельным generation-call.
+- **Критичное ограничение Freemium — 1 поток генерации.** Все GigaChat generation, vision и Files API операции проходят через re-entrant `GenerationGate`: локальный semaphore ускоряет один worker, а PostgreSQL advisory lock сериализует вызовы между workers. Обычный пользовательский turn использует два последовательных GigaChat generation-call с одним `GenerationContext`: structured `confidence` и streaming user answer. При screenshot его parse выполняется до retrieval в том же атомарном turn. Confidence публикуется отдельным техническим SSE-событием: пользовательский UI его не показывает, но браузер получает и обрабатывает значение; operator/admin UI могут его отображать. Первый и второй подряд низкий confidence всё равно запускают streaming answer, а третий подряд ниже порога эскалирует без второго call. Ручной шаблон оператора выполняется отдельным generation-call.
 - **Operator template context:** backend строит полный упорядоченный снимок сообщений
   user/assistant/operator/system и всех вложений на момент вызова; затем общий
   sliding-window выбирает самый свежий фрагмент истории в `gigachat_input_budget`.
@@ -188,7 +188,7 @@ seed не скачивает внешний массив документов.
 - **Runtime BGE-M3:** зафиксированный snapshot модели скачивается на этапе сборки backend-образа, загружается через `BGEM3FlagModel` в FastAPI lifespan и прогревается до выдачи lifespan приложения. Во время обработки запросов сеть для Hugging Face не используется.
 - **Runtime Docling:** layout, TableFormer и EasyOCR artifacts скачиваются на этапе сборки backend-образа в `/opt/models/docling`, передаются в `DocumentConverter` через `DOCLING_ARTIFACTS_PATH` и загружаются в выделенные parser-потоки. `KB_INDEX_CONCURRENCY` ограничивает число одновременных ingestion-задач и Docling worker (безопасный default `1`, максимум `2`), поэтому тяжёлый парсинг не занимает event loop или shared thread pool FastAPI. Во время ingestion сеть для Hugging Face и EasyOCR не используется.
 - **Интерфейсы разделяем:** `GigaChatProvider` отвечает за generation/multimodal input, `EmbeddingProvider` — за локальную векторизацию. Это не смешивает платёжные/сетевые ограничения GigaChat с индексом БЗ.
-- **Ограничение Freemium:** один поток generation-запросов. Единый re-entrant `GenerationGate` находится в `app/core/generation_gate.py`; provider защищает каждый GigaChat/file/vision вызов, а сервис удерживает тот же gate на всём атомарном user turn. Дополнительно `TurnCoordinator` защищает admission внутри процесса, а PostgreSQL `pg_advisory_xact_lock(712031043)` и проверка `pending/processing` user triggers не допускают параллельные AI user turns между workers. Embeddings/retrieval выполняются локально.
+- **Ограничение Freemium:** один поток generation-запросов. Единый re-entrant `GenerationGate` находится в `app/core/generation_gate.py`; provider защищает каждый GigaChat/file/vision вызов, а сервис удерживает тот же gate на всём атомарном user turn. PostgreSQL advisory lock сериализует generation между workers, а отдельный advisory lock и проверка `pending/processing` user triggers не допускают параллельные AI user turns. Embeddings/retrieval выполняются локально.
 - **Не делаем в MVP:** self-hosted генеративную LLM и альтернативные embedding-модели «на всякий случай». Если BGE-M3 не проходит наш golden dataset, модель меняется через `EmbeddingProvider`, но до измерений не усложняем архитектуру.
 
 ### ADR-4 · Qdrant + единая коллекция знаний
@@ -229,8 +229,9 @@ seed не скачивает внешний массив документов.
 Следующие правила уже реализованы в backend и являются частью текущего MVP-контракта:
 
 - все generation, vision и Files API вызовы GigaChat сериализуются единым
-  re-entrant `GenerationGate` внутри процесса; сервисы могут удерживать его на всём
-  атомарном turn, а provider дополнительно защищает отдельные вызовы;
+  re-entrant `GenerationGate` с PostgreSQL advisory lock между workers; сервисы могут
+  удерживать его на всём атомарном turn, а provider дополнительно защищает отдельные
+  вызовы;
 - пользовательский AI-turn глобально допускается только один: `TurnCoordinator`
   дополняется PostgreSQL advisory transaction lock с ключом `712031043` и проверкой
   persisted `pending/processing` triggers, поэтому блокировка действует между
@@ -305,6 +306,10 @@ seed не скачивает внешний массив документов.
   прямой admin upload валидных UTF-8 Markdown-карточек формата
   `# title / ## Проблема / ## Результат`; оба пути создают `resolved_case` и
   используют общий permanent ingestion pipeline;
+- GigaChat, Qdrant, Redis и local/S3 storage используют bounded timeouts из
+  `Settings`; Compose задаёт безопасные fallback-значения через environment;
+- runtime и permanent uploads валидируются чанками, передаются в storage через
+  seekable stream, а `UPLOAD_MAX_CONCURRENCY` ограничивает multipart admission;
 - Redis хранит versioned Qdrant search hits. Версия лежит в `SystemSetting` и
   повышается в той же SQL-транзакции, что и KB-изменение; evidence всегда повторно
   загружается из PostgreSQL, поэтому Redis не становится источником истины.
@@ -412,7 +417,7 @@ flowchart TB
 | Векторная БД        | Qdrant                                                                      | Hybrid search, payload-фильтры, Docker-friendly                                                                                         |
 | RAG cache / events  | Redis                                                                       | Versioned Qdrant hits и межworker SSE Pub/Sub; PostgreSQL подтверждает persisted state                                                   |
 | РСУБД               | PostgreSQL                                                                  | Диалоги, тикеты, метаданные БЗ, логи, метрики                                                                                           |
-| Фоновые задачи      | FastAPI `BackgroundTasks` / простой in-process worker                       | Для MVP достаточно для переиндексации небольшого объёма документов без отдельной очереди                                                |
+| Фоновые задачи      | FastAPI `BackgroundTasks` как wake-up + persisted recovery dispatcher          | `pending/processing` восстанавливаются через PostgreSQL advisory lock; отдельной durable queue пока нет                                   |
 | Объектное хранилище | LocalObjectStorage по умолчанию; опционально S3 через `aioboto3`            | Скриншоты, исходные документы; MinIO не входит в текущий Compose                                                                        | Быстро извлекает текст/коды ошибки локально перед retrieval; GigaChat всё равно получает исходное изображение и выполняет смысловой Vision-анализ |
 | Наблюдаемость       | Application logs + базовые метрики backend                                  | Latency, ошибки, confidence, источники ответа и эскалации без внешнего SaaS                                                             |
 | Деплой              | Docker Compose для dev и production; Caddy для TLS                            | Один воспроизводимый стек с внутренними сервисами и единой внешней точкой входа; Kubernetes не входит в текущий репозиторий             |
@@ -4034,8 +4039,9 @@ attachments   # repeated, максимум 10
 `client_message_id = UUID` нужен для idempotency/retry.
 
 Backend возвращает persisted user `Message` сразу. В `ai_support` GigaChat processing
-запускается через FastAPI `BackgroundTasks` после отправки HTTP-ответа и идёт дальше
-через SSE; в `operator_support` сообщение ожидает действий оператора. При этом
+обычно запускается через FastAPI `BackgroundTasks` после отправки HTTP-ответа и идёт
+дальше через SSE; периодический persisted-work dispatcher подбирает сообщение, если
+callback не запустился или worker завершился. В `operator_support` сообщение ожидает действий оператора. При этом
 backend admission не принимает новый user AI-turn, включая отправку в другом чате,
 пока существует любой активный `pending/processing` AI trigger.
 Периодический dispatcher под PostgreSQL advisory lock подбирает пропущенный
