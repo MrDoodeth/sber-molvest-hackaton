@@ -47,6 +47,7 @@ services:
       - data
 
   backend:
+    init: true
     restart: unless-stopped
     build:
       context: ./backend
@@ -109,6 +110,8 @@ services:
       - data
 
   caddy:
+    # Reap orphaned helper processes spawned by container healthchecks.
+    init: true
     build:
       context: ./frontend
       dockerfile: Dockerfile.caddy
@@ -126,11 +129,9 @@ services:
       backend:
         condition: service_healthy
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "wget --no-check-certificate --header='Host: $${DOMAIN}' --spider --quiet https://localhost/",
-        ]
+      # Check Caddy's local admin endpoint instead of spawning wget's HTTPS
+      # ssl_client helper against the public TLS listener.
+      test: ["CMD", "wget", "--spider", "--quiet", "http://127.0.0.1:2019/config/"]
       interval: 10s
       timeout: 3s
       retries: 10
