@@ -239,7 +239,7 @@ export default function KnowledgePage() {
           </p>
         </header>
         <div className="mt-6 grid gap-5 lg:grid-cols-[18rem_minmax(0,1fr)]">
-          <Card className="min-h-72 overflow-hidden">
+          <Card className="min-h-72 self-start overflow-hidden">
             <div className="flex items-center justify-between border-b border-stone-100 px-4 py-3.5">
               <h2 className="text-sm font-bold text-molvest-950">Разделы</h2>
               <IconButton
