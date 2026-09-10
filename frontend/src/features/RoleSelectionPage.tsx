@@ -4,7 +4,6 @@ import {
   Check,
   Headphones,
   Image,
-  LockKeyhole,
   MessageCircleMore,
   Send,
   ShieldCheck,
@@ -127,7 +126,6 @@ export default function RoleSelectionPage() {
           <Link className="group flex items-center gap-3 rounded-2xl border border-[#dbe3f0] p-3.5 transition hover:border-molvest-400 hover:shadow-lg" to="/operator" onClick={() => setStaffOpen(false)}><span className="grid size-11 place-items-center rounded-xl bg-[#fbc4fb]/55 text-[#a13cc9]"><Headphones className="size-5" /></span><span className="flex-1"><strong className="block text-sm">Оператор</strong><span className="mt-0.5 block text-xs text-slate-500">Очередь эскалаций и ответы пользователям</span></span><ArrowRight className="size-5 text-slate-300 transition group-hover:translate-x-1 group-hover:text-molvest-700" /></Link>
           <Link className="group flex items-center gap-3 rounded-2xl border border-[#dbe3f0] p-3.5 transition hover:border-molvest-400 hover:shadow-lg" to="/admin/dialogs" onClick={() => setStaffOpen(false)}><span className="grid size-11 place-items-center rounded-xl bg-[#fcc67f]/45 text-[#9a5600]"><ShieldCheck className="size-5" /></span><span className="flex-1"><strong className="block text-sm">Администратор</strong><span className="mt-0.5 block text-xs text-slate-500">База знаний, настройки AI и мониторинг</span></span><ArrowRight className="size-5 text-slate-300 transition group-hover:translate-x-1 group-hover:text-molvest-700" /></Link>
         </div>
-        <p className="mt-4 flex items-center gap-1.5 text-xs leading-5 text-slate-400"><LockKeyhole className="size-3" />В рабочей версии здесь может быть SSO или корпоративная авторизация.</p>
       </Modal>
     </main>
   );
