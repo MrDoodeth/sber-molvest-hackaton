@@ -4,11 +4,13 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "../../shared/ui";
 import { cn } from "../../shared/utils";
 
+const logoUrl = "https://image.qwenlm.ai/public_source/b22fc383-709d-427d-95ee-3fb7a5ed0c16/1b5563a00-4741-4066-a846-fd8b73d47001.png";
+
 export function MolvestMark({ inverse = false }: { inverse?: boolean }) {
   return (
     <div className="flex items-center gap-3">
       <span className={cn("relative flex size-10 items-center justify-center overflow-hidden rounded-xl bg-[linear-gradient(135deg,#2b9ffe,#fbc4fb)] font-black text-white", inverse && "shadow-[0_0_0_1px_rgb(255_255_255/20%)]")}>
-        М
+        <img className="size-full object-cover" src={logoUrl} alt="Молвест" />
       </span>
       <span className="leading-tight">
         <strong className="block text-sm tracking-[0.08em]">МОЛВЕСТ</strong>
