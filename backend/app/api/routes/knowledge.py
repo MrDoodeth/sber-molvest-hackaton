@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import uuid
 from pathlib import PurePath
 from urllib.parse import quote
@@ -21,7 +22,7 @@ from app.core.constants import DEFAULT_CASE_SECTION_ID, DOCUMENTATION_SECTION_ID
 from app.core.enums import DocumentSourceType, UserRole
 from app.core.errors import ForbiddenError, UnprocessableError
 from app.models import User
-from app.services.attachments import validate_upload_stream
+from app.services.attachments import ValidatedUpload, validate_upload_stream
 from app.services.container import ApplicationContainer
 
 router = APIRouter(
@@ -29,6 +30,38 @@ router = APIRouter(
     tags=["Knowledge"],
     responses=API_RESPONSES,
 )
+
+CASE_CARD_PATTERN = re.compile(
+    r"\A#\s+([^\n]+)\n+##\s+Проблема\s*\n(.+?)\n+##\s+Результат\s*\n(.+?)\s*\Z",
+    re.DOTALL,
+)
+CASE_CARD_MAX_BYTES = 2 * 1024 * 1024
+
+
+def _case_card_title(upload: ValidatedUpload) -> str:
+    if upload.size_bytes > CASE_CARD_MAX_BYTES:
+        raise UnprocessableError(
+            "Карточка решённого обращения должна быть не больше 2 МБ",
+            {"max_bytes": CASE_CARD_MAX_BYTES},
+        )
+    upload.source.seek(0)
+    try:
+        content = upload.source.read().decode("utf-8").replace("\r\n", "\n")
+    except UnicodeDecodeError as exc:
+        raise UnprocessableError("Markdown-карточка должна быть в UTF-8") from exc
+    finally:
+        upload.source.seek(0)
+    match = CASE_CARD_PATTERN.fullmatch(content)
+    if match is None or not match.group(2).strip() or not match.group(3).strip():
+        raise UnprocessableError(
+            "Ожидается Markdown-карточка с заголовками #, ## Проблема и ## Результат"
+        )
+    title = match.group(1).strip()
+    if len(title) > 500:
+        raise UnprocessableError(
+            "Заголовок карточки должен быть не длиннее 500 символов"
+        )
+    return title
 
 
 def require_admin(user: User) -> None:
@@ -95,15 +128,16 @@ async def documents(
 )
 async def upload_document(
     section_id: uuid.UUID,
-    file: UploadFile = File(description="PDF, DOCX, HTML or Markdown; maximum 40 MB."),
+    file: UploadFile = File(
+        description=(
+            "PDF, DOCX, HTML or Markdown; maximum 40 MB. The case journal accepts "
+            "only UTF-8 Markdown case cards up to 2 MB."
+        )
+    ),
     user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> KnowledgeDocumentDto:
     require_admin(user)
-    if section_id == DEFAULT_CASE_SECTION_ID:
-        raise UnprocessableError(
-            "Раздел «Журнал обращений» заполняется только одобренными кейсами"
-        )
     upload = await validate_upload_stream(
         file_name=file.filename,
         content_type=file.content_type,
@@ -111,21 +145,29 @@ async def upload_document(
         permanent=True,
         settings=container.settings,
     )
-    document_title = PurePath(upload.file_name).stem.strip()
+    if section_id == DEFAULT_CASE_SECTION_ID:
+        if upload.extension not in {".md", ".markdown"}:
+            raise UnprocessableError(
+                "В Журнал обращений можно загружать только Markdown-карточки"
+            )
+        document_title = _case_card_title(upload)
+    else:
+        document_title = PurePath(upload.file_name).stem.strip()
     if not document_title:
         raise UnprocessableError("Название документа обязательно")
-    source_type = (
-        DocumentSourceType.OFFICIAL_1C_DOCS
-        if section_id == DOCUMENTATION_SECTION_ID
-        else DocumentSourceType.INTERNAL_KB
-    )
+    if section_id == DEFAULT_CASE_SECTION_ID:
+        source_type = DocumentSourceType.RESOLVED_CASE
+    elif section_id == DOCUMENTATION_SECTION_ID:
+        source_type = DocumentSourceType.OFFICIAL_1C_DOCS
+    else:
+        source_type = DocumentSourceType.INTERNAL_KB
     return await container.knowledge_base.create_document(
         upload=upload,
         section_id=section_id,
         source_type=source_type,
         title=document_title,
         one_c_version=None,
-        tags=[],
+        tags=["resolved_case"] if section_id == DEFAULT_CASE_SECTION_ID else [],
     )
 
 

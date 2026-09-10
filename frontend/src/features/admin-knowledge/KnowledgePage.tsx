@@ -46,9 +46,14 @@ const indexTone: Record<
   failed: "danger",
 };
 const KB_ACCEPT = ".pdf,.docx,.html,.htm,.md,.markdown";
+const CASE_JOURNAL_ACCEPT = ".md,.markdown";
 
-function validateKbFile(file: File): string | undefined {
+function validateKbFile(file: File, caseJournal: boolean): string | undefined {
   const extension = file.name.toLowerCase().split(".").pop();
+  if (caseJournal && extension !== "md" && extension !== "markdown")
+    return "В Журнал обращений можно загружать только Markdown-карточки.";
+  if (caseJournal && file.size > 2 * 1024 * 1024)
+    return "Markdown-карточка должна быть не больше 2 МБ.";
   if (
     !extension ||
     !["pdf", "docx", "html", "htm", "md", "markdown"].includes(extension)
@@ -101,7 +106,7 @@ export default function KnowledgePage() {
   );
   const isCaseJournal =
     selectedSection?.isSystem && selectedSection.name === "Журнал обращений";
-  const canUpload = Boolean(selectedSectionId) && !isCaseJournal;
+  const canUpload = Boolean(selectedSectionId);
 
   const create = useMutation({
     mutationFn: () => knowledgeApi.createSection(name.trim()),
@@ -210,7 +215,7 @@ export default function KnowledgePage() {
   };
   const handleFileChange = (selectedFile: File | undefined) => {
     if (!selectedFile || !selectedSectionId) return;
-    const error = validateKbFile(selectedFile);
+    const error = validateKbFile(selectedFile, Boolean(isCaseJournal));
     if (error) {
       toast(error, "error");
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -365,13 +370,19 @@ export default function KnowledgePage() {
                     RAG.
                   </p>
                 )}
+                {isCaseJournal && (
+                  <p className="mt-1 text-xs text-slate-500">
+                    Импортируйте UTF-8 Markdown с разделами «Проблема» и
+                    «Результат».
+                  </p>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 <input
                   ref={fileInputRef}
                   className="sr-only"
                   type="file"
-                  accept={KB_ACCEPT}
+                  accept={isCaseJournal ? CASE_JOURNAL_ACCEPT : KB_ACCEPT}
                   onChange={(event) =>
                     handleFileChange(event.target.files?.[0])
                   }
@@ -406,12 +417,12 @@ export default function KnowledgePage() {
                 icon={<FilePlus2 className="size-8" />}
                 title={
                   isCaseJournal
-                    ? "Одобренных кейсов пока нет"
+                    ? "Решённых кейсов пока нет"
                     : "Документов нет"
                 }
                 description={
                   isCaseJournal
-                    ? "Одобренные карточки решений появятся здесь после модерации."
+                    ? "Карточки появятся после модерации или прямого импорта Markdown."
                     : "Нажмите «Загрузить», чтобы выбрать файл и запустить индексацию."
                 }
               />

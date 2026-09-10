@@ -303,8 +303,6 @@ class KnowledgeBaseService:
         schedule_ingestion: bool = True,
         storage_key: str | None = None,
     ) -> KnowledgeDocumentDto:
-        if source_type == DocumentSourceType.RESOLVED_CASE and schedule_ingestion:
-            raise ConflictError("resolved_case создаётся только через модерацию")
         key = storage_key or f"knowledge/{upload.sha256}{upload.extension}"
         async with self._session_factory() as session:
             section = await session.get(

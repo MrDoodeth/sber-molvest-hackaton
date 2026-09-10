@@ -301,6 +301,10 @@ seed не скачивает внешний массив документов.
 - удаление KB-раздела удерживает `SELECT FOR UPDATE` на section до удаления всех
   документов, а создание документа берёт тот же lock до записи в storage. Reindex
   становится `failed`, если stale Qdrant vectors не удалось очистить после retry.
+- системный раздел «Журнал обращений» принимает как approved candidates, так и
+  прямой admin upload валидных UTF-8 Markdown-карточек формата
+  `# title / ## Проблема / ## Результат`; оба пути создают `resolved_case` и
+  используют общий permanent ingestion pipeline;
 - Redis хранит versioned Qdrant search hits. Версия лежит в `SystemSetting` и
   повышается в той же SQL-транзакции, что и KB-изменение; evidence всегда повторно
   загружается из PostgreSQL, поэтому Redis не становится источником истины.
@@ -1461,25 +1465,16 @@ structured document
 Журнал обращений не надо индексировать как сырой длинный чат.
 
 Для кейса, который администратор хочет опубликовать, итоговая Markdown-карточка
-имеет логическую структуру:
+имеет фиксированную структуру:
 
-```text
-Проблема:
-...
+```markdown
+# Краткий заголовок кейса
 
-Симптомы / текст ошибки:
-...
+## Проблема
+Описание симптомов и исходной ситуации.
 
-Контекст:
-конфигурация / версия / форма
-
-Решение:
-1. ...
-2. ...
-3. ...
-
-Результат:
-успешно
+## Результат
+Проверенное решение и итог выполнения.
 ```
 
 Текущий обычный close-flow не делает LLM-суммаризацию: он создаёт deterministic
@@ -1534,7 +1529,12 @@ approved
 rejected
 ```
 
-Только после `approved` case card становится permanent KB document.
+Карточка из текущего Dialog становится permanent KB document только после
+`approved`. Для миграции существующего журнала администратор также может напрямую
+загрузить готовую карточку того же формата в системный раздел: только UTF-8
+`.md`/`.markdown`, до 2 MB, с непустыми `#`, `## Проблема` и `## Результат`.
+Такая карточка не создаёт искусственный `KnowledgeCandidate`, получает
+`source_type=resolved_case` и сразу проходит стандартный permanent ingestion.
 
 Approve всегда использует `DEFAULT_CASE_SECTION_ID`; selector в UI отсутствует:
 
@@ -1595,7 +1595,8 @@ internal_kb
 resolved_case
 ```
 
-`resolved_case` используется только для case card, прошедших admin Approve.
+`resolved_case` используется для case card, прошедших admin Approve, и для
+валидированных Markdown-карточек прямого импорта в системный журнал.
 
 ### Structure-aware chunking
 
@@ -4078,7 +4079,7 @@ Frontend не решает concurrency самостоятельно.
 | PATCH  | `/api/admin/knowledge/sections/{id}`                   | rename / enable-disable           |
 | DELETE | `/api/admin/knowledge/sections/{id}`                   | удалить section                   |
 | GET    | `/api/admin/knowledge/documents?section_id=`           | documents, sorted by newest first |
-| POST   | `/api/admin/knowledge/sections/{section_id}/documents` | upload one permanent KB file      |
+| POST   | `/api/admin/knowledge/sections/{section_id}/documents` | upload permanent file; для системного журнала только case-card Markdown |
 | GET    | `/api/admin/knowledge/documents/{id}`                  | document detail                   |
 | PATCH  | `/api/admin/knowledge/documents/{id}`                  | enable-disable only in current MVP |
 | POST   | `/api/admin/knowledge/documents/{id}/reindex`          | повторный ingestion               |
