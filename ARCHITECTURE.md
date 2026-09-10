@@ -53,7 +53,7 @@
 
 ## 1. TL;DR
 
-- **Фронтенд собственный** (не 1С/Bitrix24 UI): одно SPA с тремя панелями — `user`, `operator`, `admin`. Backend-сервисы не зависят от SPA, но формальный adapter boundary для внешних каналов пока не реализован; Bitrix24/Redmine остаются roadmap.
+- **Фронтенд собственный** (не 1С/Bitrix24 UI): одно SPA с публичным лендингом `/` и тремя панелями — `user`, `operator`, `admin`. Лендинг ведёт сотрудника сразу в пользовательский чат, а служебный вход открывает выбор operator/admin. Backend-сервисы не зависят от SPA, но формальный adapter boundary для внешних каналов пока не реализован; Bitrix24/Redmine остаются roadmap.
 - **Backend — модульный монолит на FastAPI**, не микросервисы: меньше DevOps-расходов на хакатон, модули (RAG, Vision, Escalation, KB) изолированы и готовы к выносу в отдельные сервисы позже.
 - **GigaChat — центральная генеративная модель:** используем API для формирования финального ответа и анализа приложенных скриншотов. Для MVP основной кандидат — `GigaChat (активная модель)`.
 - **Embeddings делаем локально:** Freemium предоставляет бесплатные токены генерации, но векторное представление текста оплачивается отдельно. Поэтому retrieval не зависит от платного Embeddings API; основной локальный кандидат — `BAAI/bge-m3`.
@@ -169,7 +169,7 @@ seed не скачивает внешний массив документов.
 ### ADR-1 · Собственный фронтенд сейчас, Bitrix24/Redmine через адаптеры позже
 
 - **Контекст:** ТЗ предполагает Bitrix24 и Redmine HelpDesk, но на хакатоне важнее быстро довести основной пользовательский сценарий до стабильного состояния.
-- **Решение:** на MVP строим одно SPA с тремя role-зонами — пользователь, оператор и администратор. Backend сразу проектируем независимо от интерфейса, а Bitrix24/Redmine подключаем позднее через `IChannelAdapter`.
+- **Решение:** на MVP строим одно SPA с публичным лендингом и тремя role-зонами — пользователь, оператор и администратор. Лендинг скрывает служебный выбор ролей из основного сценария: пользовательский CTA открывает `/user`, а operator/admin доступны через служебный диалог. Backend сразу проектируем независимо от интерфейса, а Bitrix24/Redmine подключаем позднее через `IChannelAdapter`.
 - **Почему:** собственный frontend ускоряет разработку и позволяет качественно проработать UX. Единые backend-контракты гарантируют, что позднее интеграция каналов не потребует переписывать RAG/Vision/KB-ядро.
 - **Важно для MVP:** автоматическое подключение к существующему чату не реализуем как обязательный сценарий первого этапа — оно остаётся в Roadmap.
 - **Отклонённая альтернатива:** начинать с виджета внутри Bitrix24/Open Lines — повышает интеграционные риски и отвлекает от критериев «работоспособность прототипа», «GigaChat» и «UX».
@@ -315,7 +315,8 @@ seed не скачивает внешний массив документов.
 
 ```mermaid
 flowchart TB
-    subgraph CLIENT["Vite SPA: три role-зоны"]
+    subgraph CLIENT["Vite SPA: лендинг и role-зоны"]
+        LANDING["Public landing /"]
         FE["User panel"]
         OP["Operator panel"]
         ADMIN["Admin panel"]
@@ -350,6 +351,9 @@ flowchart TB
         REDMINE["Redmine HelpDesk"]
     end
 
+    LANDING --> FE
+    LANDING -.-> OP
+    LANDING -.-> ADMIN
     FE --> API
     OP --> API
     ADMIN --> API
@@ -379,7 +383,7 @@ flowchart TB
 
 **Компоненты:**
 
-- **Frontend** — на MVP: чат пользователя, панель оператора и админ-панель в одном Vite + React + TypeScript SPA. Возможность прикрепить скриншот присутствует в каждом диалоге по умолчанию. панель оператора с AI GigaChat входит в MVP; Roadmap относится только к внешним Bitrix24/Redmine.
+- **Frontend** — на MVP: публичный лендинг, чат пользователя, панель оператора и админ-панель в одном Vite + React + TypeScript SPA. Лендинг направляет сотрудника в пользовательский чат без выбора роли, а служебный диалог открывает operator/admin панели. Возможность прикрепить скриншот присутствует в каждом диалоге по умолчанию. Панель оператора с AI GigaChat входит в MVP; Roadmap относится только к внешним Bitrix24/Redmine.
 - **API Gateway** — FastAPI, REST для команд/сообщений + SSE для streaming и событий состояния; те же контракты позже используются интеграционными адаптерами.
 - **Dialog Service** — состояние диалога/история, роутинг в RAG/Vision/Escalation.
         - **RAG Engine** — локальная векторизация (`EmbeddingProvider`) → hybrid retrieval из Qdrant → evidence для единого user `GenerationContext`.
@@ -3540,7 +3544,7 @@ knowledge_card
 
 # Часть III — Frontend
 
-Frontend — одно **React SPA** с тремя изолированными role-зонами. Отдельные приложения не создаём.
+Frontend — одно **React SPA** с публичным лендингом и тремя изолированными role-зонами. Отдельные приложения не создаём.
 
 ```text
 React 18
@@ -3570,13 +3574,24 @@ Redux/Zustand в MVP не нужны.
 
 ## 18. Общая frontend-архитектура
 
-### 18.1 Три панели
+### 18.1 Лендинг и панели
 
 ```text
+/
+├── public landing
+│   ├── user CTA → /user
+│   └── staff dialog → /operator or /admin/dialogs
+│
 /user
 /operator
 /admin
 ```
+
+`/` - основной вход в приложение. Лендинг объясняет пользовательский flow,
+показывает возможности RAG/Vision и ведёт сотрудника в `/user` без выбора роли.
+Ссылки «Вход для команды» в header и footer открывают modal со служебными
+переходами в `/operator` и `/admin/dialogs`. Единый логотип «Молвест» используется
+на лендинге, во всех role-header и как favicon.
 
 В одном SPA:
 
@@ -3613,6 +3628,7 @@ Server data остаётся в React Query; не дублируем REST-fetch 
 ├── /user
 │   ├── index
 │   ├── /new
+│   ├── /history
 │   └── /dialogs/:dialogId
 │
 ├── /operator
@@ -3628,15 +3644,17 @@ Server data остаётся в React Query; не дублируем REST-fetch 
     └── /monitoring
 ```
 
-`/user`, `/operator`, `/admin` защищаются role guard.
+Лендинг является UX-точкой входа, а не security boundary. В MVP прямые маршруты
+`/user`, `/operator` и `/admin` технически остаются доступны без route guard.
 
 ### 18.3 Auth и role guards
 
-Frontend открывает контуры напрямую. Для API запросов frontend передаёт
-`X-Molvest-Role: user|operator|admin`; backend разрешает этот заголовок только как
-demo actor context. Это не authentication и не security boundary. Production
-публикует только Caddy на `80/443` и автоматически терминирует TLS. GigaChat
-credentials никогда не попадают в browser.
+Основной CTA лендинга ведёт в `/user`; role-панели оператора и администратора
+предлагаются из служебного dialog, но могут быть открыты и прямым URL. Для API
+запросов frontend передаёт `X-Molvest-Role: user|operator|admin`; backend разрешает
+этот заголовок только как demo actor context. Это не authentication, не route guard
+и не security boundary. Production публикует только Caddy на `80/443` и
+автоматически терминирует TLS. GigaChat credentials никогда не попадают в browser.
 
 Dev:
 
