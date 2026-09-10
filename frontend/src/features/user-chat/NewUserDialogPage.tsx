@@ -123,7 +123,7 @@ export default function NewUserDialogPage() {
       <UserDialogsNav />
       <section className="flex min-w-0 flex-1 flex-col bg-cream">
         <header className="flex min-h-[4.75rem] items-center gap-3 border-b border-[#dbe3f0] bg-white px-3 py-3 sm:px-5">
-          <Link to="/user" className="inline-flex size-10 shrink-0 items-center justify-center rounded-xl text-molvest-700 hover:bg-molvest-50 md:hidden" aria-label="К списку обращений"><ArrowLeft className="size-5" /></Link>
+          <Link to="/user/history" className="inline-flex size-10 shrink-0 items-center justify-center rounded-xl text-molvest-700 hover:bg-molvest-50 md:hidden" aria-label="К списку обращений"><ArrowLeft className="size-5" /></Link>
           <div className="min-w-0">
             <h1 className="text-base font-bold text-black">Новое обращение</h1>
             <p className="mt-1 text-xs text-slate-500">Диалог появится в списке после отправки первого сообщения.</p>

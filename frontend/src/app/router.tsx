@@ -35,8 +35,9 @@ export const router = createBrowserRouter([
         path: "user",
         element: suspended(<UserLayout />),
         children: [
-          { index: true, element: suspended(<UserHomePage />) },
+          { index: true, element: suspended(<NewUserDialogPage />) },
           { path: "new", element: suspended(<NewUserDialogPage />) },
+          { path: "history", element: suspended(<UserHomePage />) },
           { path: "dialogs/:dialogId", element: suspended(<UserDialogPage />) },
         ],
       },

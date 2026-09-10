@@ -1,21 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
-import { MessageCircleMore, Plus } from "lucide-react";
-import { useEffect } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { MessageCircleMore } from "lucide-react";
+import { NavLink } from "react-router-dom";
 import { dialogsApi } from "../../api/dialogs";
 import { queryKeys } from "../../api/queryKeys";
 import { DialogStatusBadge } from "../../shared/chat/DialogStatusBadge";
 import { useListReorderAnimation } from "../../shared/hooks/useListReorderAnimation";
 import { useUserProcessing } from "../../shared/hooks/useUserProcessing";
-import { Button, EmptyState, ErrorState, Skeleton } from "../../shared/ui";
+import { EmptyState, ErrorState, Skeleton } from "../../shared/ui";
 import { cn, formatRelativeDate, truncateTitle } from "../../shared/utils";
 
-function preloadNewDialog() {
-  void import("./NewUserDialogPage");
-}
-
 export default function UserDialogsNav({ mobile = false }: { mobile?: boolean }) {
-  const navigate = useNavigate();
   const processing = useUserProcessing();
   const dialogs = useQuery({
     queryKey: queryKeys.user.dialogs(),
@@ -28,25 +22,9 @@ export default function UserDialogsNav({ mobile = false }: { mobile?: boolean })
   const busyDialogId = processing.busyDialogId ?? serverBusyDialogId ?? null;
   const isBusy = processing.isBusy || serverBusyDialogId !== undefined;
 
-  useEffect(() => {
-    preloadNewDialog();
-  }, []);
-
   return (
     <aside className={cn("flex min-h-0 flex-col border-[#dbe3f0] bg-white", mobile ? "h-full" : "hidden border-r md:flex md:w-80 md:shrink-0")}>
-      <div className="border-b border-[#dbe3f0] p-4">
-          <Button
-            className="w-full"
-            disabled={isBusy}
-            onClick={() => navigate("/user/new")}
-            onFocus={preloadNewDialog}
-            onPointerEnter={preloadNewDialog}
-            onTouchStart={preloadNewDialog}
-          >
-          <Plus className="size-4" /> Новый чат
-        </Button>
-      </div>
-      <div className="flex items-center justify-between px-4 pb-2 pt-4">
+      <div className="flex items-center justify-between border-b border-[#dbe3f0] px-4 py-4">
         <h2 className="text-xs font-extrabold uppercase tracking-[0.16em] text-slate-500">Мои обращения</h2>
         {dialogs.data && <span className="rounded-full bg-[#fcc67f]/45 px-2 py-0.5 text-xs font-bold text-[#9a5600]">{dialogs.data.length}</span>}
       </div>
@@ -54,7 +32,7 @@ export default function UserDialogsNav({ mobile = false }: { mobile?: boolean })
         {dialogs.isPending && <div className="grid gap-2 p-2"><Skeleton className="h-24" /><Skeleton className="h-24" /><Skeleton className="h-24" /></div>}
         {dialogs.isError && <ErrorState description={dialogs.error.message} onRetry={() => void dialogs.refetch()} />}
         {dialogs.isSuccess && dialogs.data.length === 0 && (
-          <EmptyState icon={<MessageCircleMore className="size-8" />} title="Обращений пока нет" description="Создайте чат, чтобы задать первый вопрос." />
+          <EmptyState icon={<MessageCircleMore className="size-8" />} title="Обращений пока нет" description="Отправьте первое сообщение, чтобы начать диалог." />
         )}
         {dialogs.data?.map((dialog) => (
           <NavLink
