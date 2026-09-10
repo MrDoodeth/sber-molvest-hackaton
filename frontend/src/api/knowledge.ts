@@ -7,6 +7,7 @@ import type {
 
 export interface DocumentFilters {
   sectionId?: string;
+  page: number;
 }
 
 export interface UploadDocumentInput {
@@ -42,6 +43,7 @@ export const knowledgeApi = {
     apiRequest<KnowledgeDocumentsResponse>(
       `/api/admin/knowledge/documents${queryString({
         section_id: filters.sectionId,
+        page: filters.page,
       })}`,
       { signal },
     ),

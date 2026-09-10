@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BookOpen,
+  ChevronLeft,
+  ChevronRight,
   FilePlus2,
   FileText,
   FolderPlus,
@@ -82,8 +84,11 @@ export default function KnowledgePage() {
     queryFn: ({ signal }) => knowledgeApi.sections(signal),
   });
   const selectedSectionId = searchParams.get("section") ?? "";
+  const rawPage = Number(searchParams.get("page") ?? 1);
+  const page = Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1;
   const filters: DocumentFilters = {
     sectionId: selectedSectionId || undefined,
+    page,
   };
   const documents = useQuery({
     queryKey: queryKeys.kb.documents(filters),
@@ -99,7 +104,10 @@ export default function KnowledgePage() {
 
   useEffect(() => {
     if (!selectedSectionId && sections.data?.[0])
-      setSearchParams({ section: sections.data[0].id }, { replace: true });
+      setSearchParams(
+        { section: sections.data[0].id, page: "1" },
+        { replace: true },
+      );
   }, [sections.data, selectedSectionId, setSearchParams]);
   const selectedSection = sections.data?.find(
     (section) => section.id === selectedSectionId,
@@ -107,12 +115,20 @@ export default function KnowledgePage() {
   const isCaseJournal =
     selectedSection?.isSystem && selectedSection.name === "Журнал обращений";
   const canUpload = Boolean(selectedSectionId);
+  const setDocumentPage = (nextPage: number) => {
+    const next = new URLSearchParams(searchParams);
+    next.set("page", String(nextPage));
+    setSearchParams(next);
+  };
+  const totalPages = documents.data?.totalPages ?? 0;
+  const canPrevious = Boolean(documents.data && documents.data.page > 1);
+  const canNext = Boolean(documents.data && documents.data.page < totalPages);
 
   const create = useMutation({
     mutationFn: () => knowledgeApi.createSection(name.trim()),
     onSuccess: (section) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.kb.sections() });
-      setSearchParams({ section: section.id });
+      setSearchParams({ section: section.id, page: "1" });
       setCreateOpen(false);
       setName("");
       toast("Раздел создан", "success");
@@ -145,7 +161,7 @@ export default function KnowledgePage() {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.kb.allDocuments(),
       });
-      setSearchParams({});
+      setSearchParams({ page: "1" });
       setSectionAction(undefined);
       toast("Раздел удалён", "success");
     },
@@ -176,6 +192,7 @@ export default function KnowledgePage() {
         queryKey: queryKeys.kb.documents(filters),
       });
       void queryClient.invalidateQueries({ queryKey: queryKeys.kb.sections() });
+      setDocumentPage(1);
       if (fileInputRef.current) fileInputRef.current.value = "";
       toast("Документ загружен и передан на индексацию", "success");
     },
@@ -205,6 +222,7 @@ export default function KnowledgePage() {
         queryKey: queryKeys.kb.allDocuments(),
       });
       void queryClient.invalidateQueries({ queryKey: queryKeys.kb.sections() });
+      setDocumentPage(1);
       setDocumentToDelete(undefined);
       toast("Документ удалён из базы знаний", "success");
     },
@@ -285,12 +303,14 @@ export default function KnowledgePage() {
                       ? "border-molvest-400 bg-molvest-50"
                       : "border-transparent hover:bg-[#f1f4fb]",
                   )}
-                  onClick={() => setSearchParams({ section: section.id })}
+                  onClick={() =>
+                    setSearchParams({ section: section.id, page: "1" })
+                  }
                   onKeyDown={(event) => {
                     if (event.target !== event.currentTarget) return;
                     if (event.key === "Enter" || event.key === " ") {
                       event.preventDefault();
-                      setSearchParams({ section: section.id });
+                      setSearchParams({ section: section.id, page: "1" });
                     }
                   }}
                 >
@@ -428,8 +448,9 @@ export default function KnowledgePage() {
               />
             )}
             {documents.data && documents.data.items.length > 0 && (
-              <div className="w-full">
-                <table className="w-full table-fixed text-left text-sm">
+              <>
+                <div className="w-full">
+                  <table className="w-full table-fixed text-left text-sm">
                   <thead className="bg-[#f7f9fd] text-[10px] font-extrabold uppercase tracking-[0.12em] text-slate-500">
                     <tr>
                       <th className="w-[38%] px-2 py-3 sm:px-5">Документ</th>
@@ -518,8 +539,36 @@ export default function KnowledgePage() {
                       </tr>
                     ))}
                   </tbody>
-                </table>
-              </div>
+                  </table>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-stone-100 px-4 py-3">
+                  <span className="text-xs text-stone-500">
+                    Страница {documents.data.page} из {Math.max(totalPages, 1)}
+                  </span>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={!canPrevious}
+                      onClick={() =>
+                        canPrevious && setDocumentPage(documents.data.page - 1)
+                      }
+                    >
+                      <ChevronLeft className="size-4" /> Назад
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={!canNext}
+                      onClick={() =>
+                        canNext && setDocumentPage(documents.data.page + 1)
+                      }
+                    >
+                      Далее <ChevronRight className="size-4" />
+                    </Button>
+                  </div>
+                </div>
+              </>
             )}
           </Card>
         </div>

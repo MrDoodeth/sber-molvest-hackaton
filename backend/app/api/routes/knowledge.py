@@ -5,7 +5,7 @@ import uuid
 from pathlib import PurePath
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, Query, UploadFile
 from fastapi.responses import Response
 
 from app.api.deps import get_container, get_request_actor
@@ -112,12 +112,21 @@ async def delete_section(
 @router.get("/documents", response_model=KnowledgeDocumentsResponse)
 async def documents(
     section_id: uuid.UUID | None = None,
+    page: int = Query(default=1, ge=1),
     user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
 ) -> KnowledgeDocumentsResponse:
     require_admin(user)
+    page_size = 10
+    items, total = await container.knowledge_base.list_documents(
+        section_id, page, page_size
+    )
     return KnowledgeDocumentsResponse(
-        items=await container.knowledge_base.list_documents(section_id)
+        items=items,
+        page=page,
+        page_size=page_size,
+        total=total,
+        total_pages=(total + page_size - 1) // page_size,
     )
 
 

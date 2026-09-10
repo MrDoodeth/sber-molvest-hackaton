@@ -238,8 +238,8 @@ class KnowledgeBaseService:
                 await self._touch_rag_cache_version(session)
 
     async def list_documents(
-        self, section_id: uuid.UUID | None
-    ) -> list[KnowledgeDocumentDto]:
+        self, section_id: uuid.UUID | None, page: int, page_size: int
+    ) -> tuple[list[KnowledgeDocumentDto], int]:
         async with self._session_factory() as session:
             statement = (
                 select(KnowledgeDocument, KnowledgeSection)
@@ -253,8 +253,19 @@ class KnowledgeBaseService:
             )
             if section_id is not None:
                 statement = statement.where(KnowledgeDocument.section_id == section_id)
-            rows = (await session.execute(statement)).all()
-            return [document_dto(document, section) for document, section in rows]
+            count_statement = select(func.count()).select_from(KnowledgeDocument)
+            if section_id is not None:
+                count_statement = count_statement.where(
+                    KnowledgeDocument.section_id == section_id
+                )
+            total = await session.scalar(count_statement)
+            rows = (
+                await session.execute(
+                    statement.offset((page - 1) * page_size).limit(page_size)
+                )
+            ).all()
+            documents = [document_dto(document, section) for document, section in rows]
+            return documents, total or 0
 
     async def get_document(self, document_id: uuid.UUID) -> KnowledgeDocumentDto:
         async with self._session_factory() as session:

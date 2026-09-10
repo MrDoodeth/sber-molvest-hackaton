@@ -113,6 +113,10 @@ export interface KnowledgeDocumentDto {
 
 export interface KnowledgeDocumentsResponse {
   items: KnowledgeDocumentDto[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
 }
 
 export interface CaseCardDto {

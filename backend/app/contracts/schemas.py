@@ -168,6 +168,10 @@ class KnowledgeDocumentDto(ApiModel):
 
 class KnowledgeDocumentsResponse(ApiModel):
     items: list[KnowledgeDocumentDto]
+    page: int
+    page_size: int
+    total: int
+    total_pages: int
 
 
 class PromptDto(ApiModel):

@@ -4084,7 +4084,7 @@ Frontend не решает concurrency самостоятельно.
 | POST   | `/api/admin/knowledge/sections`                        | создать section                   |
 | PATCH  | `/api/admin/knowledge/sections/{id}`                   | rename / enable-disable           |
 | DELETE | `/api/admin/knowledge/sections/{id}`                   | удалить section                   |
-| GET    | `/api/admin/knowledge/documents?section_id=`           | documents, sorted by newest first |
+| GET    | `/api/admin/knowledge/documents?section_id=&page=`     | documents, newest first; 10 per page |
 | POST   | `/api/admin/knowledge/sections/{section_id}/documents` | upload permanent file; для системного журнала только case-card Markdown |
 | GET    | `/api/admin/knowledge/documents/{id}`                  | document detail                   |
 | PATCH  | `/api/admin/knowledge/documents/{id}`                  | enable-disable only in current MVP |
@@ -4844,6 +4844,8 @@ Upload:
 Отдельная страница document detail не нужна: список показывает только документ,
 enabled, compact updated date и index status; failed status содержит action для
 повторной индексации. Raw chunks и служебные metadata через UI не редактируются.
+Список использует `?section=<id>&page=<n>`; API возвращает `items`, `page`,
+`page_size`, `total` и `total_pages`.
 
 Удаление permanent document выполняется в таком порядке:
 
