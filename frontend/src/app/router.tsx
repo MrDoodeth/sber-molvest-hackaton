@@ -7,7 +7,6 @@ const UserLayout = lazy(() => import("./layouts/UserLayout"));
 const RoleSelectionPage = lazy(() => import("../features/RoleSelectionPage"));
 const OperatorLayout = lazy(() => import("./layouts/OperatorLayout"));
 const AdminLayout = lazy(() => import("./layouts/AdminLayout"));
-const UserHomePage = lazy(() => import("../features/user-chat/UserHomePage"));
 const NewUserDialogPage = lazy(() => import("../features/user-chat/NewUserDialogPage"));
 const UserDialogPage = lazy(() => import("../features/user-chat/UserDialogPage"));
 const OperatorWorkspace = lazy(() => import("../features/operator/OperatorWorkspace"));
@@ -37,7 +36,6 @@ export const router = createBrowserRouter([
         children: [
           { index: true, element: suspended(<NewUserDialogPage />) },
           { path: "new", element: suspended(<NewUserDialogPage />) },
-          { path: "history", element: suspended(<UserHomePage />) },
           { path: "dialogs/:dialogId", element: suspended(<UserDialogPage />) },
         ],
       },

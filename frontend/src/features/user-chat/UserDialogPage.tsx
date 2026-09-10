@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CheckCircle2, Image as ImageIcon, LockKeyhole, RotateCcw, XCircle } from "lucide-react";
+import { CheckCircle2, Image as ImageIcon, LockKeyhole, RotateCcw, XCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { ApiError } from "../../api/client";
 import { dialogsApi } from "../../api/dialogs";
 import { queryKeys } from "../../api/queryKeys";
@@ -211,7 +211,6 @@ export default function UserDialogPage() {
         {detail.data && (
           <>
              <header className="flex min-h-[4.75rem] items-center gap-3 border-b border-[#dbe3f0] bg-white px-3 py-3 sm:px-5">
-                <Link to="/user/history" className="inline-flex size-10 shrink-0 items-center justify-center rounded-xl text-molvest-700 hover:bg-molvest-50 md:hidden" aria-label="К списку обращений"><ArrowLeft className="size-5" /></Link>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                    <h1 className="text-base font-bold text-black">{truncateTitle(detail.data.title || `Обращение ${detail.data.id.slice(0, 8)}`)}</h1>
