@@ -97,7 +97,7 @@ export default function RoleSelectionPage() {
               <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-[#8ea3c8]">онлайн</span>
             </div>
             <div className="relative mt-5 flex min-h-[294px] flex-col gap-3 rounded-[20px] bg-[#f7f9fd] p-4 sm:min-h-[330px] sm:p-5">
-              <p className="ml-auto max-w-[88%] rounded-[15px] rounded-br-md bg-molvest-400 px-3.5 py-3 text-[13px] leading-5 text-white">Не проводится документ реализации. Что проверить?</p>
+              <p className="selection-blue ml-auto max-w-[88%] rounded-[15px] rounded-br-md bg-molvest-400 px-3.5 py-3 text-[13px] leading-5 text-white">Не проводится документ реализации. Что проверить?</p>
               <p className="max-w-[88%] rounded-[15px] rounded-bl-md border border-[#dbe3f0] bg-white px-3.5 py-3 text-[13px] leading-5">Проверю регламент и связанные ошибки в базе знаний. Начните с остатков по партии и статуса «Выработки продукции».</p>
               <div className="flex flex-wrap gap-1.5"><span className="rounded-full bg-molvest-100 px-2 py-1 text-[10px] font-extrabold text-molvest-700">RAG · база знаний</span><span className="rounded-full bg-molvest-100 px-2 py-1 text-[10px] font-extrabold text-molvest-700">Confidence 86%</span></div>
               <p className="max-w-[88%] rounded-[15px] rounded-bl-md border border-[#dbe3f0] bg-white px-3.5 py-3 text-[13px] leading-5">Если данных будет недостаточно, я передам этот же диалог специалисту.</p>
