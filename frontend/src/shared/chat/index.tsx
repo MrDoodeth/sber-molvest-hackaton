@@ -49,7 +49,7 @@ import {
 
 const IMAGE_LIMIT = 15 * 1024 * 1024;
 const DOCUMENT_LIMIT = 40 * 1024 * 1024;
-const ATTACHMENT_REQUEST_LIMIT = 80 * 1024 * 1024;
+const MEDIA_REQUEST_LIMIT = 80 * 1024 * 1024;
 export const MAX_RUNTIME_ATTACHMENTS = 10;
 export const MAX_RUNTIME_IMAGES = 1;
 const IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"];
@@ -175,6 +175,9 @@ export function isRuntimeImage(file: File): boolean {
 
 export function validateRuntimeAttachment(file: File): string | null {
   const extension = `.${file.name.split(".").pop()?.toLowerCase() ?? ""}`;
+  if (file.type.startsWith("audio/")) {
+    return "Аудиофайлы не поддерживаются.";
+  }
   const isImage = isRuntimeImage(file);
   const isDocument = DOCUMENT_EXTENSIONS.includes(extension);
   if (!isImage && !isDocument) {
@@ -203,9 +206,9 @@ export function validateRuntimeAttachments(files: File[]): string | null {
   if (imageCount > MAX_RUNTIME_IMAGES) {
     return "Можно прикрепить только одно изображение за сообщение.";
   }
-  const totalBytes = files.reduce((total, file) => total + file.size, 0);
-  if (totalBytes >= ATTACHMENT_REQUEST_LIMIT) {
-    return "Суммарный размер вложений должен быть менее 80 МБ.";
+  const mediaBytes = files.filter(isRuntimeImage).reduce((total, file) => total + file.size, 0);
+  if (mediaBytes >= MEDIA_REQUEST_LIMIT) {
+    return "Суммарный размер изображений должен быть менее 80 МБ.";
   }
   return null;
 }

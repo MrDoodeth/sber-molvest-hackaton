@@ -14,7 +14,7 @@ from app.providers.interfaces import LLMProvider, ObjectStorage
 
 MAX_RUNTIME_ATTACHMENTS = 10
 MAX_RUNTIME_IMAGES = 1
-MAX_RUNTIME_REQUEST_BYTES = 80 * 1024 * 1024
+MAX_RUNTIME_MEDIA_REQUEST_BYTES = 80 * 1024 * 1024
 RUNTIME_IMAGE_MIME_TYPES = frozenset(
     {"image/png", "image/jpeg", "image/tiff", "image/bmp"}
 )

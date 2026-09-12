@@ -33,7 +33,7 @@ from app.models import User
 from app.services.attachments import (
     MAX_RUNTIME_ATTACHMENTS,
     MAX_RUNTIME_IMAGES,
-    MAX_RUNTIME_REQUEST_BYTES,
+    MAX_RUNTIME_MEDIA_REQUEST_BYTES,
     ValidatedUpload,
     validate_upload_stream,
 )
@@ -147,13 +147,19 @@ async def send_message(
 
     validated: list[ValidatedUpload] = []
     if uploaded_files:
-        total_bytes = 0
+        media_bytes = 0
         image_count = 0
         for attachment in uploaded_files:
-            if total_bytes >= MAX_RUNTIME_REQUEST_BYTES:
+            content_type = (attachment.content_type or "").split(";", 1)[0].lower()
+            if content_type.startswith("audio/"):
                 raise UnprocessableError(
-                    "Суммарный размер вложений должен быть менее 80 МБ",
-                    {"max_bytes": MAX_RUNTIME_REQUEST_BYTES},
+                    "Аудиофайлы не поддерживаются",
+                    {"mime_type": content_type},
+                )
+            if media_bytes >= MAX_RUNTIME_MEDIA_REQUEST_BYTES:
+                raise UnprocessableError(
+                    "Суммарный размер изображений должен быть менее 80 МБ",
+                    {"max_bytes": MAX_RUNTIME_MEDIA_REQUEST_BYTES},
                 )
             upload = await validate_upload_stream(
                 file_name=attachment.filename,
@@ -169,11 +175,11 @@ async def send_message(
                         "Можно прикрепить только одно изображение за сообщение",
                         {"max_images": MAX_RUNTIME_IMAGES},
                     )
-            total_bytes += upload.size_bytes
-            if total_bytes >= MAX_RUNTIME_REQUEST_BYTES:
+                media_bytes += upload.size_bytes
+            if media_bytes >= MAX_RUNTIME_MEDIA_REQUEST_BYTES:
                 raise UnprocessableError(
-                    "Суммарный размер вложений должен быть менее 80 МБ",
-                    {"max_bytes": MAX_RUNTIME_REQUEST_BYTES},
+                    "Суммарный размер изображений должен быть менее 80 МБ",
+                    {"max_bytes": MAX_RUNTIME_MEDIA_REQUEST_BYTES},
                 )
             validated.append(upload)
     message, created = await container.dialogs.persist_message(

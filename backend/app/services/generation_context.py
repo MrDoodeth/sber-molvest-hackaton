@@ -34,6 +34,10 @@ class PreparedGenerationContext:
     request: GenerationRequest
 
 
+MAX_GIGACHAT_IMAGES = 10
+MAX_GIGACHAT_MEDIA_BYTES = 80 * 1024 * 1024
+
+
 class GenerationContextService:
     """Build the shared dialog/RAG context for every GigaChat generation flow."""
 
@@ -85,11 +89,11 @@ class GenerationContextService:
             raise UnprocessableError(
                 "Нельзя сгенерировать шаблон без сообщений пользователя"
             )
-        all_attachments = [
-            attachment
-            for message_item in messages
-            for attachment in attachments.get(message_item.id, [])
-        ]
+        latest_user_message = next(
+            message
+            for message in reversed(messages)
+            if message.author_type == MessageAuthor.USER
+        )
         latest_message = messages[-1]
         if latest_message.author_type == MessageAuthor.USER:
             current_text = latest_message.text
@@ -105,7 +109,7 @@ class GenerationContextService:
             dialog_id=dialog_id,
             current_text=current_text,
             history=history,
-            attachments=all_attachments,
+            attachments=attachments.get(latest_user_message.id, []),
             system_prompt=system_prompt,
             settings=settings,
         )
@@ -120,17 +124,24 @@ class GenerationContextService:
     ) -> PreparedGenerationContext:
         messages, attachments = await self._dialog_snapshot(dialog_id)
         history = self._history(messages, attachments)
-        all_attachments = [
-            attachment
-            for message in messages
-            for attachment in attachments.get(message.id, [])
-        ]
+        latest_user_message = next(
+            (
+                message
+                for message in reversed(messages)
+                if message.author_type == MessageAuthor.USER
+            ),
+            None,
+        )
         return await self._build_request(
             dialog_id=dialog_id,
             system_prompt=system_prompt,
             current_text=instruction,
             history=history,
-            attachments=all_attachments,
+            attachments=(
+                attachments.get(latest_user_message.id, [])
+                if latest_user_message is not None
+                else []
+            ),
             settings=settings,
         )
 
@@ -167,6 +178,7 @@ class GenerationContextService:
         settings: RuntimeSettings,
     ) -> PreparedGenerationContext:
         try:
+            self._validate_gigachat_attachments(attachments)
             attachment_file_ids, attachment_mime_types = await self._upload_attachments(
                 attachments, settings.active_model, dialog_id
             )
@@ -230,6 +242,25 @@ class GenerationContextService:
                 rag_status=retrieval.status,
             )
         )
+
+    @staticmethod
+    def _validate_gigachat_attachments(attachments: list[Attachment]) -> None:
+        images = [
+            attachment
+            for attachment in attachments
+            if attachment.mime_type in RUNTIME_IMAGE_MIME_TYPES
+        ]
+        if len(images) > MAX_GIGACHAT_IMAGES:
+            raise UnprocessableError(
+                "GigaChat поддерживает не более 10 изображений за запрос",
+                {"max_images": MAX_GIGACHAT_IMAGES},
+            )
+        media_bytes = sum(attachment.size_bytes or 0 for attachment in images)
+        if media_bytes >= MAX_GIGACHAT_MEDIA_BYTES:
+            raise UnprocessableError(
+                "Суммарный размер изображений для GigaChat должен быть менее 80 МБ",
+                {"max_bytes": MAX_GIGACHAT_MEDIA_BYTES},
+            )
 
     async def _dialog_snapshot(
         self, dialog_id: uuid.UUID
