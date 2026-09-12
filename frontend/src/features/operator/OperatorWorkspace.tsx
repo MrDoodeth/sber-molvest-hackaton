@@ -319,7 +319,7 @@ export default function OperatorWorkspace() {
           {dialogId && detail.isPending && (
             <PageLoader label="Открываем тикет" />
           )}
-          {dialogId && detail.isError && (
+          {dialogId && detail.isError && !detail.data && (
             <ErrorState
               description={detail.error.message}
               onRetry={() => void detail.refetch()}
@@ -327,6 +327,14 @@ export default function OperatorWorkspace() {
           )}
           {dialogId && detail.data && (
             <>
+              {detail.isError && (
+                <ErrorState
+                  compact
+                  title="Нет соединения"
+                  description="Показываем сохранённый тикет."
+                  onRetry={() => void detail.refetch()}
+                />
+              )}
               <header className="flex min-h-[4.75rem] items-center justify-between gap-4 border-b border-[#dbe3f0] bg-white px-4 py-3">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
@@ -376,9 +384,17 @@ export default function OperatorWorkspace() {
                 )}
               <div className="min-h-0 flex-1 overflow-y-auto">
                 {messages.isPending && <PageLoader label="Загружаем историю" />}
-                {messages.isError && (
+                {messages.isError && !messages.data && (
                   <ErrorState
                     description={messages.error.message}
+                    onRetry={() => void messages.refetch()}
+                  />
+                )}
+                {messages.isError && messages.data && (
+                  <ErrorState
+                    compact
+                    title="Нет соединения"
+                    description="Показываем сохранённую переписку."
                     onRetry={() => void messages.refetch()}
                   />
                 )}

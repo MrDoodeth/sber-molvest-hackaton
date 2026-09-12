@@ -45,8 +45,18 @@ export default function OperatorQueue({
       </div>
       <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto p-2">
         {queue.isPending && <div className="grid gap-2 p-2"><Skeleton className="h-32" /><Skeleton className="h-32" /><Skeleton className="h-32" /></div>}
-        {queue.isError && <ErrorState description={queue.error.message} onRetry={() => void queue.refetch()} />}
-        {queue.isSuccess && queue.data.length === 0 && (
+        {queue.isError && queue.data === undefined && (
+          <ErrorState description={queue.error.message} onRetry={() => void queue.refetch()} />
+        )}
+        {queue.isError && queue.data !== undefined && (
+          <ErrorState
+            compact
+            title="Нет соединения"
+            description="Показываем сохранённую очередь."
+            onRetry={() => void queue.refetch()}
+          />
+        )}
+        {queue.data?.length === 0 && (
           <EmptyState icon={<Inbox className="size-8" />} title={scope === "mine" ? "Нет тикетов в работе" : "Очередь пуста"} description={scope === "mine" ? "Возьмите свободное обращение во вкладке «Не назначены»." : "Новые эскалации появятся здесь автоматически."} />
         )}
         {queue.data?.map((dialog) => (
