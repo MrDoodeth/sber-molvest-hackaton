@@ -274,11 +274,32 @@ export function ErrorState({
   title = "Не удалось загрузить данные",
   description,
   onRetry,
+  compact = false,
 }: {
   title?: string;
   description?: string;
   onRetry?: () => void;
+  compact?: boolean;
 }) {
+  if (compact) {
+    return (
+      <div
+        className="flex items-center gap-2 border-b border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+        role="alert"
+      >
+        <AlertCircle className="size-4 shrink-0" aria-hidden="true" />
+        <span className="min-w-0 flex-1">
+          <strong className="font-bold">{title}</strong>
+          {description && <span className="ml-1">{description}</span>}
+        </span>
+        {onRetry && (
+          <Button variant="ghost" size="sm" className="shrink-0 text-amber-900" onClick={onRetry}>
+            Повторить
+          </Button>
+        )}
+      </div>
+    );
+  }
   return (
     <div className="flex min-h-52 flex-col items-center justify-center px-6 py-10 text-center" role="alert">
       <AlertCircle className="size-8 text-red-600" aria-hidden="true" />

@@ -36,8 +36,18 @@ export default function UserDialogsNav({ mobile = false }: { mobile?: boolean })
       </div>
       <nav ref={listRef} aria-label="Мои обращения" className="min-h-0 flex-1 overflow-y-auto p-2">
         {dialogs.isPending && <div className="grid gap-2 p-2"><Skeleton className="h-24" /><Skeleton className="h-24" /><Skeleton className="h-24" /></div>}
-        {dialogs.isError && <ErrorState description={dialogs.error.message} onRetry={() => void dialogs.refetch()} />}
-        {dialogs.isSuccess && dialogs.data.length === 0 && (
+        {dialogs.isError && dialogs.data === undefined && (
+          <ErrorState description={dialogs.error.message} onRetry={() => void dialogs.refetch()} />
+        )}
+        {dialogs.isError && dialogs.data !== undefined && (
+          <ErrorState
+            compact
+            title="Нет соединения"
+            description="Показываем сохранённые обращения."
+            onRetry={() => void dialogs.refetch()}
+          />
+        )}
+        {dialogs.data?.length === 0 && (
           <EmptyState icon={<MessageCircleMore className="size-8" />} title="Обращений пока нет" description="Отправьте первое сообщение, чтобы начать диалог." />
         )}
         {dialogs.data?.map((dialog) => (

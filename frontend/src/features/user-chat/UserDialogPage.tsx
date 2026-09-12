@@ -207,10 +207,20 @@ export default function UserDialogPage() {
       <UserDialogsNav />
       <section className="flex min-w-0 flex-1 flex-col bg-cream">
         {detail.isPending && <PageLoader label="Открываем обращение" />}
-        {detail.isError && <ErrorState description={detail.error.message} onRetry={() => void detail.refetch()} />}
+        {detail.isError && !detail.data && (
+          <ErrorState description={detail.error.message} onRetry={() => void detail.refetch()} />
+        )}
         {detail.data && (
           <>
-             <header className="flex min-h-[4.75rem] items-center gap-3 border-b border-[#dbe3f0] bg-white px-3 py-3 sm:px-5">
+            {detail.isError && (
+              <ErrorState
+                compact
+                title="Нет соединения"
+                description="Показываем сохранённое обращение."
+                onRetry={() => void detail.refetch()}
+              />
+            )}
+            <header className="flex min-h-[4.75rem] items-center gap-3 border-b border-[#dbe3f0] bg-white px-3 py-3 sm:px-5">
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                    <h1 className="text-base font-bold text-black">{truncateTitle(detail.data.title || `Обращение ${detail.data.id.slice(0, 8)}`)}</h1>
@@ -224,7 +234,17 @@ export default function UserDialogPage() {
             </header>
             <div className="min-h-0 flex-1 overflow-y-auto">
               {messages.isPending && <PageLoader label="Загружаем переписку" />}
-              {messages.isError && <ErrorState description={messages.error.message} onRetry={() => void messages.refetch()} />}
+              {messages.isError && !messages.data && (
+                <ErrorState description={messages.error.message} onRetry={() => void messages.refetch()} />
+              )}
+              {messages.isError && messages.data && (
+                <ErrorState
+                  compact
+                  title="Нет соединения"
+                  description="Показываем сохранённую переписку."
+                  onRetry={() => void messages.refetch()}
+                />
+              )}
               {messages.data && (
                 <MessageList
                   messages={allMessages}

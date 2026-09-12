@@ -85,11 +85,21 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
     body = JSON.stringify(mapJsonKeys(options.json, toSnakeCase));
   }
 
-  const response = await fetch(path, {
-    ...options,
-    headers,
-    body,
-  });
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      ...options,
+      headers,
+      body,
+    });
+  } catch (error) {
+    throw new ApiError(
+      "NETWORK_ERROR",
+      "Нет соединения с сервером. Проверьте интернет и повторите попытку.",
+      0,
+      error instanceof Error ? error.message : undefined,
+    );
+  }
 
   const text = response.status === 204 ? "" : await response.text();
   let payload: unknown;
