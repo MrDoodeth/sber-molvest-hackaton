@@ -1,4 +1,5 @@
 # Molvest GigaChat Support
+
 ## О проекте
 
 Molvest AI Support помогает автоматизировать первую линию технической поддержки
@@ -25,11 +26,11 @@ Molvest AI Support помогает автоматизировать перву�
 
 ## Роли
 
-| Роль | Что делает |
-| --- | --- |
-| Пользователь | Создаёт обращения, отправляет текст и файлы, получает ответы GigaChat или оператора, закрывает диалог и оставляет оценку ответа. |
-| Оператор | Получает эскалированные обращения, видит историю, использует AI-шаблон, редактирует и вручную отправляет ответ клиенту. |
-| Администратор | Управляет журналом, модерацией, базой знаний, prompt-ами, AI-настройками и метриками. |
+| Роль          | Что делает                                                                                                                       |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Пользователь  | Создаёт обращения, отправляет текст и файлы, получает ответы GigaChat или оператора, закрывает диалог и оставляет оценку ответа. |
+| Оператор      | Получает эскалированные обращения, видит историю, использует AI-шаблон, редактирует и вручную отправляет ответ клиенту.          |
+| Администратор | Управляет журналом, модерацией, базой знаний, prompt-ами, AI-настройками и метриками.                                            |
 
 ## Основные пользовательские сценарии
 
@@ -48,22 +49,12 @@ GigaChat оценивает уверенность ответа -> GigaChat фо
 
 ### Сценарий оператора
 
-Эскалация обращения -> обращение появляется в очереди -> оператор атомарно берёт его
+Эскалация обращения -> обращение появляется в очереди -> оператор берёт его
 в работу -> видит историю общения с пользователем и GigaChat, а также вложения ->
-получает при необходимости шаблон ответа от AI -> редактирует и отправляет ответ
+получает при необходимости шаблон ответа от AI на основе всего чата -> редактирует и отправляет ответ
 вручную -> продолжает общение с пользователем -> закрывает обращение -> обращение
 появляется в журнале
 администратора.
-
-#### AI-помощник оператора
-
-История обращения + вложения + найденные фрагменты базы знаний ->
-`SystemPrompt(operator_gigachat)` -> GigaChat -> шаблон ответа -> оператор
-редактирует шаблон -> оператор отправляет ответ вручную.
-
-Серверная часть строит полный упорядоченный снимок сообщений и вложений, затем
-выбирает самый свежий фрагмент, помещающийся в доступный объём контекста. GigaChat никогда не
-отправляет операторский шаблон клиенту автоматически.
 
 ### Сценарий администратора
 
@@ -73,18 +64,13 @@ GigaChat оценивает уверенность ответа -> GigaChat фо
 оценки» -> открывает полную историю, уверенность ответа, модель и состояние
 модерации.
 
-Журнал использует серверную постраничную выдачу и фильтры по дате, способу решения,
-наличию вложений и состоянию модерации.
-
 #### Кандидат в базу знаний
 
 Обращение закрыто -> создаётся один `KnowledgeCandidate` -> администратор редактирует
 карточку -> одобряет или отклоняет её -> при одобрении карточка проходит Markdown
 -> Docling -> BGE-M3 -> Qdrant.
 
-Карточка содержит `Название`, `Проблема` и `Результат`. Кандидат создаётся для
-каждого закрытого обращения; ограничение `UNIQUE(dialog_id)` не позволяет создать
-дубликат.
+Карточка содержит `Название`, `Проблема` и `Результат`.
 
 #### База знаний
 
@@ -102,9 +88,6 @@ Qdrant сохраняет индекс -> документ получает ст
 - скачивать и удалять документы;
 - импортировать Markdown-карточки кейсов в системный раздел «Журнал обращений».
 
-Список документов выводится по 10 записей. Страница хранится в URL:
-`/admin/knowledge?section=<id>&page=<n>`.
-
 #### Настройки AI
 
 Администратор открывает настройки AI -> изменяет модель GigaChat, доли контекста,
@@ -113,106 +96,64 @@ Qdrant сохраняет индекс -> документ получает ст
 
 ## Как работает AI
 
-### User AI-turn
+### Обработка вопроса
 
-```text
-USER MESSAGE
-    |
-    +-- screenshot parse, если есть изображение
-    |
-    v
-RAG retrieval
-    |
-    v
-ONE GenerationContext
-    |
-    v
-CALL #1: structured ConfidenceAssessment
-    |
-    +-- streak < 3 -> CALL #2: GigaChat answer -> SSE
-    |
-    +-- streak = 3 -> operator_support без CALL #2
-```
+Сообщение пользователя -> анализ снимка экрана, если он приложен -> поиск по базе
+знаний -> построение единого `GenerationContext` -> первый вызов GigaChat с
+`ConfidenceAssessment` -> проверка уверенности -> второй вызов GigaChat с
+`SystemPrompt(type=user_support)` -> передача ответа пользователю потоком через SSE.
 
-Оба GigaChat call используют один и тот же `GenerationContext`. Первый call
-использует hardcoded technical confidence prompt. Второй использует редактируемый
-`SystemPrompt(type=user_support)` и сразу стримит очищенные chunks пользователю.
-Один полный user-turn записывается как один `MetricEvent` с общей latency цепочки:
-screenshot parse, RAG, confidence, answer stream, escalation или error.
+Оба вызова GigaChat используют один и тот же `GenerationContext`. Первый использует
+встроенную техническую инструкцию для оценки уверенности. Второй формирует ответ
+и сразу передаёт его очищенные фрагменты пользователю. Полный пользовательский
+оборот записывается как один `MetricEvent` с общей задержкой: анализ снимка экрана,
+поиск по базе знаний, оценка уверенности, ответ, передача оператору или ошибка.
 
-### Confidence и эскалация
+### Уверенность и передача оператору
 
-```text
-confidence >= threshold
-    -> обычный AI flow
+Уверенность не ниже порога -> обычный ответ AI.
 
-первый low-confidence
-    -> AI отвечает, streak = 1
+Первая низкая оценка -> AI отвечает -> счётчик низких оценок равен 1.
 
-второй подряд low-confidence
-    -> AI отвечает, streak = 2
+Вторая подряд низкая оценка -> AI отвечает -> счётчик низких оценок равен 2.
 
-третий подряд low-confidence
-    -> Dialog -> operator_support
+Третья подряд низкая оценка -> обращение переводится в `operator_support` без
+дополнительного вызова GigaChat.
 
-явная просьба пользователя об операторе
-    -> мгновенная эскалация
-```
-
-Порог по умолчанию составляет 80% и изменяется в AI Settings. При эскалации
-оператор подключается к существующему `Dialog`, поэтому пользователю не нужно
+Явная просьба пользователя об операторе -> немедленная передача обращения
+оператору. Порог по умолчанию составляет 80% и изменяется в настройках AI.
+Оператор подключается к существующему обращению, поэтому пользователю не нужно
 повторять проблему.
 
 ## Как работает RAG
 
-### Permanent Knowledge Base
+### Постоянная база знаний
 
-```text
-PDF / DOCX / HTML / Markdown
-        |
-        v
-Docling
-        |
-        v
-HybridChunker
-        |
-        v
-BGE-M3 dense + sparse embeddings
-        |
-        v
-Qdrant: knowledge_chunks
-```
+Документ PDF, DOCX, HTML или Markdown -> Docling -> `HybridChunker` -> плотные и
+разреженные векторные представления BGE-M3 -> коллекция `knowledge_chunks` в Qdrant.
 
-В RAG участвуют только документы со статусом `indexed`, у которых включены и
-section, и сам документ. Для поиска используются dense/sparse retrieval и RRF;
-результат ограничивается настройкой `rag_top_k`.
+В поиске участвуют только документы со статусом `indexed`, у которых включены и
+раздел, и сам документ. Система выполняет гибридный поиск, объединяет результаты
+с помощью RRF и ограничивает выдачу настройкой `rag_top_k`.
 
-### Runtime files != Knowledge Base
+### Временные вложения и постоянная база знаний
 
-Назначение файла определяет pipeline:
+Вложение только для текущего обращения -> GigaChat Files API -> текущий диалог.
 
-```text
-Runtime attachment
-    -> GigaChat Files API
-    -> текущий Dialog
+Документ, который администратор добавляет в базу знаний -> Docling -> BGE-M3 ->
+Qdrant.
 
-Permanent KB document
-    -> Docling
-    -> BGE-M3
-    -> Qdrant
-```
+Временное вложение не становится постоянной базой знаний автоматически. Оно
+используется только в текущем обращении, а удалённый файл GigaChat удаляется после
+завершения его жизненного цикла.
 
-Runtime-вложения не становятся постоянной базой знаний автоматически. Их можно
-использовать только в текущем обращении; remote GigaChat file удаляется после
-завершения жизненного цикла.
+Текущие ограничения вложений в сообщении: до 10 файлов, общий размер запроса менее
+80 MB и не более одного изображения. Изображения поддерживают PNG, JPEG, TIFF и
+BMP до 15 MB; документы поддерживают TXT, DOC, DOCX, PDF, EPUB, PPT, PPTX и XLSX
+до 40 MB.
 
-Текущие лимиты runtime upload: до 10 файлов в сообщении, общий размер запроса
-менее 80 MB и максимум одно изображение. Изображения поддерживают PNG, JPEG,
-TIFF и BMP до 15 MB; документы поддерживают TXT, DOC, DOCX, PDF, EPUB, PPT,
-PPTX и XLSX до 40 MB.
-
-Permanent KB принимает PDF, DOCX, HTML и Markdown до 40 MB. Markdown-карточки
-для «Журнала обращений» должны быть UTF-8 и не превышать 2 MB.
+Постоянная база знаний принимает PDF, DOCX, HTML и Markdown до 40 MB.
+Markdown-карточки для «Журнала обращений» должны быть в UTF-8 и не превышать 2 MB.
 
 ## Архитектура
 
@@ -258,21 +199,21 @@ FastAPI modular monolith
 
 ## Стек
 
-| Слой | Технологии |
-| --- | --- |
-| Frontend | React 18, TypeScript, Vite, Tailwind CSS |
-| Routing | React Router v7 |
-| Server state | TanStack React Query |
-| Backend | Python 3.11, FastAPI, SQLAlchemy |
-| LLM | GigaChat |
-| LLM integration | LangChain Core, `langchain-gigachat` |
-| Embeddings | `BAAI/bge-m3`, FlagEmbedding |
-| Vector DB | Qdrant |
-| Database | PostgreSQL |
-| Cache and events | Redis, Redis Pub/Sub |
-| Parsing | Docling |
-| Realtime | Server-Sent Events (SSE) |
-| Deploy | Docker Compose, Caddy |
+| Слой             | Технологии                               |
+| ---------------- | ---------------------------------------- |
+| Frontend         | React 18, TypeScript, Vite, Tailwind CSS |
+| Routing          | React Router v7                          |
+| Server state     | TanStack React Query                     |
+| Backend          | Python 3.11, FastAPI, SQLAlchemy         |
+| LLM              | GigaChat                                 |
+| LLM integration  | LangChain Core, `langchain-gigachat`     |
+| Embeddings       | `BAAI/bge-m3`, FlagEmbedding             |
+| Vector DB        | Qdrant                                   |
+| Database         | PostgreSQL                               |
+| Cache and events | Redis, Redis Pub/Sub                     |
+| Parsing          | Docling                                  |
+| Realtime         | Server-Sent Events (SSE)                 |
+| Deploy           | Docker Compose, Caddy                    |
 
 ## Быстрый запуск
 
@@ -316,14 +257,14 @@ FastAPI modular monolith
 
 После запуска:
 
-| Сервис | URL |
-| --- | --- |
-| Frontend | <http://localhost:5173> |
-| FastAPI Swagger | <http://localhost:8000/docs> |
-| FastAPI ReDoc | <http://localhost:8000/redoc> |
-| OpenAPI JSON | <http://localhost:8000/openapi.json> |
-| Backend liveness | <http://localhost:8000/health> |
-| Qdrant HTTP API | <http://localhost:6333> |
+| Сервис           | URL                                  |
+| ---------------- | ------------------------------------ |
+| Frontend         | <http://localhost:5173>              |
+| FastAPI Swagger  | <http://localhost:8000/docs>         |
+| FastAPI ReDoc    | <http://localhost:8000/redoc>        |
+| OpenAPI JSON     | <http://localhost:8000/openapi.json> |
+| Backend liveness | <http://localhost:8000/health>       |
+| Qdrant HTTP API  | <http://localhost:6333>              |
 
 Откройте <http://localhost:5173>. Публичный landing ведёт кнопку «Задать вопрос»
 сразу в `/user`; «Вход для команды» открывает переходы в `/operator` и
@@ -377,18 +318,18 @@ docker compose -f docker-compose.dev.yml down --volumes --remove-orphans
 
 ## Основные маршруты
 
-| URL | Назначение |
-| --- | --- |
-| `/` | Public landing |
-| `/user` | Панель пользователя |
-| `/user/new` | Новый Dialog |
-| `/operator` | Очередь оператора |
-| `/operator/dialogs/:dialogId` | Dialog оператора |
-| `/admin/dialogs` | Журнал обращений |
-| `/admin/knowledge` | База знаний |
-| `/admin/prompts` | System Prompts |
-| `/admin/settings` | AI Settings |
-| `/admin/monitoring` | Monitoring |
+| URL                           | Назначение          |
+| ----------------------------- | ------------------- |
+| `/`                           | Public landing      |
+| `/user`                       | Панель пользователя |
+| `/user/new`                   | Новый Dialog        |
+| `/operator`                   | Очередь оператора   |
+| `/operator/dialogs/:dialogId` | Dialog оператора    |
+| `/admin/dialogs`              | Журнал обращений    |
+| `/admin/knowledge`            | База знаний         |
+| `/admin/prompts`              | System Prompts      |
+| `/admin/settings`             | AI Settings         |
+| `/admin/monitoring`           | Monitoring          |
 
 Маршрут `/admin` перенаправляет в `/admin/dialogs`.
 
