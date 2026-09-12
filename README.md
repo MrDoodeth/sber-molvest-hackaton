@@ -235,17 +235,17 @@ Markdown-карточки для «Журнала обращений» долж�
 | Обновления в реальном времени | Server-Sent Events (SSE) |
 | Развёртывание | Docker Compose, Caddy |
 
-## Roadmap
+## План развития
 
-- Bitrix24 Open Lines adapter.
-- Redmine HelpDesk adapter.
-- Production authentication и RBAC.
-- Transactional outbox и event replay.
-- Durable background queue.
-- Расширенный monitoring и alerting.
-- Automated RAG evaluation и golden datasets.
-- Reranker при подтверждённой необходимости.
-- Массовый импорт реальной базы знаний заказчика.
+- Подключение Bitrix24.
+- Подключение Redmine.
+- Полноценная авторизация и разграничение прав.
+- Надёжная доставка событий и их повторная отправка.
+- Отдельная очередь фоновых задач.
+- Расширенный мониторинг и уведомления.
+- Проверка качества поиска и ответов AI на тестовом наборе.
+- Дополнительное улучшение поиска при необходимости.
+- Массовый импорт базы знаний заказчика.
 
 ## Проверки проекта
 
