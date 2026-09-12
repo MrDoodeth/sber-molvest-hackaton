@@ -1,7 +1,5 @@
 # Архитектура AI-агента техподдержки 1С
 
-> Единый архитектурный контракт проекта: backend, RAG/GigaChat pipeline и три frontend-панели `user / operator / admin`.
-
 ## Оглавление
 
 ### Часть I — Общая архитектура
@@ -55,7 +53,7 @@
 
 - **Фронтенд собственный** (не 1С/Bitrix24 UI): одно SPA с публичным лендингом `/` и тремя панелями — `user`, `operator`, `admin`. Лендинг ведёт сотрудника сразу в пользовательский чат, а служебный вход открывает выбор operator/admin. Backend-сервисы не зависят от SPA, но формальный adapter boundary для внешних каналов пока не реализован; Bitrix24/Redmine остаются roadmap.
 - **Backend — модульный монолит на FastAPI**, не микросервисы: меньше DevOps-расходов на хакатон, модули (RAG, Vision, Escalation, KB) изолированы и готовы к выносу в отдельные сервисы позже.
-- **GigaChat — центральная генеративная модель:** используем API для формирования финального ответа и анализа приложенных скриншотов. Для MVP основной кандидат — `GigaChat (активная модель)`.
+- **GigaChat — центральная генеративная модель:** используем API для формирования финального ответа и анализа приложенных скриншотов. Для MVP основной кандидат — `GigaChat Pro`.
 - **Embeddings делаем локально:** Freemium предоставляет бесплатные токены генерации, но векторное представление текста оплачивается отдельно. Поэтому retrieval не зависит от платного Embeddings API; основной локальный кандидат — `BAAI/bge-m3`.
 - **Критичное ограничение Freemium — 1 поток генерации.** Все GigaChat generation, vision и Files API операции проходят через re-entrant `GenerationGate`: локальный semaphore ускоряет один worker, а PostgreSQL advisory lock сериализует вызовы между workers. Обычный пользовательский turn использует два последовательных GigaChat generation-call с одним `GenerationContext`: structured `confidence` и streaming user answer. При screenshot его parse выполняется до retrieval в том же атомарном turn. Confidence публикуется отдельным техническим SSE-событием: пользовательский UI его не показывает, но браузер получает и обрабатывает значение; operator/admin UI могут его отображать. Первый и второй подряд низкий confidence всё равно запускают streaming answer, а третий подряд ниже порога эскалирует без второго call. Ручной шаблон оператора выполняется отдельным generation-call.
 - **Operator template context:** backend строит полный упорядоченный снимок сообщений
@@ -78,12 +76,12 @@
 
 ### Функциональные сценарии и приоритет реализации
 
-| #   | Сценарий                                            | Статус на хакатон                                            | Ключевая механика                                                                                                                                                                                     |
-| --- | --------------------------------------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | **Вопрос–ответ (чат-бот)**                          | **Обязательный MVP**                                         | Пользователь пишет вопрос в нашем веб-чате → backend анализирует запрос → выполняет поиск по БЗ → GigaChat формирует понятный ответ → при низкой уверенности обращение эскалируется оператору         |
-| 2   | **Автоматическое подключение к существующему чату** | **Roadmap, не MVP**                                          | В будущем агент подключается к Bitrix24/Redmine, читает сообщения в реальном времени и либо предлагает оператору черновик, либо отвечает автоматически по настройке                                   |
+| #   | Сценарий                                            | Статус на хакатон                                            | Ключевая механика                                                                                                                                                                                              |
+| --- | --------------------------------------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **Вопрос–ответ (чат-бот)**                          | **Обязательный MVP**                                         | Пользователь пишет вопрос в нашем веб-чате → backend анализирует запрос → выполняет поиск по БЗ → GigaChat формирует понятный ответ → при низкой уверенности обращение эскалируется оператору                  |
+| 2   | **Автоматическое подключение к существующему чату** | **Roadmap, не MVP, частично РЕАЛИЗОВАН**                     | В будущем агент подключается к Bitrix24/Redmine, читает сообщения в реальном времени и либо предлагает оператору черновик, либо отвечает автоматически по настройке                                            |
 | 3   | **Анализ изображений и скриншотов**                 | **Обязательный MVP, доступен в каждом диалоге по умолчанию** | В любом чате пользователь может приложить PNG/JPEG/TIFF/BMP-скриншот 1С; агент извлекает текст и визуальные признаки, определяет ошибку/поле/состояние интерфейса и использует результат как часть RAG-запроса |
-| 4   | **Управление базой знаний**                         | **Обязательный MVP**                                         | Администратор создаёт/редактирует/удаляет разделы БЗ, загружает документы, запускает переиндексацию, обновляет источники и управляет параметрами системы                                              |
+| 4   | **Управление базой знаний**                         | **Обязательный MVP**                                         | Администратор создаёт/редактирует/удаляет разделы БЗ, загружает документы, запускает переиндексацию, обновляет источники и управляет параметрами системы                                                       |
 
 #### 1.2.1 Текущий канал взаимодействия и совместимость с Bitrix24/Redmine
 
@@ -220,9 +218,9 @@ seed не скачивает внешний массив документов.
   Единый `.env.example` содержит только GigaChat credentials. Остальные runtime
   defaults и dev host ports заданы в Compose; `docker-compose.dev.yml` использует dev
   defaults, а `docker-compose.yml` — production defaults и Caddy domain.
-   а `docker-compose.yml` публикует только Caddy и жёстко задаёт production
-   defaults независимо от demo-значений шаблона. Authentication settings не
-   являются environment variables; demo actor context используется в обоих режимах.
+  а `docker-compose.yml` публикует только Caddy и жёстко задаёт production
+  defaults независимо от demo-значений шаблона. Authentication settings не
+  являются environment variables; demo actor context используется в обоих режимах.
 
 ### 3.1. Текущее состояние реализации
 
@@ -323,104 +321,34 @@ seed не скачивает внешний массив документов.
 
 ## 4. Высокоуровневая архитектура
 
-```mermaid
-flowchart TB
-    subgraph CLIENT["Vite SPA: лендинг и role-зоны"]
-        LANDING["Public landing /"]
-        FE["User panel"]
-        OP["Operator panel"]
-        ADMIN["Admin panel"]
-    end
-
-    subgraph GW["API Gateway (FastAPI)"]
-        API["REST + SSE"]
-    end
-
-    subgraph CORE["Ядро приложения"]
-        DIALOG["Dialog Service"]
-        RAG["RAG Engine"]
-        VISION["Vision / Attachments Handler"]
-        ESCALATION["Escalation Service"]
-        KB["KB Service"]
-    end
-
-    subgraph AI["AI-провайдеры"]
-        GIGA["GigaChatProvider<br/>Generate + Vision"]
-        EMB["Local EmbeddingProvider<br/>BAAI/bge-m3"]
-    end
-
-    subgraph DATA["Хранилища"]
-        PG[("PostgreSQL")]
-        VDB[("Qdrant")]
-        REDIS[("Redis RAG cache + SSE Pub/Sub")]
-        S3[("Local / optional S3-compatible storage")]
-    end
-
-    subgraph EXT["Внешние каналы (Roadmap)"]
-        BITRIX["Bitrix24 Open Lines"]
-        REDMINE["Redmine HelpDesk"]
-    end
-
-    LANDING --> FE
-    LANDING -.-> OP
-    LANDING -.-> ADMIN
-    FE --> API
-    OP --> API
-    ADMIN --> API
-    API --> DIALOG
-    DIALOG --> RAG
-    DIALOG --> VISION
-    DIALOG --> ESCALATION
-
-    VISION --> RAG
-    RAG --> EMB
-    EMB --> VDB
-    RAG --> VDB
-    RAG --> REDIS
-    RAG --> GIGA
-
-    KB --> EMB
-    KB --> VDB
-    KB --> PG
-
-    DIALOG --> PG
-    ESCALATION --> PG
-    VISION --> S3
-
-    API -.->|adapter, roadmap| BITRIX
-    API -.->|adapter, roadmap| REDMINE
-```
-
 **Компоненты:**
 
 - **Frontend** — на MVP: публичный лендинг, чат пользователя, панель оператора и админ-панель в одном Vite + React + TypeScript SPA. Лендинг направляет сотрудника в пользовательский чат без выбора роли, а служебный диалог открывает operator/admin панели. Возможность прикрепить скриншот присутствует в каждом диалоге по умолчанию. Панель оператора с AI GigaChat входит в MVP; Roadmap относится только к внешним Bitrix24/Redmine.
 - **API Gateway** — FastAPI, REST для команд/сообщений + SSE для streaming и событий состояния; те же контракты позже используются интеграционными адаптерами.
-- **Dialog Service** — состояние диалога/история, роутинг в RAG/Vision/Escalation.
-        - **RAG Engine** — локальная векторизация (`EmbeddingProvider`) → hybrid retrieval из Qdrant → evidence для единого user `GenerationContext`.
-        - **Vision / Attachments Handler** — хранит runtime attachment, для screenshot выполняет отдельный GigaChat parse (`extracted_text + visual_summary`) до RAG, затем переиспользует тот же `file_id` в confidence и answer calls. Text attachments также передаются в generation-вызовы с `function_call="auto"`.
-        - **Dialog decision flow** — `DialogService` один раз собирает `GenerationContext`, вызывает hardcoded confidence assessment, считает персистентную серию низких оценок и запускает streaming answer, пока серия меньше трёх; третий подряд низкий confidence эскалирует Dialog.
+- **Dialog Service** — состояние диалога/история, роутинг в RAG/Vision/Escalation. - **RAG Engine** — локальная векторизация (`EmbeddingProvider`) → hybrid retrieval из Qdrant → evidence для единого user `GenerationContext`. - **Vision / Attachments Handler** — хранит runtime attachment, для screenshot выполняет отдельный GigaChat parse (`extracted_text + visual_summary`) до RAG, затем переиспользует тот же `file_id` в confidence и answer calls. Text attachments также передаются в generation-вызовы с `function_call="auto"`. - **Dialog decision flow** — `DialogService` один раз собирает `GenerationContext`, вызывает hardcoded confidence assessment, считает персистентную серию низких оценок и запускает streaming answer, пока серия меньше трёх; третий подряд низкий confidence эскалирует Dialog.
   - **Moderation flow** — `ModerationService` показывает администратору завершённые тикеты с `DialogFeedback.verdict=ai_error`, управляет candidate и выполняет подтверждённое каскадное удаление разобранных ошибочных чатов.
 - **KB Service** — CRUD документов, чанкинг, (ре)индексация.
   - **Channel Adapters** (roadmap) — Bitrix24 Open Lines и Redmine HelpDesk через будущий `IChannelAdapter`. Такой адаптер должен преобразовывать сообщения конкретной платформы в единый внутренний контракт backend; в текущем коде этого слоя нет.
 
 ## 5. Технологический стек и LangChain-first
 
-| Слой                | Технология                                                                  | Почему                                                                                                                                  |
-| ------------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Frontend            | **React 18 + TypeScript + Vite + Tailwind + React Router v7 + React Query** | Один SPA для user/operator/admin; Router — маршрутизация, React Query — server state, Tailwind — UI                                     |
-| Realtime            | **SSE + REST + Redis Pub/Sub**                                              | REST хранит команды, Redis доставляет SSE между workers, БД остаётся source of truth                                                     |
-| Backend             | Python 3.11 + FastAPI (async)                                               | REST/SSE API, приём сообщений и файлов                                                                                                  |
-| Каналы              | REST для web MVP; `IChannelAdapter` + webhooks — Roadmap                    | MVP использует только собственный frontend; adapter-контракт и webhooks Bitrix24/Redmine ещё не реализованы                              |
-| Генерация + Vision  | GigaChat API: Lite / Pro / Max / Ultra через `langchain-gigachat`           | Активная модель задаётся backend-политикой и отображается в админке; единый `GigaChatProvider` скрывает различия моделей от RAG/backend |
-| Embeddings          | **Локально `BAAI/bge-m3`** через `FlagEmbedding` / `sentence-transformers`  | Бесплатно локально; RU/multilingual; dense+sparse representations для hybrid retrieval                                                  |
-| Оркестрация         | LangChain Core / LCEL + `langchain-gigachat`                                | Простые контролируемые Runnable-вызовы без agent executor; прозрачный контроль latency и числа GigaChat-вызовов         |
-| Векторная БД        | Qdrant                                                                      | Hybrid search, payload-фильтры, Docker-friendly                                                                                         |
-| RAG cache / events  | Redis                                                                       | Versioned Qdrant hits и межworker SSE Pub/Sub; PostgreSQL подтверждает persisted state                                                   |
-| РСУБД               | PostgreSQL                                                                  | Диалоги, тикеты, метаданные БЗ, логи, метрики                                                                                           |
-| Фоновые задачи      | FastAPI `BackgroundTasks` как wake-up + persisted recovery dispatcher          | `pending/processing` восстанавливаются через PostgreSQL advisory lock; отдельной durable queue пока нет                                   |
-| Объектное хранилище | LocalObjectStorage по умолчанию; опционально S3 через `aioboto3`            | Скриншоты, исходные документы; MinIO не входит в текущий Compose                                                                        | Быстро извлекает текст/коды ошибки локально перед retrieval; GigaChat всё равно получает исходное изображение и выполняет смысловой Vision-анализ |
-| Наблюдаемость       | Application logs + базовые метрики backend                                  | Latency, ошибки, confidence, источники ответа и эскалации без внешнего SaaS                                                             |
-| Деплой              | Docker Compose для dev и production; Caddy для TLS                            | Один воспроизводимый стек с внутренними сервисами и единой внешней точкой входа; Kubernetes не входит в текущий репозиторий             |
+| Слой                | Технология                                                                            | Почему                                                                                                                                         |
+| ------------------- | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Frontend            | **React 18 + TypeScript + Vite + Tailwind + React Router v7 + React Query**           | Один SPA для user/operator/admin; Router отвечает за маршрутизацию, React Query — за server state, Tailwind — за UI.                           |
+| Realtime            | **SSE + REST + Redis Pub/Sub**                                                        | REST используется для команд и мутаций, Redis доставляет SSE-события между backend workers, PostgreSQL остаётся source of truth.               |
+| Backend             | Python 3.11 + FastAPI (async)                                                         | REST/SSE API, обработка сообщений, файлов и бизнес-логики приложения.                                                                          |
+| Каналы              | REST для web MVP; `IChannelAdapter` + webhooks — Roadmap                              | MVP использует собственный frontend. Адаптеры и webhooks для Bitrix24/Redmine пока не реализованы.                                             |
+| Генерация + Vision  | GigaChat API: Lite / Pro / Max / Ultra через `langchain-gigachat`                     | Активная модель задаётся backend-политикой и настройками администратора. `GigaChatProvider` изолирует детали интеграции от остальных сервисов. |
+| Embeddings          | **Локально `BAAI/bge-m3`** через `FlagEmbedding` / `sentence-transformers`            | Бесплатные локальные embeddings, мультиязычность, dense + sparse representations для hybrid retrieval.                                         |
+| Оркестрация         | LangChain Core / LCEL + `langchain-gigachat`                                          | Простые контролируемые Runnable-вызовы без AgentExecutor и многоагентной orchestration.                                                        |
+| Векторная БД        | Qdrant                                                                                | Hybrid search, payload-фильтры и удобный Docker deployment.                                                                                    |
+| RAG cache / events  | Redis                                                                                 | Versioned cache результатов retrieval и межworker SSE Pub/Sub. Persisted state подтверждается PostgreSQL.                                      |
+| РСУБД               | PostgreSQL                                                                            | Диалоги, сообщения, пользователи, настройки, метаданные БЗ, moderation и метрики.                                                              |
+| Фоновые задачи      | FastAPI `BackgroundTasks` + persisted recovery dispatcher                             | `pending/processing` задачи восстанавливаются из PostgreSQL; отдельной durable queue в MVP нет.                                                |
+| Объектное хранилище | `LocalObjectStorage` по умолчанию; опционально S3-compatible storage через `aioboto3` | Хранение runtime-вложений и исходных документов БЗ. MinIO не является обязательной частью текущего Compose.                                    |
+| Наблюдаемость       | Application logs + базовые backend-метрики                                            | Latency, ошибки, confidence, usage и статистика эскалаций без отдельного observability SaaS.                                                   |
+| Деплой              | Docker Compose для dev и production; Caddy для TLS                                    | Один воспроизводимый стек с внутренними сервисами и единой внешней точкой входа. Kubernetes в текущий MVP не входит.                           |
+|                     |
 
 ### LangChain-first правило разработки
 
@@ -446,14 +374,12 @@ flowchart TB
 
 **Латентность (бюджет на <5 сек из ТЗ):**
 
-| Этап                       | Бюджет                                                                  |
-| -------------------------- | ----------------------------------------------------------------------- |
-| Local BGE-M3 embedding     | измеряем на целевом железе                                              |
-| Поиск в Qdrant             | целевой порядок десятки миллисекунд                                     |
-    | GigaChat до первого токена | измеряем на API; user UI получает первый answer chunk сразу через SSE после технического confidence call |
-| End-to-end                 | целевой KPI заказчика <5 с; обязательно подтвердить экспериментально    |
-
-_Открытый вопрос для приёмки: считать SLA «<5 сек» как время до первого токена (со стримингом) или до полного ответа — уточнить у В.В. Донцовой._
+| Этап                       | Бюджет                                                                                                   |
+| -------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Local BGE-M3 embedding     | измеряем на целевом железе                                                                               |
+| Поиск в Qdrant             | целевой порядок десятки миллисекунд                                                                      |
+| GigaChat до первого токена | измеряем на API; user UI получает первый answer chunk сразу через SSE после технического confidence call |
+| End-to-end                 | целевой KPI заказчика <5 с; обязательно подтвердить экспериментально                                     |
 
 **Безопасность и данные:** self-hosted Qdrant/Postgres и local storage по умолчанию (либо внешний S3 через provider); authentication в MVP отсутствует. User/operator/admin контуры используют незащищённый `X-Molvest-Role` demo actor context и не являются публичным security boundary. GigaChat credentials находятся только на backend. В Docker/Linux устанавливаем доверенный сертификат НУЦ Минцифры или задаём `ca_bundle_file`; SSL verification не отключаем. Runtime-файлы удаляются из GigaChat File Storage при close/hard delete, а не обязательно сразу после каждого generation-call. PII не пишем в технические логи без необходимости.
 
@@ -466,11 +392,11 @@ transactional outbox остаются Roadmap; REST/БД являются ист
 
 ## 7. Метрики эффективности
 
-| Метрика                      | Как считаем                                                                           | Целевой показатель                                    |
-| ---------------------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------- |
-| % обработанных без эскалации | count(escalated=false) / total                                                        | Снижение обращений к операторам на 30–40%             |
-| Среднее время ответа         | `MetricEvent.latency_ms` для полного user turn: от начала background processing до answer/escalation/error; текущий API считает только average, p50/p95 не реализованы | <5 сек                                                |
-| Количество эскалаций         | count(escalated=true) / период                                                        | Тренд к снижению                                      |
+| Метрика                      | Как считаем                                                                                                                                                            | Целевой показатель                        |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| % обработанных без эскалации | count(escalated=false) / total                                                                                                                                         | Снижение обращений к операторам на 30–40% |
+| Среднее время ответа         | `MetricEvent.latency_ms` для полного user turn: от начала background processing до answer/escalation/error; текущий API считает только average, p50/p95 не реализованы | <5 сек                                    |
+| Количество эскалаций         | count(escalated=true) / период                                                                                                                                         | Тренд к снижению                          |
 
 `MetricEvent.event_type` различает `user_turn`, `operator_template` и
 `knowledge_card`; monitoring KPI агрегирует только `user_turn`, чтобы ручные
@@ -491,7 +417,7 @@ answer не запускался, сохраняется usage только conf
 | Функция ТЗ             | Хакатон (MVP)                                                                                                                    | Прод (Roadmap)                                                               |
 | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
 | Q&A чат-бот            | **Свой веб-чат + RAG на GigaChat API**                                                                                           | Bitrix24 Open Lines и Redmine HelpDesk через адаптеры                        |
-| Совместимость каналов  | Web REST является единственным реализованным каналом; нормализующие контракты и adapters спроектированы как Roadmap                   | Реальные webhooks/API конкретных платформ                                    |
+| Совместимость каналов  | Web REST является единственным реализованным каналом; нормализующие контракты и adapters спроектированы как Roadmap              | Реальные webhooks/API конкретных платформ                                    |
 | Автоподключение к чату | **Не реализуем как обязательный MVP**                                                                                            | Listener Bitrix24/Redmine + режимы `suggest/auto`                            |
 | База знаний            | **Секции + CRUD документов + human-in-the-loop candidate approval + индексация**                                                 | Версионирование, массовый импорт                                             |
 | Минимальные данные     | Документы загружаются через KB API; автоматический seed реальной документации 1С не выполняется                                  | Полный массив источников заказчика и автоматическая стартовая загрузка       |
@@ -502,15 +428,15 @@ answer не запускался, сохраняется usage только conf
 
 ### Проверка ожидаемого результата по ТЗ
 
-| Требование заказчика  | Как закрываем                                                                              |
-| --------------------- | ------------------------------------------------------------------------------------------ |
-| Работающий AI-агент   | Собственный web-чат на MVP; backend сразу совместим с будущими Bitrix24/Redmine-адаптерами |
-| БЗ по продуктам 1С    | Обязательный раздел «Документация 1С», индексируемый в Qdrant                              |
-| Анализ скриншотов     | Встроен в каждый диалог, GigaChat Vision → извлечённый контекст → RAG                      |
+| Требование заказчика  | Как закрываем                                                                                    |
+| --------------------- | ------------------------------------------------------------------------------------------------ |
+| Работающий AI-агент   | Собственный web-чат на MVP; backend сразу совместим с будущими Bitrix24/Redmine-адаптерами       |
+| БЗ по продуктам 1С    | Обязательный раздел «Документация 1С», индексируемый в Qdrant                                    |
+| Анализ скриншотов     | Встроен в каждый диалог, GigaChat Vision → извлечённый контекст → RAG                            |
 | Админ-панель          | Управление разделами/документами, настройки confidence, агрегированный monitoring без log viewer |
-| Обновление знаний     | Загрузка новых документов и переиндексация; закрытые кейсы как кандидаты в БЗ              |
-| Документация          | `ARCHITECTURE.md`, Swagger UI `/docs` и ReDoc `/redoc`                                     |
-| Метрики эффективности | % без эскалации, среднее время ответа, количество эскалаций, confidence                    |
+| Обновление знаний     | Загрузка новых документов и переиндексация; закрытые кейсы как кандидаты в БЗ                    |
+| Документация          | `ARCHITECTURE.md`, Swagger UI `/docs` и ReDoc `/redoc`                                           |
+| Метрики эффективности | % без эскалации, среднее время ответа, количество эскалаций, confidence                          |
 
 ## 9. Риски и митигации
 
@@ -537,11 +463,11 @@ backend не буферизует ответ целиком. Третий под
 - latency `user_turn` включает screenshot, RAG, confidence, весь answer stream и
   финальное решение.
 
-| Риск                                                  | Влияние                                | Митигация                                                                                                                                         |
-| ----------------------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Нестабильное распознавание мелкого/рукописного текста | Ошибочная диагностика скриншота        | Vision + regex по кодам ошибок + запрос переснять крупнее                                                                                         |
+| Риск                                                  | Влияние                                | Митигация                                                                                                            |
+| ----------------------------------------------------- | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Нестабильное распознавание мелкого/рукописного текста | Ошибочная диагностика скриншота        | Vision + regex по кодам ошибок + запрос переснять крупнее                                                            |
 | Нет доступа к реальному Bitrix24/Redmine на хакатоне  | Нельзя показать «настоящую» интеграцию | На MVP показываем собственный frontend; adapter boundary пока не реализован, реальную интеграцию оставляем в Roadmap |
-| Долгая индексация полной БЗ 1С                        | Не успеть до дедлайна                  | На демо — ограниченный, но реальный срез БЗ (ключевые документы + история обращений)                                                              |
+| Долгая индексация полной БЗ 1С                        | Не успеть до дедлайна                  | На демо — ограниченный, но реальный срез БЗ (ключевые документы + история обращений)                                 |
 
 # Часть II — Backend
 
@@ -959,54 +885,54 @@ USER MESSAGE
     ↓
 RAG retrieval
     ↓
-                ContextBuilder.build() — один GenerationContext
-                    ↓
-                GenerationGate.acquire()
-                    ↓
-                CALL #1: structured ConfidenceAssessment
-                hardcoded confidence prompt; threshold применяется после call
-                    ↓
-                confidence SSE event
-                ┌──────────────────────────────┼─────────────────────┐
-                │                              │
-                low-confidence streak < 3      low-confidence streak = 3
-                │                              │
-                ↓                              ↓
-                CALL #2: user answer stream     no CALL #2
-                → assistant_token SSE           operator_support
-                → assistant_done
-                ```
+ContextBuilder.build() — один GenerationContext
+    ↓
+GenerationGate.acquire()
+    ↓
+CALL #1: structured ConfidenceAssessment
+hardcoded confidence prompt; threshold применяется после call
+    ↓
+confidence SSE event
+┌──────────────────────────────┼─────────────────────┐
+│                              │
+low-confidence streak < 3      low-confidence streak = 3
+│                              │
+↓                              ↓
+CALL #2: user answer stream     no CALL #2
+→ assistant_token SSE           operator_support
+→ assistant_done
+```
 
-                Оба call используют один и тот же базовый контекст: recent history, текущий
-                вопрос, RAG evidence, screenshot analysis, runtime attachments и snapshot
-                runtime settings. Между ними нет повторного retrieval или перестроения истории.
-                Первый call не генерирует пользовательский ответ. При достаточной уверенности
-                второй call использует только `SystemPrompt(type=user_support)` и отправляет
-                очищенные chunks через SSE сразу по мере получения.
+Оба call используют один и тот же базовый контекст: recent history, текущий
+вопрос, RAG evidence, screenshot analysis, runtime attachments и snapshot
+runtime settings. Между ними нет повторного retrieval или перестроения истории.
+Первый call не генерирует пользовательский ответ. При достаточной уверенности
+второй call использует только `SystemPrompt(type=user_support)` и отправляет
+очищенные chunks через SSE сразу по мере получения.
 
-                Контракт confidence:
+Контракт confidence:
 
-                ```python
-                class ConfidenceAssessment(BaseModel):
-                    """Structured result of the hidden routing assessment."""
+```python
+class ConfidenceAssessment(BaseModel):
+    """Structured result of the hidden routing assessment."""
 
-                    confidence: float = Field(
-                        ge=0,
-                        le=1,
-                        description="Насколько контекста достаточно для корректного ответа, от 0 до 1.",
-                    )
-                ```
+    confidence: float = Field(
+        ge=0,
+        le=1,
+        description="Насколько контекста достаточно для корректного ответа, от 0 до 1.",
+    )
+```
 
-                Confidence получает полный общий контекст, но не получает редактируемый
-                `SystemPrompt(type=user_support)`: используется только hardcoded technical
-                instruction. Для стабильной маршрутизации structured call выполняется с
-                `temperature=0, top_p=0.1`. Первый и второй подряд низкий confidence
-                всё равно запускают второй call; третий подряд ниже порога переводит
-                Dialog в `operator_support` без user-answer generation.
+Confidence получает полный общий контекст, но не получает редактируемый
+`SystemPrompt(type=user_support)`: используется только hardcoded technical
+instruction. Для стабильной маршрутизации structured call выполняется с
+`temperature=0, top_p=0.1`. Первый и второй подряд низкий confidence
+всё равно запускают второй call; третий подряд ниже порога переводит
+Dialog в `operator_support` без user-answer generation.
 
 #### Поведение после подключения оператора
 
-                В `operator_support` новые пользовательские сообщения не запускают confidence/answer или
+В `operator_support` новые пользовательские сообщения не запускают confidence/answer или
 автоматический ответ. Они сохраняются в историю и передаются оператору через SSE.
 Шаблон генерируется только явным
 `POST /api/operator/dialogs/{dialogId}/template`.
@@ -1022,6 +948,7 @@ default = 0.80
 
                 Она передаётся в общий `GenerationContext` и используется backend decision policy
                 после первого confidence call.
+
 Остальные runtime AI/RAG settings также редактируются в этой форме и сохраняются
 одной atomic mutation; backend валидирует их перед commit.
 
@@ -1258,45 +1185,6 @@ CLOSED TICKET
     └── unrated  → ожидает оценку
 ```
 
-### Runtime sequence
-
-```mermaid
-sequenceDiagram
-    participant U as Пользователь
-    participant API as FastAPI
-    participant EMB as BGE-M3
-    participant Q as Qdrant
-    participant G as GigaChat
-    participant E as Operator
-
-    U->>API: message + optional attachment
-
-    API->>G: CALL #0 screenshot parse (if image exists)
-    G-->>API: extracted text + visual summary
-    API->>EMB: embed(user prompt + recent history)
-    EMB-->>API: prompt dense/sparse query
-    opt screenshot text or visual summary exists
-        API->>EMB: embed(parsed screenshot)
-        EMB-->>API: screenshot dense/sparse query
-    end
-    API->>Q: hybrid retrieval + dense preflight + rank fusion
-    Q-->>API: merged rag_top_k evidence or no_match
-
-    API->>G: Call #1 structured confidence
-    G-->>API: {confidence}
-    API-->>U: SSE confidence event
-
-    alt consecutive low-confidence turns < 3
-        API->>G: Call #2 user answer with same context
-        G-->>API: answer chunks
-        API-->>U: SSE assistant_token...
-        API-->>U: SSE assistant_done
-    else third consecutive low confidence
-        API->>E: switch same Dialog to operator_support
-        API-->>U: SSE operator_connected
-    end
-```
-
 ## 12. RAG: ingestion, retrieval и управление контекстом
 
 В runtime сначала выполняется screenshot parse (если есть изображение), затем
@@ -1476,9 +1364,11 @@ structured document
 # Краткий заголовок кейса
 
 ## Проблема
+
 Описание симптомов и исходной ситуации.
 
 ## Результат
+
 Проверенное решение и итог выполнения.
 ```
 
@@ -3410,7 +3300,7 @@ MVP-модель оставляем минимальной: каждая сущ�
 | `KnowledgeCandidate` | `id`, `dialog_id`, `source`, `generated_card`, `status`, `resulting_document_id?`, `reviewed_by?`, `reviewed_at?`                                                                                                                                                              | `UNIQUE(dialog_id)`; после Approve `resulting_document_id → KnowledgeDocument.id`                                                   |
 | `SystemPrompt`       | `id`, `type`, `content`, `updated_at`, `updated_by`                                                                                                                                                                                                                            | Одна редактируемая запись на каждый prompt: `user_support / operator_gigachat / knowledge_card`                                     |
 | `SystemSetting`      | `key`, `value`, `updated_at`                                                                                                                                                                                                                                                   | Runtime AI/RAG settings без restart                                                                                                 |
-| `MetricEvent`        | `id`, `dialog_id?`, `event_type`, `success`, `error_message?`, `latency_ms`, `confidence?`, `escalated`, `prompt_tokens?`, `completion_tokens?`, `precached_prompt_tokens?`, `gigachat_model?`, `system_prompt?`, `rag_top_k?`, `operator_escalation_threshold?`, `created_at` | Один aggregate на user turn: полная latency цепочки и суммарный usage confidence + answer calls |
+| `MetricEvent`        | `id`, `dialog_id?`, `event_type`, `success`, `error_message?`, `latency_ms`, `confidence?`, `escalated`, `prompt_tokens?`, `completion_tokens?`, `precached_prompt_tokens?`, `gigachat_model?`, `system_prompt?`, `rag_top_k?`, `operator_escalation_threshold?`, `created_at` | Один aggregate на user turn: полная latency цепочки и суммарный usage confidence + answer calls                                     |
 
 ### DB constraints / delete rules
 
@@ -4054,15 +3944,15 @@ polling-запросами.
 
 ### 20.2 Operator
 
-| Method | Endpoint                                      | Назначение                         |
-| ------ | --------------------------------------------- | ---------------------------------- |
-| GET    | `/api/operator/dialogs?scope=unassigned\|mine` | активная operator queue            |
-| POST   | `/api/operator/dialogs/{dialogId}/claim`    | атомарно назначить тикет текущему operator        |
-| GET    | `/api/operator/events`                      | realtime queue SSE                                |
-| GET    | `/api/operator/dialogs/{dialogId}/events`   | operator-only user/dialog state SSE               |
-| POST   | `/api/operator/dialogs/{dialogId}/template` | сгенерировать шаблон ответа по актуальной истории |
-| POST   | `/api/dialogs/{dialogId}/messages`          | отправить сообщение как operator                  |
-| POST   | `/api/dialogs/{dialogId}/close`             | закрыть тикет                                     |
+| Method | Endpoint                                       | Назначение                                        |
+| ------ | ---------------------------------------------- | ------------------------------------------------- |
+| GET    | `/api/operator/dialogs?scope=unassigned\|mine` | активная operator queue                           |
+| POST   | `/api/operator/dialogs/{dialogId}/claim`       | атомарно назначить тикет текущему operator        |
+| GET    | `/api/operator/events`                         | realtime queue SSE                                |
+| GET    | `/api/operator/dialogs/{dialogId}/events`      | operator-only user/dialog state SSE               |
+| POST   | `/api/operator/dialogs/{dialogId}/template`    | сгенерировать шаблон ответа по актуальной истории |
+| POST   | `/api/dialogs/{dialogId}/messages`             | отправить сообщение как operator                  |
+| POST   | `/api/dialogs/{dialogId}/close`                | закрыть тикет                                     |
 
 Claim выполняется backend атомарно:
 
@@ -4078,18 +3968,18 @@ Frontend не решает concurrency самостоятельно.
 
 ### 20.3 Admin — Knowledge Base
 
-| Method | Endpoint                                               | Назначение                        |
-| ------ | ------------------------------------------------------ | --------------------------------- |
-| GET    | `/api/admin/knowledge/sections`                        | sections                          |
-| POST   | `/api/admin/knowledge/sections`                        | создать section                   |
-| PATCH  | `/api/admin/knowledge/sections/{id}`                   | rename / enable-disable           |
-| DELETE | `/api/admin/knowledge/sections/{id}`                   | удалить section                   |
-| GET    | `/api/admin/knowledge/documents?section_id=&page=`     | documents, newest first; 10 per page |
+| Method | Endpoint                                               | Назначение                                                              |
+| ------ | ------------------------------------------------------ | ----------------------------------------------------------------------- |
+| GET    | `/api/admin/knowledge/sections`                        | sections                                                                |
+| POST   | `/api/admin/knowledge/sections`                        | создать section                                                         |
+| PATCH  | `/api/admin/knowledge/sections/{id}`                   | rename / enable-disable                                                 |
+| DELETE | `/api/admin/knowledge/sections/{id}`                   | удалить section                                                         |
+| GET    | `/api/admin/knowledge/documents?section_id=&page=`     | documents, newest first; 10 per page                                    |
 | POST   | `/api/admin/knowledge/sections/{section_id}/documents` | upload permanent file; для системного журнала только case-card Markdown |
-| GET    | `/api/admin/knowledge/documents/{id}`                  | document detail                   |
-| PATCH  | `/api/admin/knowledge/documents/{id}`                  | enable-disable only in current MVP |
-| POST   | `/api/admin/knowledge/documents/{id}/reindex`          | повторный ingestion               |
-| DELETE | `/api/admin/knowledge/documents/{id}`                  | удалить SQL-запись, Qdrant index и storage object |
+| GET    | `/api/admin/knowledge/documents/{id}`                  | document detail                                                         |
+| PATCH  | `/api/admin/knowledge/documents/{id}`                  | enable-disable only in current MVP                                      |
+| POST   | `/api/admin/knowledge/documents/{id}/reindex`          | повторный ingestion                                                     |
+| DELETE | `/api/admin/knowledge/documents/{id}`                  | удалить SQL-запись, Qdrant index и storage object                       |
 
 ### 20.4 Admin — Prompts / Settings
 
@@ -5224,11 +5114,11 @@ frontend: актуальным UI является React SPA в `frontend/src`.
   PostgreSQL, Qdrant и backend не имеют host-портов. Caddy сам собирает и раздаёт
   production static frontend bundle. Dev Compose
   публикует свои сервисные порты только на loopback `127.0.0.1`; production использует
-   отдельные `edge`, `proxy` и `data` Docker networks: Caddy видит backend только
-   через `proxy`, но не имеет прямого доступа к PostgreSQL/Qdrant. Authentication
-   settings не являются env variables; seed включён и на чистом production volume
-   создаёт demo users/sections/prompts/settings. Compose healthchecks проверяют Qdrant
-   и Caddy, но backend
+  отдельные `edge`, `proxy` и `data` Docker networks: Caddy видит backend только
+  через `proxy`, но не имеет прямого доступа к PostgreSQL/Qdrant. Authentication
+  settings не являются env variables; seed включён и на чистом production volume
+  создаёт demo users/sections/prompts/settings. Compose healthchecks проверяют Qdrant
+  и Caddy, но backend
   `/health` остаётся liveness endpoint и не является dependency-aware readiness.
   FastAPI Swagger/ReDoc/OpenAPI включены в development и отключены в production.
 - S3-compatible storage provider присутствует в коде, но MinIO service не входит в
