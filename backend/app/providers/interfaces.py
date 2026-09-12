@@ -119,6 +119,11 @@ class ConfidenceAssessment(BaseModel):
         le=1,
         description="Насколько контекста достаточно для корректного ответа, от 0 до 1.",
     )
+    operator_requested: bool = Field(
+        description=(
+            "Пользователь явно просит передать обращение оператору или специалисту."
+        )
+    )
 
     _usage: ProviderUsage | None = PrivateAttr(default=None)
 

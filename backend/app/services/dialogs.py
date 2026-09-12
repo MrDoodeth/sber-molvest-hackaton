@@ -25,6 +25,7 @@ from app.contracts.schemas import (
     MessagePage,
     OperatorTemplateDto,
 )
+from app.core.config import CONFIDENCE_MODEL_ID
 from app.core.constants import ESCALATION_SYSTEM_MESSAGE
 from app.core.enums import (
     DialogChannel,
@@ -81,52 +82,6 @@ from app.services.tasks import TaskSupervisor
 logger = logging.getLogger(__name__)
 LOW_CONFIDENCE_ESCALATION_STREAK = 3
 AI_PROCESSING_ADVISORY_LOCK_KEY = 712031045
-_OPERATOR_REQUEST_MARKERS = (
-    "подключите оператора",
-    "подключите живого оператора",
-    "подключите живого специалиста",
-    "подключи оператора",
-    "подключи специалиста",
-    "позовите оператора",
-    "позови оператора",
-    "хочу специалиста",
-    "соедините с оператором",
-    "соедините с поддержкой",
-    "соедините меня с поддержкой",
-    "соедините меня с оператором",
-    "соедините меня со специалистом",
-    "переключите на оператора",
-    "переведите на оператора",
-    "переведи на оператора",
-    "переведи на специалиста",
-    "переведи к оператору",
-    "переведи к специалисту",
-    "переведите на специалиста",
-    "переведите к специалисту",
-    "соедини с оператором",
-    "соедини со специалистом",
-    "хочу поговорить с оператором",
-    "нужен оператор",
-    "нужен специалист",
-    "мне нужен человек",
-    "мне нужен живой оператор",
-    "позовите специалиста",
-    "позови специалиста",
-    "подключите специалиста",
-    "передайте оператору",
-    "передай оператору",
-    "передай специалисту",
-    "хочу поговорить с человеком",
-)
-_OPERATOR_REQUEST_NEGATIONS = (
-    "не нужен оператор",
-    "оператор не нужен",
-    "не хочу оператора",
-    "не нужен специалист",
-    "специалист не нужен",
-    "не подключайте оператора",
-    "не подключайте специалиста",
-)
 
 
 class DialogService:
@@ -1008,7 +963,6 @@ class DialogService:
         runtime_settings: RuntimeSettings | None = None
         prompt_content: str | None = None
         usage: ProviderUsage | None = None
-        trigger_text = ""
         try:
             async with self._session_factory() as session:
                 trigger = await session.get(Message, message_id)
@@ -1050,7 +1004,6 @@ class DialogService:
                         is not None
                     ):
                         return
-                    trigger_text = trigger.text
                     trigger.processing_status = MessageProcessingStatus.PROCESSING
                     trigger.processing_error = None
                     dialog.updated_at = datetime.now(UTC)
@@ -1060,27 +1013,6 @@ class DialogService:
                         session, PromptType.USER_SUPPORT
                     )
                     prompt_content = prompt.content
-
-                if self._explicit_operator_request(trigger_text):
-                    confidence = 0.0
-                    await self._persist_confidence(
-                        dialog_id, message_id, confidence, []
-                    )
-                    await self._broker.publish(
-                        user_dialog_channel(dialog_id),
-                        {"type": "confidence", "value": confidence},
-                    )
-                    await self._escalate(
-                        dialog_id,
-                        confidence,
-                        [],
-                        started,
-                        runtime_settings,
-                        prompt_content,
-                        message_id,
-                        usage=None,
-                    )
-                    return
 
                 async with self._generation_gate.acquire():
                     context = await self._generation_context.build_for_user_message(
@@ -1103,7 +1035,7 @@ class DialogService:
 
                     assessment = await self._llm_provider.evaluate_confidence(
                         generation_request,
-                        runtime_settings.active_model,
+                        CONFIDENCE_MODEL_ID,
                         dialog_id,
                     )
                     confidence = assessment.confidence
@@ -1116,7 +1048,7 @@ class DialogService:
                         {"type": "confidence", "value": confidence},
                     )
 
-                    if (
+                    if assessment.operator_requested or (
                         await self._low_confidence_streak(
                             dialog_id,
                             message_id,
@@ -1557,28 +1489,6 @@ class DialogService:
             prompt_tokens=total("prompt_tokens"),
             completion_tokens=total("completion_tokens"),
             precached_prompt_tokens=total("precached_prompt_tokens"),
-        )
-
-    @staticmethod
-    def _explicit_operator_request(text: str) -> bool:
-        normalized = " ".join(text.casefold().split())
-        direct_request = normalized in {
-            "оператор",
-            "специалист",
-            "живой человек",
-            "человек",
-        }
-        has_negation = any(
-            marker in normalized for marker in _OPERATOR_REQUEST_NEGATIONS
-        )
-        positive_text = normalized
-        for marker in _OPERATOR_REQUEST_NEGATIONS:
-            positive_text = positive_text.replace(marker, " ")
-        marker_request = any(
-            marker in positive_text for marker in _OPERATOR_REQUEST_MARKERS
-        )
-        return (direct_request or marker_request) and (
-            marker_request or not has_negation
         )
 
     @staticmethod

@@ -27,6 +27,7 @@ MODEL_CAPABILITIES: dict[str, ModelCapabilities] = {
     "GigaChat-2-Max": ModelCapabilities("Max", "GigaChat-2-Max", 128_000),
     "GigaChat-3-Ultra": ModelCapabilities("Ultra", "GigaChat-3-Ultra", 128_000),
 }
+CONFIDENCE_MODEL_ID = "GigaChat-2"
 
 EMBEDDING_MODEL_ID = "BAAI/bge-m3"
 EMBEDDING_DIMENSION = 1024
