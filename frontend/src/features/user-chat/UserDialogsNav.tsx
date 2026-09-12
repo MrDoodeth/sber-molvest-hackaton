@@ -1,15 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
-import { MessageCircleMore } from "lucide-react";
-import { NavLink } from "react-router-dom";
+import { MessageCircleMore, Plus } from "lucide-react";
+import { NavLink, useNavigate } from "react-router-dom";
 import { dialogsApi } from "../../api/dialogs";
 import { queryKeys } from "../../api/queryKeys";
 import { DialogStatusBadge } from "../../shared/chat/DialogStatusBadge";
 import { useListReorderAnimation } from "../../shared/hooks/useListReorderAnimation";
 import { useUserProcessing } from "../../shared/hooks/useUserProcessing";
-import { EmptyState, ErrorState, Skeleton } from "../../shared/ui";
+import { Button, EmptyState, ErrorState, Skeleton } from "../../shared/ui";
 import { cn, formatRelativeDate, truncateTitle } from "../../shared/utils";
 
 export default function UserDialogsNav({ mobile = false }: { mobile?: boolean }) {
+  const navigate = useNavigate();
   const processing = useUserProcessing();
   const dialogs = useQuery({
     queryKey: queryKeys.user.dialogs(),
@@ -24,7 +25,12 @@ export default function UserDialogsNav({ mobile = false }: { mobile?: boolean })
 
   return (
     <aside className={cn("flex min-h-0 flex-col border-[#dbe3f0] bg-white", mobile ? "h-full" : "hidden border-r md:flex md:w-80 md:shrink-0")}>
-      <div className="flex items-center justify-between border-b border-[#dbe3f0] px-4 py-4">
+      <div className="border-b border-[#dbe3f0] p-4">
+        <Button className="w-full" disabled={isBusy} onClick={() => navigate("/user/new")}>
+          <Plus className="size-4" /> Новый чат
+        </Button>
+      </div>
+      <div className="flex items-center justify-between px-4 pb-2 pt-4">
         <h2 className="text-xs font-extrabold uppercase tracking-[0.16em] text-slate-500">Мои обращения</h2>
         {dialogs.data && <span className="rounded-full bg-[#fcc67f]/45 px-2 py-0.5 text-xs font-bold text-[#9a5600]">{dialogs.data.length}</span>}
       </div>
