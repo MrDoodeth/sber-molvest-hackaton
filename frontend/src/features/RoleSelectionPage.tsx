@@ -13,7 +13,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Modal } from "../shared/ui";
 
-const logoUrl = "https://image.qwenlm.ai/public_source/b22fc383-709d-427d-95ee-3fb7a5ed0c16/1b5563a00-4741-4066-a846-fd8b73d47001.png";
+const logoUrl = "/molvest-logo.png";
 
 function Brand({ compact = false }: { compact?: boolean }) {
   return (

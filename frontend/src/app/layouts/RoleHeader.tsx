@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "../../shared/ui";
 import { cn } from "../../shared/utils";
 
-const logoUrl = "https://image.qwenlm.ai/public_source/b22fc383-709d-427d-95ee-3fb7a5ed0c16/1b5563a00-4741-4066-a846-fd8b73d47001.png";
+const logoUrl = "/molvest-logo.png";
 
 export function MolvestMark({ inverse = false }: { inverse?: boolean }) {
   return (
