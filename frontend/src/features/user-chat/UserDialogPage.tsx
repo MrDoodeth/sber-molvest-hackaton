@@ -229,7 +229,7 @@ export default function UserDialogPage() {
                  <p className="mt-1 truncate text-xs text-slate-500">{detail.data.mode === "operator_support" ? detail.data.assignedOperator ? `На связи ${detail.data.assignedOperator.displayName}` : "Ожидаем свободного специалиста" : "GigaChat использует проверенные материалы базы знаний"}</p>
               </div>
               {detail.data.status === "active" && detail.data.mode === "ai_support" && allMessages.some((message) => message.authorType === "assistant") && (
-                <Button variant="secondary" size="sm" disabled={pendingTurn || send.isPending} onClick={() => setCloseOpen(true)}><CheckCircle2 className="size-4" /><span className="hidden sm:inline">Завершить обращение</span></Button>
+                 <Button size="sm" disabled={pendingTurn || send.isPending} onClick={() => setCloseOpen(true)}><CheckCircle2 className="size-4" /><span className="hidden sm:inline">Завершить обращение</span></Button>
               )}
             </header>
             <div className="min-h-0 flex-1 overflow-y-auto">
