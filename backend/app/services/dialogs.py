@@ -1048,13 +1048,14 @@ class DialogService:
                         {"type": "confidence", "value": confidence},
                     )
 
-                    if assessment.operator_requested or (
-                        await self._low_confidence_streak(
-                            dialog_id,
-                            message_id,
-                            runtime_settings.operator_escalation_threshold,
-                        )
-                        >= LOW_CONFIDENCE_ESCALATION_STREAK
+                    low_confidence_streak = await self._low_confidence_streak(
+                        dialog_id,
+                        message_id,
+                        runtime_settings.operator_escalation_threshold,
+                    )
+                    if (
+                        assessment.operator_requested
+                        or low_confidence_streak >= LOW_CONFIDENCE_ESCALATION_STREAK
                     ):
                         await self._escalate(
                             dialog_id,

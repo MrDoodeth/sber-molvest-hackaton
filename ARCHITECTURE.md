@@ -55,7 +55,7 @@
 - **Backend — модульный монолит на FastAPI**, не микросервисы: меньше DevOps-расходов на хакатон, модули (RAG, Vision, Escalation, KB) изолированы и готовы к выносу в отдельные сервисы позже.
 - **GigaChat — центральная генеративная модель:** используем API для формирования финального ответа и анализа приложенных скриншотов. Для MVP основной кандидат — `GigaChat Pro`.
 - **Embeddings делаем локально:** Freemium предоставляет бесплатные токены генерации, но векторное представление текста оплачивается отдельно. Поэтому retrieval не зависит от платного Embeddings API; основной локальный кандидат — `BAAI/bge-m3`.
-- **Критичное ограничение Freemium — 1 поток генерации.** Все GigaChat generation, vision и Files API операции проходят через re-entrant `GenerationGate`: локальный semaphore ускоряет один worker, а PostgreSQL advisory lock сериализует вызовы между workers. Обычный пользовательский turn использует два последовательных GigaChat generation-call с одним `GenerationContext`: structured `confidence` и streaming user answer. При screenshot его parse выполняется до retrieval в том же атомарном turn. Confidence публикуется отдельным техническим SSE-событием: пользовательский UI его не показывает, но браузер получает и обрабатывает значение; operator/admin UI могут его отображать. Первый и второй подряд низкий confidence всё равно запускают streaming answer, а третий подряд ниже порога эскалирует без второго call. Ручной шаблон оператора выполняется отдельным generation-call.
+- **Критичное ограничение Freemium — 1 поток генерации.** Все GigaChat generation, vision и Files API операции проходят через re-entrant `GenerationGate`: локальный semaphore ускоряет один worker, а PostgreSQL advisory lock сериализует вызовы между workers. Обычный пользовательский turn использует два последовательных GigaChat generation-call с одним `GenerationContext`: structured `confidence` на фиксированной Lite-модели и streaming user answer на выбранной администратором модели. При screenshot его parse выполняется до retrieval в том же атомарном turn. Confidence публикуется отдельным техническим SSE-событием: пользовательский UI его не показывает, но браузер получает и обрабатывает значение; operator/admin UI могут его отображать. Первый и второй подряд низкий confidence всё равно запускают streaming answer, а третий подряд ниже порога эскалирует без второго call. `operator_requested=true` эскалирует сразу, независимо от streak. Ручной шаблон оператора выполняется отдельным generation-call.
 - **Operator template context:** backend строит полный упорядоченный снимок сообщений
   user/assistant/operator/system и всех вложений на момент вызова; затем общий
   sliding-window выбирает самый свежий фрагмент истории в `gigachat_input_budget`.
@@ -102,7 +102,8 @@
     На первом и втором подряд низком значении backend всё равно запускает user-answer
     call; на третьем подряд значении эскалирует обращение оператору без второго call.
     Любое значение confidence >= порога или user turn без оценки сбрасывает серию.
-    Явная просьба подключить оператора обрабатывается локально и эскалирует сразу.
+    Lite возвращает operator_requested=true для явной просьбы подключить оператора;
+    такой turn сразу эскалируется, не дожидаясь результата streak-политики.
 
 Порог уверенности:
 
@@ -179,7 +180,7 @@ seed не скачивает внешний массив документов.
 
 ### ADR-3 · GigaChat как основная интеллектуальная модель + локальные embeddings
 
-- **GigaChat используется в основном пользовательском сценарии:** отдельным structured-вызовом анализирует приложенный screenshot до retrieval, затем в одном `GenerationContext` выполняет structured confidence call и, если threshold пройден, streaming user-answer call. Загруженные file ID переиспользуются в обоих вызовах; технический confidence prompt захардкожен в backend и не является `SystemPrompt`. Конкретная модель GigaChat и runtime-бюджеты выбираются администратором из валидируемых настроек.
+- **GigaChat используется в основном пользовательском сценарии:** выбранная администратором модель отдельным structured-вызовом анализирует приложенный screenshot до retrieval, затем в одном `GenerationContext` фиксированная Lite-модель выполняет structured confidence call, а выбранная модель выполняет streaming user-answer call. Загруженные file ID переиспользуются в обоих вызовах; технический confidence prompt захардкожен в backend и не является `SystemPrompt`.
 - **Embeddings API GigaChat в MVP не используем:** он оплачивается отдельно от Freemium-генерации, поэтому retrieval должен работать полностью локально и не зависеть от платной услуги.
 - **Единственная embedding-модель MVP:** `BAAI/bge-m3`.
 - **Почему `BGE-M3`:** мультиязычность (>100 языков), 1024-мерные dense-вектора, контекст до 8192 токенов, MIT-лицензия и возможность получать dense + sparse representations для hybrid retrieval.
@@ -446,7 +447,7 @@ answer не запускался, сохраняется usage только conf
 переиспользует один собранный контекст:
 
 ```text
-GenerationContext → structured confidence → threshold → streaming user answer
+GenerationContext → Lite structured confidence → threshold/operator_requested → streaming user answer
 ```
 
 Confidence-событие отправляется в user-safe SSE без технического prompt. Пока серия
@@ -455,7 +456,7 @@ backend не буферизует ответ целиком. Третий под
 второй call и эскалирует Dialog.
 
 - confidence возвращает маленький structured `ConfidenceAssessment`;
-- confidence использует отдельный hardcoded backend prompt и `max_tokens=64`;
+- confidence всегда использует Lite (`GigaChat-2`), отдельный hardcoded backend prompt и `max_tokens=64`;
 - тот же `X-Session-ID` и неизменный базовый контекст позволяют переиспользовать
   совпадающий prompt-prefix;
 - `GenerationGate` удерживается от screenshot/context preparation до конца
@@ -550,10 +551,11 @@ dialog_confidence = 1.0
             ↓
     GenerationGate.acquire()
             ↓
-    CALL #1 — structured ConfidenceAssessment
+    CALL #1 — Lite structured ConfidenceAssessment
     hardcoded confidence prompt (constrained sampling)
             ↓
     technical confidence SSE event (not rendered in user UI)
+    ├── operator_requested=true → no CALL #2; operator_support
     ├── low-confidence streak < 3 → CALL #2 user answer, stream tokens through SSE
     └── low-confidence streak = 3 → no CALL #2; operator_support
 ```
@@ -561,8 +563,9 @@ dialog_confidence = 1.0
 Второй call использует тот же `GenerationContext` и только редактируемый
 `SystemPrompt(type=user_support)`. Его текст не буферизуется: каждый очищенный
 chunk сразу публикуется как `assistant_token`, затем полный ответ сохраняется и
-завершается `assistant_done`. При явной просьбе оператора LLM pipeline обходится:
-backend сразу выставляет confidence `0` и переводит Dialog в `operator_support`.
+завершается `assistant_done`. При явной просьбе оператора Lite возвращает
+`operator_requested=true` и confidence `0`; backend сразу переводит Dialog в
+`operator_support`, не выполняя второй вызов для ответа.
 
 ---
 
@@ -661,7 +664,8 @@ Docling / нормализация
 #### Этап 2B. Confidence не прошёл порог
 
 После построения общего `GenerationContext` backend сначала вызывает structured
-confidence assessment. Его контракт содержит только confidence:
+confidence assessment на фиксированной Lite-модели. Его контракт содержит confidence
+и признак запроса оператора:
 
 ```python
 class ConfidenceAssessment(BaseModel):
@@ -672,6 +676,7 @@ class ConfidenceAssessment(BaseModel):
         le=1,
         description="Насколько контекста достаточно для корректного ответа, от 0 до 1.",
     )
+    operator_requested: bool
 ```
 
 Технический confidence prompt захардкожен в backend, не хранится в `SystemPrompt` и
@@ -685,12 +690,13 @@ analysis и runtime attachments. Текущий `operator_escalation_threshold` 
 `user_support` в него не передаётся.
 
 Decision policy работает так. Серия считается по сохранённым `Message.confidence`
-последовательных user turns, поэтому переживает restart и не требует отдельного Redis:
+обычных user turns, поэтому переживает restart и не требует отдельного Redis:
 
 ```python
 confidence = assessment.confidence
-low_streak = consecutive_user_confidences_below_threshold()
-if low_streak >= 3:
+if assessment.operator_requested:
+    switch_to_operator_mode()
+elif consecutive_user_confidences_below_threshold() >= 3:
     switch_to_operator_mode()
 else:
     stream_user_answer_with_same_context()
@@ -704,8 +710,9 @@ else:
 `Message.sources`.
 
 Высокий confidence либо user turn без сохранённой оценки обрывает серию. Прямой запрос
-оператора не зависит от счётчика: backend выставляет confidence `0`, не вызывает
-GigaChat и сразу переводит Dialog в `operator_support`.
+оператора не зависит от счётчика: Lite возвращает `operator_requested=true` и
+confidence `0`; backend сразу переводит Dialog в `operator_support` без второго
+вызова GigaChat для ответа.
 
 Системное сообщение переживает reload. Пользователь продолжает тот же тикет, а
 эскалированное обращение появляется в панели оператора. Source snapshot хранится
@@ -889,18 +896,18 @@ ContextBuilder.build() — один GenerationContext
     ↓
 GenerationGate.acquire()
     ↓
-CALL #1: structured ConfidenceAssessment
+CALL #1: Lite structured ConfidenceAssessment
 hardcoded confidence prompt; threshold применяется после call
     ↓
 confidence SSE event
 ┌──────────────────────────────┼─────────────────────┐
 │                              │
-low-confidence streak < 3      low-confidence streak = 3
+operator_requested=true         low-confidence streak < 3      low-confidence streak = 3
 │                              │
-↓                              ↓
-CALL #2: user answer stream     no CALL #2
-→ assistant_token SSE           operator_support
-→ assistant_done
+↓                              ↓                              ↓
+no CALL #2                      CALL #2: user answer stream     no CALL #2
+operator_support                → assistant_token SSE           operator_support
+                               → assistant_done
 ```
 
 Оба call используют один и тот же базовый контекст: recent history, текущий
@@ -921,14 +928,16 @@ class ConfidenceAssessment(BaseModel):
         le=1,
         description="Насколько контекста достаточно для корректного ответа, от 0 до 1.",
     )
+    operator_requested: bool
 ```
 
-Confidence получает полный общий контекст, но не получает редактируемый
+Confidence всегда выполняется Lite-моделью, получает полный общий контекст, но не получает редактируемый
 `SystemPrompt(type=user_support)`: используется только hardcoded technical
 instruction. Для стабильной маршрутизации structured call выполняется с
-`temperature=0, top_p=0.1`. Первый и второй подряд низкий confidence
+`temperature=0, top_p=0.1` и возвращает `operator_requested`. Первый и второй подряд низкий confidence
 всё равно запускают второй call; третий подряд ниже порога переводит
-Dialog в `operator_support` без user-answer generation.
+Dialog в `operator_support` без user-answer generation. `operator_requested=true`
+переводит Dialog в `operator_support` сразу, не дожидаясь streak-политики.
 
 #### Поведение после подключения оператора
 
@@ -1990,15 +1999,16 @@ GigaChat — **основная интеллектуальная модель п
 - runtime attachments: screenshot / документ, если приложены.
 
 В user `ai_support` pipeline backend один раз собирает `GenerationContext`, затем
-выполняет hardcoded structured confidence call. Второй последовательный call с
+фиксированная Lite-модель выполняет hardcoded structured confidence call. Второй последовательный call с
 `SystemPrompt(type=user_support)` формирует ответ и стримится пользователю, пока это
 не третий подряд confidence ниже порога. Третий низкий turn эскалируется без второго
-call. В operator pipeline отдельный generation-вызов формирует шаблон ответа; он не
-отправляется пользователю автоматически.
+call. `operator_requested=true` эскалирует сразу без второго call, не дожидаясь
+streak-политики. В operator pipeline отдельный generation-вызов формирует шаблон
+ответа; он не отправляется пользователю автоматически.
 
 Анализ screenshot выполняется отдельным structured vision-вызовом до retrieval.
 
-`confidence` оценивается первым отдельным structured-вызовом в `ai_support` до
+`confidence` оценивается фиксированной Lite-моделью первым отдельным structured-вызовом в `ai_support` до
 формирования ответа и до его публикации пользователю. Этот вызов использует только
 hardcoded технический confidence prompt; порог применяется после call, а редактируемый
 `SystemPrompt(type=user_support)` в него не передаётся. Structured-вызовы также
@@ -2402,7 +2412,7 @@ Confidence event не содержит технический prompt. При у�
 
 Structured Output используется в трёх явных местах:
 
-1. confidence call возвращает `ConfidenceAssessment(confidence)`;
+1. Lite confidence call возвращает `ConfidenceAssessment(confidence, operator_requested)`;
 2. screenshot parse возвращает `extracted_text` и `visual_summary`;
 3. admin/legacy Knowledge Card generation возвращает обязательные `title`, `problem`
    и `result`.
