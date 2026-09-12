@@ -81,15 +81,7 @@ class GenerationContextService:
         settings: RuntimeSettings,
     ) -> PreparedGenerationContext:
         messages, attachments = await self._dialog_snapshot(dialog_id)
-        message = next(
-            (
-                item
-                for item in reversed(messages)
-                if item.author_type == MessageAuthor.USER
-            ),
-            None,
-        )
-        if message is None:
+        if not any(item.author_type == MessageAuthor.USER for item in messages):
             raise UnprocessableError(
                 "Нельзя сгенерировать шаблон без сообщений пользователя"
             )
@@ -98,14 +90,21 @@ class GenerationContextService:
             for message_item in messages
             for attachment in attachments.get(message_item.id, [])
         ]
+        latest_message = messages[-1]
+        if latest_message.author_type == MessageAuthor.USER:
+            current_text = latest_message.text
+            history = self._history(messages[:-1], attachments)
+        else:
+            # Keep operator replies in their original order. Moving an older user
+            # question after them makes the model read the dialog backwards.
+            current_text = (
+                "Сформируй следующий ответ клиенту с учётом актуальной истории диалога."
+            )
+            history = self._history(messages, attachments)
         return await self._build_request(
             dialog_id=dialog_id,
-            current_text=message.text,
-            # The newest user turn is the request itself, not just an item in the
-            # history. This keeps retrieval and generation focused on its content.
-            history=self._history(
-                [item for item in messages if item.id != message.id], attachments
-            ),
+            current_text=current_text,
+            history=history,
             attachments=all_attachments,
             system_prompt=system_prompt,
             settings=settings,
