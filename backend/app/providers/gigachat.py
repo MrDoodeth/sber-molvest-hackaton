@@ -85,34 +85,6 @@ confidence и не должен использоваться для его ис�
 """.strip()
 
 
-_USER_ANSWER_INSTRUCTION = """
-Верни только обычный текст ответа пользователю.
-Не возвращай JSON и отдельное поле confidence.
-Используй Markdown для заголовков, списков и выделения; код оформляй fenced-блоком
-с языком, если это уместно. Если пользователь просит показать или проверить виды
-Markdown, не заключай заголовки, списки, цитаты, жирный/курсивный/зачёркнутый
-текст, ссылки, изображения и горизонтальные линии в code fence: верни их как
-настоящую Markdown-разметку. Code fence используй только для программного кода,
-SQL или явно запрошенного исходного Markdown; не вкладывай тройные backticks друг
-в друга. Не добавляй служебные статусы интерфейса, таймеры или счётчики времени,
-например «осталось 00:00». Не раскрывай внутренние идентификаторы и список
-источников пользователю.
-""".strip()
-
-
-_OPERATOR_TEMPLATE_INSTRUCTION = """
-Продолжи диалог от лица оператора поддержки. Верни только готовый текст следующего
-сообщения клиенту, а не пересказ переписки и не план действий для оператора.
-Учитывай всю предшествующую историю: отвечай на последний нерешённый вопрос,
-признавай уже выполненные проверки и не повторяй ранее данные инструкции без
-причины. Дай конкретные следующие шаги, ожидаемый результат и один точный вопрос,
-только если без него нельзя продолжить диагностику. Не выдумывай факты, версии,
-пункты меню и причины ошибки. Не возвращай JSON, служебные комментарии, внутренние
-статусы, метку «шаблон», идентификаторы или список источников. Используй Markdown,
-если он улучшает читаемость; код оформляй fenced-блоком с языком.
-""".strip()
-
-
 @dataclass(frozen=True, slots=True)
 class _StructuredResult:
     parsed: BaseModel
@@ -522,19 +494,6 @@ class GigaChatProvider:
     ) -> CaseCard:
         async with self._generation_gate.acquire():
             messages = self._messages(request)
-            messages[0].content += (
-                "\n\nKNOWLEDGE CARD\nВерни только структурированную карточку с полями "
-                "title, problem и result. Все три поля обязательны и должны содержать "
-                "непустые строки. title — краткое название типового случая. problem "
-                "должно полно описывать исходную ситуацию: симптомы, текст ошибки, "
-                "контекст, затронутые действия и важные условия, известные из тикета. "
-                "result должно полно описывать проверенное решение: выполненные шаги, "
-                "проверки, итог и существенные ограничения. Сохраняй только факты из "
-                "диалога и подтверждённых материалов; не выдумывай версии, причины, "
-                "пункты меню или результаты. Если факт не зафиксирован, напиши «Не "
-                "указано в тикете». Не добавляй Markdown-обёртку, комментарии или поля "
-                "вне схемы."
-            )
             result = await self._structured(
                 client=self._client(model, max_output_tokens),
                 schema=CaseCard,
@@ -551,13 +510,7 @@ class GigaChatProvider:
         max_output_tokens: int,
         session_id: uuid.UUID,
     ) -> AsyncIterator[StreamChunk]:
-        return self._stream_text(
-            request,
-            model,
-            max_output_tokens,
-            session_id,
-            instruction=_OPERATOR_TEMPLATE_INSTRUCTION,
-        )
+        return self._stream_text(request, model, max_output_tokens, session_id)
 
     def stream_user_answer(
         self,
@@ -566,13 +519,7 @@ class GigaChatProvider:
         max_output_tokens: int,
         session_id: uuid.UUID,
     ) -> AsyncIterator[StreamChunk]:
-        return self._stream_text(
-            request,
-            model,
-            max_output_tokens,
-            session_id,
-            instruction=_USER_ANSWER_INSTRUCTION,
-        )
+        return self._stream_text(request, model, max_output_tokens, session_id)
 
     async def _stream_text(
         self,
@@ -580,13 +527,10 @@ class GigaChatProvider:
         model: str,
         max_output_tokens: int,
         session_id: uuid.UUID,
-        *,
-        instruction: str,
     ) -> AsyncIterator[StreamChunk]:
         async with self._generation_gate.acquire():
             client = self._client(model, max_output_tokens)
             messages = self._messages(request)
-            messages[0].content += f"\n\n{instruction}"
             usage: ProviderUsage | None = None
             try:
                 request_id = uuid.uuid4()
