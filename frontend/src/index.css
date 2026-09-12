@@ -81,6 +81,12 @@ select {
   background: #2b9ffe;
 }
 
+.selection-blue::selection,
+.selection-blue ::selection {
+  color: #075fae;
+  background: white;
+}
+
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;

@@ -248,7 +248,7 @@ function authorMeta(message: MessageDto) {
   return {
     label: "КЛИЕНТ",
     icon: UserRound,
-    bubble: "bg-molvest-400 text-white",
+    bubble: "bg-molvest-400 text-white selection-blue",
     align: "justify-end",
   };
 }
