@@ -289,9 +289,8 @@ seed не скачивает внешний массив документов.
   по `service_started`, а коллекция создаётся лениво при первом обращении.
 - remote GigaChat files и локальные оригиналы сохраняются до разрешённого hard delete.
   Закрытие Dialog и явная Knowledge Card generation их не удаляют. Hard delete требует
-  `DialogFeedback.verdict == ai_error` и candidate в статусе `rejected`; provider
-  cleanup идемпотентен, поэтому повторная попытка завершает частично выполненное
-  удаление.
+  candidate в статусе `rejected`; provider cleanup идемпотентен, поэтому повторная
+  попытка завершает частично выполненное удаление.
 - monitoring API возвращает `failed_requests` и среднюю latency, но не p50/p95; текущий
   frontend не показывает `failed_requests`. Latency user-turn начинается в background
   worker, а не в момент persist user message.
@@ -1113,7 +1112,7 @@ DialogFeedback
 
 - исправить БЗ, System Prompt или runtime AI/RAG settings;
 - **удалить разобранный ошибочный чат**, чтобы не засорять рабочую БД. Endpoint
-  требует закрытый Dialog, `ai_error` feedback и `rejected` candidate.
+  требует закрытый Dialog и `rejected` candidate.
 
 В карточке ошибочного тикета доступны действия:
 
@@ -1122,26 +1121,21 @@ DialogFeedback
 [ Удалить чат ]
 ```
 
-Проектная moderation policy предполагает удаление только для уже завершённого
-ошибочного тикета:
+Проектная moderation policy предполагает удаление любого завершённого тикета после
+отклонения candidate:
 
 ```text
 Dialog.status = closed
 AND
-DialogFeedback.verdict = ai_error
+KnowledgeCandidate.status = rejected
 ```
 
-Backend проверяет все условия moderation policy до начала внешнего cleanup.
+Backend проверяет эти условия до начала внешнего cleanup.
 
-Перед hard delete `ModerationService` проверяет feedback и связанный
-`KnowledgeCandidate`:
+Перед hard delete `ModerationService` проверяет связанный `KnowledgeCandidate`:
 
 ```python
-feedback = DialogFeedback.get(dialog_id=dialog_id)
 candidate = KnowledgeCandidate.get(dialog_id=dialog_id)
-
-if feedback is None or feedback.verdict != "ai_error":
-    raise Conflict("Удалять можно только обращение с оценкой «AI ошибся»")
 
 if candidate is None or candidate.status == "pending":
     raise Conflict("Сначала отклоните кандидата в БЗ")
@@ -2609,7 +2603,7 @@ gigachat_file_id
 Закрытие тикета и явная Knowledge Card generation не удаляют remote runtime-файлы:
 локальный оригинал и `gigachat_file_id` сохраняются для истории и админской проверки.
 Remote cleanup выполняется только в разрешённом hard delete, когда у закрытого Dialog
-есть `DialogFeedback.verdict=ai_error` и candidate в статусе `rejected`.
+candidate находится в статусе `rejected`.
 
 Если администратор выполняет разрешённый hard delete закрытого чата, удаляем:
 
@@ -4065,7 +4059,7 @@ Frontend не хардкодит model context limit. PUT принимает в�
 | POST   | `/api/admin/candidates/{id}/generate-card` | заполнить case card через GigaChat                                                                         |
 | POST   | `/api/admin/candidates/{id}/approve`       | retryable approve: сохранить card, переиспользовать deterministic document и выполнить permanent ingestion |
 | POST   | `/api/admin/candidates/{id}/reject`        | reject                                                                                                     |
-| DELETE | `/api/admin/dialogs/{dialogId}`            | hard delete closed Dialog только после `ai_error` feedback и rejected candidate                             |
+| DELETE | `/api/admin/dialogs/{dialogId}`            | hard delete closed Dialog только после rejected candidate                                                    |
 
 ### 20.6 Admin — Monitoring
 
@@ -4646,10 +4640,10 @@ ingestion не запускается; если предыдущая попыт�
 
 ### 23.5 AI error
 
-Проектная policy предназначает удаление для:
+Проектная policy разрешает удаление закрытого тикета после отклонения candidate:
 
 ```text
-DialogFeedback.verdict = ai_error
+Dialog.status = closed AND KnowledgeCandidate.status = rejected
 ```
 
 доступно:
@@ -4671,9 +4665,8 @@ navigate /admin/dialogs?feedback=<текущая категория>
 invalidate journal query
 ```
 
-Фактическое условие frontend — `closed` и candidate со статусом `rejected`; feedback
-`ai_error` не проверяется. Backend также не проверяет verdict и допускает closed Dialog
-без candidate или с rejected candidate. Это P1 расхождение с policy выше.
+Frontend и backend требуют `closed` Dialog и candidate со статусом `rejected`; verdict
+feedback не влияет на возможность удаления.
 
 ### 23.6 Unrated
 

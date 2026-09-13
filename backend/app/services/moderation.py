@@ -476,15 +476,6 @@ class ModerationService:
                     raise NotFoundError("Диалог не найден")
                 if dialog.status != DialogStatus.CLOSED:
                     raise ConflictError("Удалять можно только закрытый тикет")
-                feedback = await session.scalar(
-                    select(DialogFeedback)
-                    .where(DialogFeedback.dialog_id == dialog_id)
-                    .with_for_update()
-                )
-                if feedback is None or feedback.verdict != FeedbackVerdict.AI_ERROR:
-                    raise ConflictError(
-                        "Удалять можно только обращение с оценкой «AI ошибся»"
-                    )
                 candidate = await session.scalar(
                     select(KnowledgeCandidate)
                     .where(KnowledgeCandidate.dialog_id == dialog_id)
