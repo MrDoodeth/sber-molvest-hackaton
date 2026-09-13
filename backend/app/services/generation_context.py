@@ -35,6 +35,8 @@ class PreparedGenerationContext:
 
 
 MAX_GIGACHAT_IMAGES = 10
+MAX_GIGACHAT_TEXT_ATTACHMENT_BYTES = 512 * 1024
+TEXT_ATTACHMENT_PREVIEW_MAX_CHARS = 16_000
 
 
 class GenerationContextService:
@@ -178,8 +180,14 @@ class GenerationContextService:
     ) -> PreparedGenerationContext:
         try:
             self._validate_gigachat_attachments(attachments)
+            (
+                current_text,
+                model_attachments,
+            ) = await self._prepare_large_text_attachments(
+                attachments, current_text, settings
+            )
             attachment_file_ids, attachment_mime_types = await self._upload_attachments(
-                attachments, settings.active_model, dialog_id
+                model_attachments, settings.active_model, dialog_id
             )
             (
                 screenshot_extracted_text,
@@ -241,6 +249,49 @@ class GenerationContextService:
                 rag_status=retrieval.status,
             )
         )
+
+    async def _prepare_large_text_attachments(
+        self,
+        attachments: list[Attachment],
+        current_text: str,
+        settings: RuntimeSettings,
+    ) -> tuple[str, list[Attachment]]:
+        """Inline bounded previews when a plain-text file exceeds model context."""
+        previews: list[str] = []
+        model_attachments: list[Attachment] = []
+        available_chars = max(
+            0,
+            (settings.gigachat_input_budget - 2_000) * 2 - len(current_text),
+        )
+        for attachment in attachments:
+            if (
+                attachment.mime_type != "text/plain"
+                or (attachment.size_bytes or 0) <= MAX_GIGACHAT_TEXT_ATTACHMENT_BYTES
+            ):
+                model_attachments.append(attachment)
+                continue
+            preview_limit = min(TEXT_ATTACHMENT_PREVIEW_MAX_CHARS, available_chars)
+            if preview_limit < 1:
+                continue
+            raw = await self._attachment_service.storage.get(attachment.storage_key)
+            text = raw.decode("utf-8", errors="replace")
+            preview = self._text_preview(text, preview_limit)
+            previews.append(
+                "[Фрагмент большого текстового вложения "
+                f"{PurePosixPath(attachment.storage_key).name}]\n{preview}"
+            )
+            available_chars -= len(preview)
+        if not previews:
+            return current_text, model_attachments
+        return "\n\n".join((current_text, *previews)).strip(), model_attachments
+
+    @staticmethod
+    def _text_preview(text: str, limit: int) -> str:
+        if len(text) <= limit:
+            return text
+        tail_length = min(2_000, limit // 4)
+        head_length = limit - tail_length
+        return f"{text[:head_length]}\n\n[...файл сокращён...]\n\n{text[-tail_length:]}"
 
     @staticmethod
     def _validate_gigachat_attachments(attachments: list[Attachment]) -> None:

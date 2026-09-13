@@ -83,7 +83,7 @@ class Settings(BaseSettings):
     gigachat_ca_bundle_file: Path | None = None
     gigachat_max_retries: int = Field(default=3, ge=0)
     gigachat_retry_backoff_factor: float = Field(default=0.5, ge=0)
-    gigachat_timeout_seconds: float = Field(default=120.0, gt=0)
+    gigachat_timeout_seconds: float = Field(default=600.0, gt=0)
 
     runtime_image_max_bytes: int = 15 * 1024 * 1024
     runtime_document_max_bytes: int = 40 * 1024 * 1024

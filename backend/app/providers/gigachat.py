@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import logging
 import uuid
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
@@ -83,6 +84,8 @@ confidence и не должен использоваться для его ис�
 
 Верни только structured confidence и operator_requested.
 """.strip()
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -470,8 +473,11 @@ class GigaChatProvider:
         session_id: uuid.UUID,
     ) -> ConfidenceAssessment:
         async with self._generation_gate.acquire(provider_request=True):
+            # Vision facts are already extracted before confidence routing. Sending
+            # the image again consumes its visual-token budget for no routing gain.
+            confidence_request = self._without_images(request)
             messages = self._messages(
-                request,
+                confidence_request,
                 system_prompt=_CONFIDENCE_SYSTEM_PROMPT,
             )
             result = await self._structured(
@@ -479,11 +485,35 @@ class GigaChatProvider:
                 schema=ConfidenceAssessment,
                 messages=messages,
                 session_id=session_id,
-                auto_file_functions=self._has_text_attachments(request),
+                auto_file_functions=self._has_text_attachments(confidence_request),
             )
             assessment = ConfidenceAssessment.model_validate(result.parsed)
             assessment._usage = result.usage
             return assessment
+
+    @staticmethod
+    def _without_images(request: GenerationRequest) -> GenerationRequest:
+        attachments = [
+            (file_id, mime_type)
+            for file_id, mime_type in zip(
+                request.attachment_file_ids,
+                request.attachment_mime_types,
+                strict=False,
+            )
+            if not mime_type.startswith("image/")
+        ]
+        return GenerationRequest(
+            system_prompt=request.system_prompt,
+            current_text=request.current_text,
+            history=request.history,
+            evidence=request.evidence,
+            threshold=request.threshold,
+            attachment_file_ids=tuple(file_id for file_id, _ in attachments),
+            attachment_mime_types=tuple(mime_type for _, mime_type in attachments),
+            screenshot_extracted_text=request.screenshot_extracted_text,
+            screenshot_visual_summary=request.screenshot_visual_summary,
+            rag_status=request.rag_status,
+        )
 
     async def generate_case_card(
         self,
@@ -547,6 +577,20 @@ class GigaChatProvider:
                         # Text files use the built-in get_file_content function;
                         # without auto mode GigaChat only reads the first one.
                         stream_kwargs["function_call"] = "auto"
+                        # The provider's streaming endpoint can return a bare 500
+                        # envelope while executing get_file_content. Use its regular
+                        # completion endpoint for document turns instead.
+                        response = await client.ainvoke(messages, **stream_kwargs)
+                        metadata = getattr(response, "response_metadata", None) or {}
+                        if metadata.get("finish_reason") == "blacklist":
+                            raise ProviderPolicyError()
+                        text = self._extract_text(getattr(response, "content", ""))
+                        if text:
+                            yield StreamChunk(text=text)
+                        usage = self._usage_from_message(response)
+                        if usage is not None:
+                            yield StreamChunk(text="", usage=usage)
+                        return
                     async for chunk in client.astream(messages, **stream_kwargs):
                         metadata = getattr(chunk, "response_metadata", None) or {}
                         if metadata.get("finish_reason") == "blacklist":
@@ -609,6 +653,11 @@ class GigaChatProvider:
     def _map_error(exc: Exception) -> ProviderError:
         if isinstance(exc, ProviderError):
             return exc
+        logger.warning(
+            "GigaChat provider request failed: %s: %s",
+            type(exc).__name__,
+            str(exc),
+        )
         names = {base.__name__ for base in type(exc).mro()}
         mappings: tuple[tuple[set[str], type[ProviderError]], ...] = (
             ({"AuthenticationError"}, ProviderAuthenticationError),

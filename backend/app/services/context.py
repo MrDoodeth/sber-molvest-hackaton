@@ -5,6 +5,8 @@ import math
 from app.providers.interfaces import ChatTurn, Evidence, GenerationRequest
 from app.services.settings import RuntimeSettings
 
+MAX_IMAGE_TOKENS = 1792
+
 
 def estimate_tokens(text: str) -> int:
     if not text:
@@ -105,6 +107,11 @@ class ContextBuilder:
             + estimate_tokens(current_text)
             + estimate_tokens(screenshot_extracted_text or "")
             + estimate_tokens(screenshot_visual_summary or "")
+            + sum(
+                MAX_IMAGE_TOKENS
+                for mime_type in attachment_mime_types
+                if mime_type.startswith("image/")
+            )
         )
         remaining = max(0, settings.gigachat_input_budget - mandatory_cost)
         selected_evidence: list[Evidence] = []
