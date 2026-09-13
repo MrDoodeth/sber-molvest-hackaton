@@ -33,9 +33,7 @@ Molvest AI Support помогает автоматизировать перву�
   Docling artifacts.
 - GigaChat credentials для генерации ответов.
 
-Первый build может быть долгим и требовать значительного места на диске. После
-сборки backend использует локальные model artifacts и не скачивает модели во время
-запросов.
+Первый build может быть долгим и требовать значительного места на диске.
 
 ### Development
 
@@ -48,7 +46,7 @@ Molvest AI Support помогает автоматизировать перву�
 2. Заполните credentials:
 
    ```dotenv
-   GIGACHAT_CREDENTIALS=<Authorization Key из sber.creds>
+   GIGACHAT_CREDENTIALS=<Authorization Key>
    GIGACHAT_SCOPE=GIGACHAT_API_PERS
    ```
 
@@ -199,16 +197,14 @@ GigaChat Lite и использует встроенную техническу�
 Вложение только для текущего обращения -> GigaChat Files API -> текущий диалог.
 
 Remote-файл GigaChat и оригинал в собственном storage сохраняются для всей истории
-диалога. Они удаляются только при разрешённом администратором hard delete после
-отклонения candidate в БЗ. В GigaChat передаются только файлы
-текущего сообщения; предыдущие вложения не добавляются в контекст следующих turns.
+диалога.
 
 Документ, который администратор добавляет в базу знаний -> Docling -> BGE-M3 ->
 Qdrant.
 
 Текущие ограничения вложений в сообщении: до 10 файлов и не более одного
-изображения. Изображения поддерживают PNG, JPEG, TIFF и BMP до 15 MB; документы
-поддерживают TXT, DOC, DOCX, PDF, EPUB, PPT, PPTX и XLSX до 40 MB.
+изображения. Изображения поддерживают PNG, JPEG до 15 MB; документы
+поддерживают TXT, DOC, DOCX, PDF, PPT, XLSX до 40 MB.
 
 Постоянная база знаний принимает PDF, DOCX, HTML и Markdown до 40 MB.
 Markdown-карточки для «Журнала обращений» должны быть в UTF-8 и не превышать 2 MB.
@@ -254,26 +250,6 @@ Markdown-карточки для «Журнала обращений» долж�
 - Расширенный мониторинг и уведомления.
 - Проверка качества поиска и ответов AI на тестовом наборе.
 - Массовый импорт базы знаний заказчика.
-
-## Проверки проекта
-
-Backend требует Python `>=3.11,<3.12` и заранее созданный `backend/.venv`:
-
-```bash
-make check-backend
-```
-
-Команда запускает Ruff lint, Ruff format check и Mypy.
-
-Frontend:
-
-```bash
-make check-frontend
-npm --prefix frontend run build
-```
-
-`make check-frontend` запускает ESLint и TypeScript typecheck. Отдельного unit-test
-runner в текущем репозитории нет.
 
 ## Документация
 
