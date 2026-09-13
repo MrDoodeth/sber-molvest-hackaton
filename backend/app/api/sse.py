@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 
 from fastapi import Request
 
-from app.services.broker import EventBroker, format_heartbeat, format_sse
+from app.services.broker import BrokerEvent, EventBroker, format_heartbeat, format_sse
 
 
 async def event_stream(
@@ -13,8 +13,11 @@ async def event_stream(
     broker: EventBroker,
     channel: str,
     heartbeat_seconds: float,
+    initial_payload: dict[str, object] | None = None,
 ) -> AsyncIterator[str]:
     async with broker.subscribe(channel) as queue:
+        if initial_payload is not None:
+            yield format_sse(BrokerEvent(await broker.next_event_id(), initial_payload))
         while not await request.is_disconnected():
             try:
                 event = await asyncio.wait_for(queue.get(), timeout=heartbeat_seconds)
@@ -31,9 +34,12 @@ async def operator_dialog_event_stream(
     heartbeat_seconds: float,
     operator_id: str,
     has_access: Callable[[], Awaitable[bool]],
+    initial_payload: dict[str, object] | None = None,
 ) -> AsyncIterator[str]:
     """Stream a dialog until its assignment no longer permits access."""
     async with broker.subscribe(channel) as queue:
+        if initial_payload is not None:
+            yield format_sse(BrokerEvent(await broker.next_event_id(), initial_payload))
         while not await request.is_disconnected():
             try:
                 event = await asyncio.wait_for(queue.get(), timeout=heartbeat_seconds)

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import logging
 import time
 import uuid
+from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime
 from io import BytesIO
 from typing import Any
@@ -39,6 +39,7 @@ from app.core.errors import (
     ServiceUnavailableError,
 )
 from app.core.generation_gate import GenerationGate
+from app.core.keyed_locks import KeyedLockRegistry
 from app.models import (
     Attachment,
     Dialog,
@@ -84,14 +85,16 @@ class ModerationService:
         self._generation_context = generation_context
         self._llm_provider = llm_provider
         self._generation_gate = generation_gate
-        self._dialog_locks: dict[uuid.UUID, asyncio.Lock] = {}
-        self._candidate_locks: dict[uuid.UUID, asyncio.Lock] = {}
+        self._dialog_locks = KeyedLockRegistry()
+        self._candidate_locks = KeyedLockRegistry()
 
-    def _dialog_lock_for(self, dialog_id: uuid.UUID) -> asyncio.Lock:
-        return self._dialog_locks.setdefault(dialog_id, asyncio.Lock())
+    def _dialog_lock_for(
+        self, dialog_id: uuid.UUID
+    ) -> AbstractAsyncContextManager[None]:
+        return self._dialog_locks.acquire(dialog_id)
 
-    def _lock_for(self, candidate_id: uuid.UUID) -> asyncio.Lock:
-        return self._candidate_locks.setdefault(candidate_id, asyncio.Lock())
+    def _lock_for(self, candidate_id: uuid.UUID) -> AbstractAsyncContextManager[None]:
+        return self._candidate_locks.acquire(candidate_id)
 
     async def add_feedback(
         self, user: User, dialog_id: uuid.UUID, verdict: FeedbackVerdict
@@ -473,15 +476,21 @@ class ModerationService:
                     raise NotFoundError("Диалог не найден")
                 if dialog.status != DialogStatus.CLOSED:
                     raise ConflictError("Удалять можно только закрытый тикет")
+                feedback = await session.scalar(
+                    select(DialogFeedback)
+                    .where(DialogFeedback.dialog_id == dialog_id)
+                    .with_for_update()
+                )
+                if feedback is None or feedback.verdict != FeedbackVerdict.AI_ERROR:
+                    raise ConflictError(
+                        "Удалять можно только обращение с оценкой «AI ошибся»"
+                    )
                 candidate = await session.scalar(
                     select(KnowledgeCandidate)
                     .where(KnowledgeCandidate.dialog_id == dialog_id)
                     .with_for_update()
                 )
-                if (
-                    candidate is not None
-                    and candidate.status == CandidateStatus.PENDING
-                ):
+                if candidate is None or candidate.status == CandidateStatus.PENDING:
                     raise ConflictError("Сначала отклоните кандидата в БЗ")
                 if (
                     candidate is not None
@@ -603,13 +612,6 @@ class ModerationService:
                 except ProviderError as exc:
                     error_message = str(exc)
                     raise ServiceUnavailableError(str(exc)) from exc
-                finally:
-                    if context is not None:
-                        await self._cleanup_generation_attachments(
-                            dialog_id,
-                            list(context.request.attachment_file_ids),
-                            runtime.active_model,
-                        )
         except Exception as exc:
             if error_message is None:
                 error_message = str(exc)
@@ -624,34 +626,6 @@ class ModerationService:
                 success=success,
                 error_message=error_message,
             )
-
-    async def _cleanup_generation_attachments(
-        self, dialog_id: uuid.UUID, file_ids: list[str], model: str
-    ) -> None:
-        if not file_ids:
-            return
-        try:
-            await self._attachment_service.cleanup_remote(file_ids, model, dialog_id)
-        except ProviderError:
-            logger.exception(
-                "Unable to remove knowledge-card files for dialog %s", dialog_id
-            )
-            return
-        deleted_at = datetime.now(UTC)
-        async with self._session_factory() as session:
-            attachments = list(
-                await session.scalars(
-                    select(Attachment)
-                    .join(Message, Attachment.message_id == Message.id)
-                    .where(
-                        Message.dialog_id == dialog_id,
-                        Attachment.gigachat_file_id.in_(file_ids),
-                    )
-                )
-            )
-            for attachment in attachments:
-                attachment.remote_deleted_at = deleted_at
-            await session.commit()
 
     async def _record_metric(
         self,

@@ -7,6 +7,7 @@ import { appendPersistedMessage } from "./messageCache";
 import { useEventSource } from "./useEventSource";
 
 const eventNames = [
+  "dialog_sync",
   "user_message",
   "operator_access_revoked",
   "dialog_closed",
@@ -35,6 +36,11 @@ export function useOperatorDialogEvents(dialogId?: string, operatorId?: string) 
     onEvent: (event) => {
       if (!dialogId) return;
       switch (event.type) {
+        case "dialog_sync":
+          void queryClient.invalidateQueries({ queryKey: queryKeys.dialog.detail(dialogId) });
+          void queryClient.invalidateQueries({ queryKey: queryKeys.dialog.messages(dialogId) });
+          void queryClient.invalidateQueries({ queryKey: queryKeys.operator.queues() });
+          break;
         case "operator_access_revoked":
           if (event.operator.id !== operatorId) {
             setAccessRevoked(true);

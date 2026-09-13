@@ -207,6 +207,7 @@ export interface MonitoringResponse {
 }
 
 export type UserDialogEvent =
+  | { type: "dialog_sync"; dialog: DialogDetailDto; messages: MessageDto[] }
   | { type: "confidence"; value: number }
   | { type: "operator_connected"; operator?: UserRef; message: MessageDto }
   | { type: "assistant_token"; token: string }
@@ -222,6 +223,7 @@ export type OperatorQueueEvent =
   | { type: "ticket_closed"; dialogId: string };
 
 export type OperatorDialogEvent =
+  | { type: "dialog_sync"; dialog: OperatorDialogDetailDto; messages: MessageDto[] }
   | { type: "user_message"; message: MessageDto }
   | { type: "operator_access_revoked"; operator: UserRef }
   | { type: "dialog_closed" }

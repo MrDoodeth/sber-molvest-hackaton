@@ -55,7 +55,7 @@
 - **Backend — модульный монолит на FastAPI**, не микросервисы: меньше DevOps-расходов на хакатон, модули (RAG, Vision, Escalation, KB) изолированы и готовы к выносу в отдельные сервисы позже.
 - **GigaChat — центральная генеративная модель:** используем API для формирования финального ответа и анализа приложенных скриншотов. Для MVP основной кандидат — `GigaChat Pro`.
 - **Embeddings делаем локально:** Freemium предоставляет бесплатные токены генерации, но векторное представление текста оплачивается отдельно. Поэтому retrieval не зависит от платного Embeddings API; основной локальный кандидат — `BAAI/bge-m3`.
-- **Критичное ограничение Freemium — 1 поток генерации.** Все GigaChat generation, vision и Files API операции проходят через re-entrant `GenerationGate`: локальный semaphore ускоряет один worker, а PostgreSQL advisory lock сериализует вызовы между workers. Обычный пользовательский turn использует два последовательных GigaChat generation-call с одним `GenerationContext`: structured `confidence` на фиксированной Lite-модели и streaming user answer на выбранной администратором модели. При screenshot его parse выполняется до retrieval в том же атомарном turn. Confidence публикуется отдельным техническим SSE-событием: пользовательский UI его не показывает, но браузер получает и обрабатывает значение; operator/admin UI могут его отображать. Первый и второй подряд низкий confidence всё равно запускают streaming answer, а третий подряд ниже порога эскалирует без второго call. `operator_requested=true` эскалирует сразу, независимо от streak. Ручной шаблон оператора выполняется отдельным generation-call.
+- **Критичное ограничение Freemium — 1 поток генерации.** Каждый реальный GigaChat generation, vision и Files API вызов проходит через `GenerationGate`: локальный semaphore и PostgreSQL advisory lock сериализуют provider-вызовы между workers. Локальная подготовка контекста, RAG и storage I/O не удерживают этот gate. Обычный пользовательский turn использует два последовательных GigaChat generation-call с одним `GenerationContext`: structured `confidence` на фиксированной Lite-модели и streaming user answer на выбранной администратором модели. При screenshot его parse выполняется до retrieval. Confidence публикуется отдельным техническим SSE-событием: пользовательский UI его не показывает, но браузер получает и обрабатывает значение; operator/admin UI могут его отображать. Первый и второй подряд низкий confidence всё равно запускают streaming answer, а третий подряд ниже порога эскалирует без второго call. `operator_requested=true` эскалирует сразу, независимо от streak. Ручной шаблон оператора выполняется отдельным generation-call.
 - **Operator template context:** backend строит полный упорядоченный снимок сообщений
   user/assistant/operator/system и всех вложений на момент вызова; затем общий
   sliding-window выбирает самый свежий фрагмент истории в `gigachat_input_budget`.
@@ -187,7 +187,7 @@ seed не скачивает внешний массив документов.
 - **Runtime BGE-M3:** зафиксированный snapshot модели скачивается на этапе сборки backend-образа, загружается через `BGEM3FlagModel` в FastAPI lifespan и прогревается до выдачи lifespan приложения. Во время обработки запросов сеть для Hugging Face не используется.
 - **Runtime Docling:** layout, TableFormer и EasyOCR artifacts скачиваются на этапе сборки backend-образа в `/opt/models/docling`, передаются в `DocumentConverter` через `DOCLING_ARTIFACTS_PATH` и загружаются в выделенные parser-потоки. `KB_INDEX_CONCURRENCY` ограничивает число одновременных ingestion-задач и Docling worker (безопасный default `1`, максимум `2`), поэтому тяжёлый парсинг не занимает event loop или shared thread pool FastAPI. Во время ingestion сеть для Hugging Face и EasyOCR не используется.
 - **Интерфейсы разделяем:** `GigaChatProvider` отвечает за generation/multimodal input, `EmbeddingProvider` — за локальную векторизацию. Это не смешивает платёжные/сетевые ограничения GigaChat с индексом БЗ.
-- **Ограничение Freemium:** один поток generation-запросов. Единый re-entrant `GenerationGate` находится в `app/core/generation_gate.py`; provider защищает каждый GigaChat/file/vision вызов, а сервис удерживает тот же gate на всём атомарном user turn. PostgreSQL advisory lock сериализует generation между workers, а отдельный advisory lock и проверка `pending/processing` user triggers не допускают параллельные AI user turns. Embeddings/retrieval выполняются локально.
+- **Ограничение Freemium:** один поток generation-запросов. Единый `GenerationGate` находится в `app/core/generation_gate.py`; provider защищает каждый GigaChat/file/vision вызов, но не локальную подготовку контекста. PostgreSQL advisory lock сериализует provider-вызовы между workers, а отдельный advisory lock и проверка `pending/processing` user triggers не допускают параллельные AI user turns. Embeddings/retrieval выполняются локально.
 - **Не делаем в MVP:** self-hosted генеративную LLM и альтернативные embedding-модели «на всякий случай». Если BGE-M3 не проходит наш golden dataset, модель меняется через `EmbeddingProvider`, но до измерений не усложняем архитектуру.
 
 ### ADR-4 · Qdrant + единая коллекция знаний
@@ -228,9 +228,9 @@ seed не скачивает внешний массив документов.
 Следующие правила уже реализованы в backend и являются частью текущего MVP-контракта:
 
 - все generation, vision и Files API вызовы GigaChat сериализуются единым
-  re-entrant `GenerationGate` с PostgreSQL advisory lock между workers; сервисы могут
-  удерживать его на всём атомарном turn, а provider дополнительно защищает отдельные
-  вызовы;
+  `GenerationGate` с PostgreSQL advisory lock между workers; gate берётся только на
+  фактическом provider-вызове, а RAG, storage и подготовка контекста выполняются без
+  удержания GigaChat-потока;
 - пользовательский AI-turn глобально допускается только один: `TurnCoordinator`
   дополняется PostgreSQL advisory transaction lock с ключом `712031043` и проверкой
   persisted `pending/processing` triggers, поэтому блокировка действует между
@@ -275,17 +275,16 @@ seed не скачивает внешний массив документов.
 - `EventBroker` использует Redis Pub/Sub для межworker-доставки и раздаёт события в
   локальные очереди подключённых SSE-клиентов. Replay по `Last-Event-ID` и
   transactional outbox отсутствуют; при переполнении локальной очереди на 256
-  событий старые события отбрасываются.
+  событий старые события отбрасываются. При каждом подключении dialog stream
+  отправляет `dialog_sync`, а frontend перечитывает состояние из PostgreSQL.
 - `/health` является liveness endpoint и всегда возвращает `ok`; он не проверяет
   PostgreSQL, Qdrant, GigaChat или object storage. Qdrant в Compose ожидается только
   по `service_started`, а коллекция создаётся лениво при первом обращении.
-- remote GigaChat files удаляются при закрытии Dialog или hard delete, а для явной
-  Knowledge Card generation — после вызова. Пока Dialog активен, загруженный remote
-  file может жить дольше одного generation-call; компенсация после частичного upload
-  не является полной.
-- hard delete закрытого Dialog проверяет статус candidate (`pending`/`approved`), но
-  текущий backend не проверяет `DialogFeedback.verdict == ai_error`; endpoint поэтому
-  шире заявленной moderation policy.
+- remote GigaChat files и локальные оригиналы сохраняются до разрешённого hard delete.
+  Закрытие Dialog и явная Knowledge Card generation их не удаляют. Hard delete требует
+  `DialogFeedback.verdict == ai_error` и candidate в статусе `rejected`; provider
+  cleanup идемпотентен, поэтому повторная попытка завершает частично выполненное
+  удаление.
 - monitoring API возвращает `failed_requests` и среднюю latency, но не p50/p95; текущий
   frontend не показывает `failed_requests`. Latency user-turn начинается в background
   worker, а не в момент persist user message.
@@ -299,8 +298,14 @@ seed не скачивает внешний массив документов.
   Поставленная в очередь ingestion-задача считает отсутствующий документ терминально
   удалённым и не помечает его как failed и не повторяет обработку.
 - удаление KB-раздела удерживает `SELECT FOR UPDATE` на section до удаления всех
-  документов, а создание документа берёт тот же lock до записи в storage. Reindex
-  становится `failed`, если stale Qdrant vectors не удалось очистить после retry.
+  документов и использует одну SQL-сессию для удаления документов и section. Создание
+  документа берёт тот же lock до записи в storage. Reindex становится `failed`, если
+  stale Qdrant vectors не удалось очистить после retry.
+- process-local locks диалогов, документов и candidates выдаются через
+  `KeyedLockRegistry` и удаляются из registry, когда исчезают holder и waiters;
+  длительная работа не накапливает записи lock-словарей.
+- downloads dialog attachments и KB documents используют потоковое чтение storage,
+  поэтому backend не загружает объект целиком в память.
 - системный раздел «Журнал обращений» принимает как approved candidates, так и
   прямой admin upload валидных UTF-8 Markdown-карточек формата
   `# title / ## Проблема / ## Результат`; оба пути создают `resolved_case` и
@@ -382,7 +387,7 @@ seed не скачивает внешний массив документов.
 | GigaChat до первого токена | измеряем на API; user UI получает первый answer chunk сразу через SSE после технического confidence call |
 | End-to-end                 | целевой KPI заказчика <5 с; обязательно подтвердить экспериментально                                     |
 
-**Безопасность и данные:** self-hosted Qdrant/Postgres и local storage по умолчанию (либо внешний S3 через provider); authentication в MVP отсутствует. User/operator/admin контуры используют незащищённый `X-Molvest-Role` demo actor context и не являются публичным security boundary. GigaChat credentials находятся только на backend. В Docker/Linux устанавливаем доверенный сертификат НУЦ Минцифры или задаём `ca_bundle_file`; SSL verification не отключаем. Runtime-файлы удаляются из GigaChat File Storage при close/hard delete, а не обязательно сразу после каждого generation-call. PII не пишем в технические логи без необходимости.
+**Безопасность и данные:** self-hosted Qdrant/Postgres и local storage по умолчанию (либо внешний S3 через provider); authentication в MVP отсутствует. User/operator/admin контуры используют незащищённый `X-Molvest-Role` demo actor context и не являются публичным security boundary. GigaChat credentials находятся только на backend. В Docker/Linux устанавливаем доверенный сертификат НУЦ Минцифры или задаём `ca_bundle_file`; SSL verification не отключаем. Runtime-файлы удаляются из GigaChat File Storage только при разрешённом hard delete. PII не пишем в технические логи без необходимости.
 
 **Масштабирование:** Redis разделяет RAG cache и доставляет SSE-события между
 процессами. `GenerationGate` и AI-turn ownership используют PostgreSQL advisory
@@ -459,8 +464,8 @@ backend не буферизует ответ целиком. Третий под
 - confidence всегда использует Lite (`GigaChat-2`), отдельный hardcoded backend prompt и `max_tokens=64`;
 - тот же `X-Session-ID` и неизменный базовый контекст позволяют переиспользовать
   совпадающий prompt-prefix;
-- `GenerationGate` удерживается от screenshot/context preparation до конца
-  confidence/answer sequence, поэтому другой generation-call не вклинивается;
+- `GenerationGate` берётся на каждом provider-вызове, поэтому screenshot/context
+  preparation и RAG не занимают единственный GigaChat-поток;
 - latency `user_turn` включает screenshot, RAG, confidence, весь answer stream и
   финальное решение.
 
@@ -549,8 +554,6 @@ dialog_confidence = 1.0
     + screenshot analysis
     + runtime attachments
             ↓
-    GenerationGate.acquire()
-            ↓
     CALL #1 — Lite structured ConfidenceAssessment
     hardcoded confidence prompt (constrained sampling)
             ↓
@@ -561,9 +564,10 @@ dialog_confidence = 1.0
 ```
 
 Второй call использует тот же `GenerationContext` и только редактируемый
-`SystemPrompt(type=user_support)`. Его текст не буферизуется: каждый очищенный
-chunk сразу публикуется как `assistant_token`, затем полный ответ сохраняется и
-завершается `assistant_done`. При явной просьбе оператора Lite возвращает
+`SystemPrompt(type=user_support)`. До первого token backend создаёт persisted draft
+assistant message, затем обновляет его во время stream. Каждый очищенный chunk сразу
+публикуется как `assistant_token`; после финальной фиксации draft получает статус
+`completed` и публикуется `assistant_done`. При явной просьбе оператора Lite возвращает
 `operator_requested=true` и confidence `0`; backend сразу переводит Dialog в
 `operator_support`, не выполняя второй вызов для ответа.
 
@@ -967,8 +971,9 @@ confidence `0`, system Message и сразу переводит Dialog в `opera
 
 #### Глобальный admission и один доступный поток
 
-Для физлица доступен один generation-поток. Внутри одного процесса provider и сервисы
-используют re-entrant `GenerationGate`. Дополнительно `TurnCoordinator` не допускает
+Для физлица доступен один generation-поток. Provider использует `GenerationGate` для
+каждого фактического API-вызова; сервисы не удерживают его во время локальной работы.
+Дополнительно `TurnCoordinator` не допускает
 два AI user turn в одном процессе, а PostgreSQL:
 
 ```text
@@ -977,9 +982,9 @@ pg_advisory_xact_lock(712031043)
 ```
 
 глобально, между backend workers, не допускает новый user AI turn до завершения
-предыдущего. Эта admission-блокировка относится к пользовательским AI-turn, а не ко
-всем generation/file/vision вызовам; локальный `GenerationGate` между replicas не
-заменяет распределённую очередь.
+предыдущего. Эта admission-блокировка относится к пользовательским AI-turn. Все
+generation/file/vision provider-вызовы отдельно сериализуются PostgreSQL advisory
+lock внутри `GenerationGate`.
 
                 Обычный успешный turn требует двух последовательных generation-вызовов:
                 confidence, затем streaming user answer. Screenshot добавляет отдельный
@@ -1100,9 +1105,8 @@ DialogFeedback
 После анализа администратор может:
 
 - исправить БЗ, System Prompt или runtime AI/RAG settings;
-- **удалить разобранный ошибочный чат**, чтобы не засорять рабочую БД. Фактический
-  текущий endpoint разрешает hard delete для любого закрытого Dialog с отсутствующим
-  или `rejected` candidate; наличие `ai_error` feedback пока не проверяется.
+- **удалить разобранный ошибочный чат**, чтобы не засорять рабочую БД. Endpoint
+  требует закрытый Dialog, `ai_error` feedback и `rejected` candidate.
 
 В карточке ошибочного тикета доступны действия:
 
@@ -1120,16 +1124,19 @@ AND
 DialogFeedback.verdict = ai_error
 ```
 
-Фактический код текущего MVP проверяет только `Dialog.status == closed` и то, что
-candidate не находится в `pending` или `approved`. Проверки `DialogFeedback` нет, поэтому
-это известное расхождение контракта, которое требуется закрыть до production.
+Backend проверяет все условия moderation policy до начала внешнего cleanup.
 
-Перед hard delete `DialogService` проверяет связанный `KnowledgeCandidate`:
+Перед hard delete `ModerationService` проверяет feedback и связанный
+`KnowledgeCandidate`:
 
 ```python
+feedback = DialogFeedback.get(dialog_id=dialog_id)
 candidate = KnowledgeCandidate.get(dialog_id=dialog_id)
 
-if candidate and candidate.status == "pending":
+if feedback is None or feedback.verdict != "ai_error":
+    raise Conflict("Удалять можно только обращение с оценкой «AI ошибся»")
+
+if candidate is None or candidate.status == "pending":
     raise Conflict("Сначала отклоните кандидата в БЗ")
 
 if candidate and candidate.status == "approved":
@@ -1141,7 +1148,7 @@ if candidate and candidate.status == "approved":
 
 Статический FK не может выразить условный RESTRICT по статусу candidate, поэтому эта проверка находится в application service.
 
-Если candidate отсутствует или уже `rejected`, выполняется hard delete.
+Только `rejected` candidate допускает hard delete.
 
 DB-level cascade:
 
@@ -1260,7 +1267,8 @@ GigaChat нативно поддерживает документы и изоб�
 1. загружает его через `POST /files` с `purpose="general"`;
 2. сохраняет полученный `gigachat_file_id`;
 3. передаёт `file_id` в `messages[].attachments`;
-4. после завершения жизненного цикла удаляет remote-файл через `/files/{file}/delete`.
+4. сохраняет file ID до разрешённого hard delete, когда удаляет remote-файл через
+   `/files/{file}/delete` вместе с локальным оригиналом.
 
 Примеры:
 
@@ -2139,7 +2147,7 @@ ca_bundle_file="/path/to/russian_trusted_root_ca_pem.crt"
 И дополнительно сериализуем обращения к GigaChat внутри backend:
 
 ```python
-generation_gate = GenerationGate()  # re-entrant asyncio gate
+generation_gate = GenerationGate()  # provider request gate
 ```
 
 Схематично:
@@ -2159,10 +2167,9 @@ PostgreSQL pg_advisory_xact_lock(712031043)
 ```
 
 Поэтому новый пользовательский turn в другом чате отклоняется до завершения текущего
-даже при нескольких backend workers. Локальный `GenerationGate` по-прежнему не
-обеспечивает глобальную сериализацию operator-template, screenshot и Knowledge Card
-generation между replicas; централизованная очередь для всех provider-вызовов остаётся
-Roadmap.
+даже при нескольких backend workers. `GenerationGate` также использует PostgreSQL
+advisory lock и сериализует operator-template, screenshot и Knowledge Card provider-
+вызовы между replicas; отдельная очередь остаётся Roadmap только при росте нагрузки.
 
 Не строим длинную LLM-chain вида:
 
@@ -2397,12 +2404,13 @@ Frontend
 ```
 
 Confidence event не содержит технический prompt. При успешном decision пользователь
-видит каждый answer chunk сразу после его получения; backend сохраняет полный текст
-только для завершения сообщения и аудита, а не для задержки SSE.
+видит каждый answer chunk сразу после его получения; до stream backend создаёт
+persisted assistant draft и обновляет его с ограниченной частотой. Финальный текст
+фиксируется в том же draft до отправки `assistant_done`.
 
-Важно: generation stream занимает доступный GigaChat-поток до завершения model call,
-а `GenerationGate` удерживается на всём user turn: от screenshot/context preparation
-до confidence, answer stream и terminal event.
+Важно: generation stream занимает доступный GigaChat-поток до завершения model call.
+`GenerationGate` удерживается только на конкретных вызовах GigaChat, а не на RAG,
+storage I/O, подготовке контекста и terminal event.
 
 Документация:
 
@@ -2509,8 +2517,6 @@ text document: <= 40 MB
 image:         <= 15 MB
 ```
 
-Общий размер запроса с runtime-вложениями должен быть меньше 80 MB.
-
 Ограничения GigaChat API дополнительно допускают:
 
 ```text
@@ -2588,12 +2594,10 @@ POST /files/{file}/delete
 gigachat_file_id
 ```
 
-Перед закрытием тикета backend удаляет remote runtime-файлы из GigaChat File Storage;
-локальный оригинал остаётся в собственном storage для истории/админской проверки.
-Если remote cleanup не удался, закрытие не выполняется и пользователь получает ошибку.
-Для явной Knowledge Card generation remote files удаляются после generation. В обычном
-user/operator generation remote file остаётся до close или hard delete; при ошибке после
-частичного upload отдельная компенсация не гарантирована.
+Закрытие тикета и явная Knowledge Card generation не удаляют remote runtime-файлы:
+локальный оригинал и `gigachat_file_id` сохраняются для истории и админской проверки.
+Remote cleanup выполняется только в разрешённом hard delete, когда у закрытого Dialog
+есть `DialogFeedback.verdict=ai_error` и candidate в статусе `rejected`.
 
 Если администратор выполняет разрешённый hard delete закрытого чата, удаляем:
 
@@ -2604,6 +2608,9 @@ gigachat_file_id через /files/{file}/delete
 ```
 
 если remote-файл ещё существует.
+
+Удаление идемпотентно: уже отсутствующий remote file не мешает повторить hard delete,
+а cleanup пытается обработать все file ID до возврата ошибки.
 
 Документация:
 
@@ -2726,7 +2733,8 @@ CALL #1 ConfidenceAssessment
 CALL #2 user answer stream
 ```
 
-Все GigaChat-вызовы выполняются последовательно под единым re-entrant `GenerationGate`.
+Все GigaChat-вызовы выполняются последовательно через `GenerationGate`; локальные
+RAG/storage-операции не занимают GigaChat-поток.
 
 ### Финальный prompt
 
@@ -3824,6 +3832,7 @@ Backend авторизует каждый stream по роли и Dialog access.
 
 ```ts
 type UserDialogEvent =
+  | { type: "dialog_sync"; dialog: DialogDetailDto; messages: MessageDto[] }
   | { type: "confidence"; value: number }
   | { type: "operator_connected"; operator?: UserRef; message: MessageDto }
   | { type: "assistant_token"; token: string }
@@ -3854,6 +3863,7 @@ Frontend использует SSE для быстрых обновлений и 
 
 ```ts
 type OperatorDialogEvent =
+  | { type: "dialog_sync"; dialog: OperatorDialogDetailDto; messages: MessageDto[] }
   | { type: "user_message"; message: MessageDto }
   | { type: "operator_access_revoked"; operator: UserRef }
   | { type: "dialog_closed" }
@@ -3887,17 +3897,22 @@ operator_message
 
 обновляем конкретный cache entry или делаем targeted invalidation.
 
+`dialog_sync` приходит сразу после подключения к user или operator dialog stream.
+Frontend сбрасывает временный token buffer и invalidates detail/messages, чтобы
+PostgreSQL восстановил все пропущенные terminal events.
+
 ### 19.6 SSE reconnect
 
 Backend присваивает каждому событию SSE глобально уникальный `id:` и передаёт его
 между workers через Redis Pub/Sub. Event log/replay отсутствует,
-`Last-Event-ID` не обрабатывается, а локальная очередь подписчика ограничена 256
+`Last-Event-ID` не используется для replay, а локальная очередь подписчика ограничена 256
 событиями и при переполнении отбрасывает старейшее.
 
 Frontend:
 
 - разрешает стандартный reconnect;
-- после reconnect refetch текущего Dialog/queue;
+- получает `dialog_sync` и refetch текущего Dialog/messages; queue продолжает
+  периодически refetch-иться;
 - backend остаётся source of truth;
 - финальные persisted `message.id` предотвращают duplicate rendering.
 
@@ -4038,7 +4053,7 @@ Frontend не хардкодит model context limit. PUT принимает в�
 | POST   | `/api/admin/candidates/{id}/generate-card` | заполнить case card через GigaChat                                                                         |
 | POST   | `/api/admin/candidates/{id}/approve`       | retryable approve: сохранить card, переиспользовать deterministic document и выполнить permanent ingestion |
 | POST   | `/api/admin/candidates/{id}/reject`        | reject                                                                                                     |
-| DELETE | `/api/admin/dialogs/{dialogId}`            | hard delete closed Dialog after candidate review; current endpoint does not enforce `ai_error` feedback    |
+| DELETE | `/api/admin/dialogs/{dialogId}`            | hard delete closed Dialog только после `ai_error` feedback и rejected candidate                             |
 
 ### 20.6 Admin — Monitoring
 
@@ -5025,7 +5040,7 @@ Docling, chunking, BGE-M3, Qdrant, hybrid retrieval, `rag_top_k` и enable/disab
 
 ### Backend B3 — GigaChatProvider
 
-LangChain-first integration, auth/certificates, active model, `ainvoke`, structured output, retry/error mapping, единый re-entrant `GenerationGate`, X-Session-ID.
+LangChain-first integration, auth/certificates, active model, `ainvoke`, structured output, retry/error mapping, единый provider-request `GenerationGate`, X-Session-ID.
 
 ### Backend B4 — пользовательский Q&A
 

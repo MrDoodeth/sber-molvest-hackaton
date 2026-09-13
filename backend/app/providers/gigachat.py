@@ -389,7 +389,7 @@ class GigaChatProvider:
         model: str,
         session_id: uuid.UUID | None = None,
     ) -> str:
-        async with self._generation_gate.acquire():
+        async with self._generation_gate.acquire(provider_request=True):
             client = self._client(model, 64)
             try:
                 with self._request_headers(session_id or uuid.uuid4()):
@@ -414,7 +414,7 @@ class GigaChatProvider:
         model: str,
         session_id: uuid.UUID | None = None,
     ) -> None:
-        async with self._generation_gate.acquire():
+        async with self._generation_gate.acquire(provider_request=True):
             client = self._client(model, 64)
             try:
                 with self._request_headers(session_id or uuid.uuid4()):
@@ -432,7 +432,7 @@ class GigaChatProvider:
         model: str,
         session_id: uuid.UUID,
     ) -> ScreenshotAnalysis:
-        async with self._generation_gate.acquire():
+        async with self._generation_gate.acquire(provider_request=True):
             try:
                 from langchain_core.messages import HumanMessage, SystemMessage
             except ImportError as exc:
@@ -469,7 +469,7 @@ class GigaChatProvider:
         model: str,
         session_id: uuid.UUID,
     ) -> ConfidenceAssessment:
-        async with self._generation_gate.acquire():
+        async with self._generation_gate.acquire(provider_request=True):
             messages = self._messages(
                 request,
                 system_prompt=_CONFIDENCE_SYSTEM_PROMPT,
@@ -492,7 +492,7 @@ class GigaChatProvider:
         max_output_tokens: int,
         session_id: uuid.UUID,
     ) -> CaseCard:
-        async with self._generation_gate.acquire():
+        async with self._generation_gate.acquire(provider_request=True):
             messages = self._messages(request)
             result = await self._structured(
                 client=self._client(model, max_output_tokens),
@@ -528,7 +528,7 @@ class GigaChatProvider:
         max_output_tokens: int,
         session_id: uuid.UUID,
     ) -> AsyncIterator[StreamChunk]:
-        async with self._generation_gate.acquire():
+        async with self._generation_gate.acquire(provider_request=True):
             client = self._client(model, max_output_tokens)
             messages = self._messages(request)
             usage: ProviderUsage | None = None

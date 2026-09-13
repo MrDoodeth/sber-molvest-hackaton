@@ -12,10 +12,10 @@ GIGACHAT_ADVISORY_LOCK_KEY = 712031044
 
 
 class GenerationGate:
-    """Serialize GigaChat requests in-process and across PostgreSQL workers.
+    """Serialize actual GigaChat requests in-process and across PostgreSQL workers.
 
-    The gate is re-entrant for the current asyncio task so a complete atomic
-    turn can hold it while provider methods guard their individual calls too.
+    Service workflows can use the default no-op scope to retain their existing
+    structure. Only provider requests acquire the shared one-stream limit.
     """
 
     def __init__(self, engine: AsyncEngine | None = None) -> None:
@@ -26,7 +26,10 @@ class GenerationGate:
         )
 
     @asynccontextmanager
-    async def acquire(self) -> AsyncIterator[None]:
+    async def acquire(self, *, provider_request: bool = False) -> AsyncIterator[None]:
+        if not provider_request:
+            yield
+            return
         depth = self._depth.get()
         if depth:
             token = self._depth.set(depth + 1)

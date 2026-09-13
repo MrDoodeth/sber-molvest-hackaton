@@ -7,6 +7,7 @@ import { appendPersistedMessage } from "./messageCache";
 import { useEventSource } from "./useEventSource";
 
 const eventNames = [
+  "dialog_sync",
   "confidence",
   "operator_connected",
   "assistant_token",
@@ -41,6 +42,11 @@ export function useUserDialogEvents(dialogId: string, onTerminal?: () => void) {
     },
     onEvent: (event) => {
       switch (event.type) {
+        case "dialog_sync":
+          setAssistantText(null);
+          void queryClient.invalidateQueries({ queryKey: queryKeys.dialog.detail(dialogId) });
+          void queryClient.invalidateQueries({ queryKey: queryKeys.dialog.messages(dialogId) });
+          break;
         case "confidence":
           setConfidence(event.value);
           setPhase("thinking");

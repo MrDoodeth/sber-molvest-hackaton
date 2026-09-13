@@ -5,7 +5,7 @@ import logging
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
 
@@ -44,6 +44,7 @@ from app.core.errors import (
     UnprocessableError,
 )
 from app.core.generation_gate import GenerationGate
+from app.core.keyed_locks import KeyedLockRegistry
 from app.core.turn_coordinator import (
     AI_TURN_ADMISSION_LOCK_KEY,
     TurnCoordinator,
@@ -112,11 +113,11 @@ class DialogService:
         self._generation_gate = generation_gate
         self._turn_coordinator = turn_coordinator or TurnCoordinator()
         self._ensure_closed_candidate = ensure_closed_candidate
-        self._dialog_locks: dict[uuid.UUID, asyncio.Lock] = {}
+        self._dialog_locks = KeyedLockRegistry()
         self._processing_message_ids: set[uuid.UUID] = set()
 
-    def dialog_lock(self, dialog_id: uuid.UUID) -> asyncio.Lock:
-        return self._dialog_locks.setdefault(dialog_id, asyncio.Lock())
+    def dialog_lock(self, dialog_id: uuid.UUID) -> AbstractAsyncContextManager[None]:
+        return self._dialog_locks.acquire(dialog_id)
 
     def _schedule_processing(
         self,
@@ -299,7 +300,14 @@ class DialogService:
             if dialog is None:
                 raise NotFoundError("Диалог не найден")
             self._assert_read_access(requester, dialog)
-            statement = select(Message).where(Message.dialog_id == dialog_id)
+            statement = select(Message).where(
+                Message.dialog_id == dialog_id,
+                or_(
+                    Message.author_type != MessageAuthor.ASSISTANT,
+                    Message.processing_status.is_(None),
+                    Message.processing_status == MessageProcessingStatus.COMPLETED,
+                ),
+            )
             if cursor is not None:
                 cursor_message = await session.get(Message, cursor)
                 if cursor_message is None or cursor_message.dialog_id != dialog_id:
@@ -886,51 +894,12 @@ class DialogService:
     async def _finalize_close(
         self, session: AsyncSession, dialog: Dialog
     ) -> DialogMode:
-        settings = await self._settings_service.get_runtime(session)
-        remote_attachments = list(
-            await session.scalars(
-                select(Attachment)
-                .join(Message, Attachment.message_id == Message.id)
-                .where(
-                    Message.dialog_id == dialog.id,
-                    Attachment.gigachat_file_id.is_not(None),
-                    Attachment.remote_deleted_at.is_(None),
-                )
-            )
-        )
-        remote_ids = [
-            item.gigachat_file_id
-            for item in remote_attachments
-            if item.gigachat_file_id
-        ]
-        if remote_ids:
-            try:
-                async with self._generation_gate.acquire():
-                    await self._attachment_service.cleanup_remote(
-                        remote_ids, settings.active_model, dialog.id
-                    )
-            except ProviderError as exc:
-                raise ServiceUnavailableError(str(exc)) from exc
-
         closed_at = datetime.now(UTC)
         dialog.status = DialogStatus.CLOSED
         dialog.closed_at = closed_at
         dialog.updated_at = closed_at
         if self._ensure_closed_candidate is not None:
             await self._ensure_closed_candidate(session, dialog.id)
-        if remote_ids:
-            attachments = list(
-                await session.scalars(
-                    select(Attachment)
-                    .join(Message, Attachment.message_id == Message.id)
-                    .where(
-                        Message.dialog_id == dialog.id,
-                        Attachment.gigachat_file_id.in_(remote_ids),
-                    )
-                )
-            )
-            for attachment in attachments:
-                attachment.remote_deleted_at = closed_at
         return dialog.mode
 
     async def _publish_dialog_closed(
@@ -963,6 +932,7 @@ class DialogService:
         runtime_settings: RuntimeSettings | None = None
         prompt_content: str | None = None
         usage: ProviderUsage | None = None
+        assistant_draft_id: uuid.UUID | None = None
         try:
             async with self._session_factory() as session:
                 trigger = await session.get(Message, message_id)
@@ -1072,6 +1042,9 @@ class DialogService:
                     output_filter = ModelOutputStreamFilter()
                     streamed_text = ""
                     answer_usage: ProviderUsage | None = None
+                    draft_id = await self._start_assistant_draft(dialog_id)
+                    assistant_draft_id = draft_id
+                    last_draft_save = time.monotonic()
                     async for chunk in self._llm_provider.stream_user_answer(
                         generation_request,
                         runtime_settings.active_model,
@@ -1089,6 +1062,9 @@ class DialogService:
                         if not token:
                             continue
                         streamed_text += token
+                        if time.monotonic() - last_draft_save >= 0.5:
+                            await self._update_assistant_draft(draft_id, streamed_text)
+                            last_draft_save = time.monotonic()
                         await self._broker.publish(
                             user_dialog_channel(dialog_id),
                             {"type": "assistant_token", "token": token},
@@ -1106,8 +1082,8 @@ class DialogService:
                     usage = self._combine_usage(
                         getattr(assessment, "usage", None), answer_usage
                     )
-                    dto = await self._persist_assistant(
-                        dialog_id,
+                    dto = await self._complete_assistant_draft(
+                        draft_id,
                         answer_text,
                         confidence,
                         source_snapshot,
@@ -1130,9 +1106,15 @@ class DialogService:
                         prompt_content,
                     )
         except asyncio.CancelledError:
+            if assistant_draft_id is not None:
+                await self._mark_assistant_draft_failed(
+                    assistant_draft_id, "Генерация отменена"
+                )
             await self._mark_turn_pending(message_id)
             raise
         except ProviderError as exc:
+            if assistant_draft_id is not None:
+                await self._mark_assistant_draft_failed(assistant_draft_id, str(exc))
             await self._mark_turn_failed(message_id, str(exc))
             if dialog_id is not None:
                 await self._record_metric(
@@ -1152,6 +1134,10 @@ class DialogService:
                 )
         except Exception:
             logger.exception("Dialog turn processing failed for message %s", message_id)
+            if assistant_draft_id is not None:
+                await self._mark_assistant_draft_failed(
+                    assistant_draft_id, "Не удалось обработать сообщение"
+                )
             await self._mark_turn_failed(message_id, "Не удалось обработать сообщение")
             if dialog_id is not None:
                 await self._record_metric(
@@ -1170,9 +1156,9 @@ class DialogService:
                     {"type": "error", "message": "Не удалось обработать сообщение"},
                 )
 
-    async def read_attachment(
+    async def attachment_download(
         self, requester: User, attachment_id: uuid.UUID
-    ) -> tuple[bytes, str, str]:
+    ) -> tuple[str, str, str]:
         async with self._session_factory() as session:
             row = (
                 await session.execute(
@@ -1186,16 +1172,8 @@ class DialogService:
                 raise NotFoundError("Вложение не найдено")
             attachment, dialog = row
             self._assert_read_access(requester, dialog)
-            try:
-                data = await self._attachment_service.storage.get(
-                    attachment.storage_key
-                )
-            except StorageError as exc:
-                raise ServiceUnavailableError(
-                    "Хранилище вложений временно недоступно"
-                ) from exc
             return (
-                data,
+                attachment.storage_key,
                 attachment.mime_type,
                 PurePosixPath(attachment.storage_key).name,
             )
@@ -1398,15 +1376,7 @@ class DialogService:
             prompt_content,
         )
 
-    async def _persist_assistant(
-        self,
-        dialog_id: uuid.UUID,
-        text: str,
-        confidence: float | None,
-        sources: list[dict[str, object]],
-        *,
-        trigger_message_id: uuid.UUID | None = None,
-    ) -> MessageDto:
+    async def _start_assistant_draft(self, dialog_id: uuid.UUID) -> uuid.UUID:
         async with self._session_factory() as session:
             dialog = await session.get(Dialog, dialog_id, with_for_update=True)
             if dialog is None or dialog.status != DialogStatus.ACTIVE:
@@ -1414,11 +1384,47 @@ class DialogService:
             message = Message(
                 dialog_id=dialog_id,
                 author_type=MessageAuthor.ASSISTANT,
-                text=text,
-                confidence=confidence,
-                sources=sources,
+                text="",
+                sources=[],
+                processing_status=MessageProcessingStatus.PROCESSING,
             )
             session.add(message)
+            await session.commit()
+            return message.id
+
+    async def _update_assistant_draft(self, draft_id: uuid.UUID, text: str) -> None:
+        async with self._session_factory() as session:
+            draft = await session.get(Message, draft_id, with_for_update=True)
+            if (
+                draft is None
+                or draft.author_type != MessageAuthor.ASSISTANT
+                or draft.processing_status != MessageProcessingStatus.PROCESSING
+            ):
+                raise ConflictError("Черновик ответа AI недоступен")
+            draft.text = text
+            await session.commit()
+
+    async def _complete_assistant_draft(
+        self,
+        draft_id: uuid.UUID,
+        text: str,
+        confidence: float | None,
+        sources: list[dict[str, object]],
+        *,
+        trigger_message_id: uuid.UUID | None = None,
+    ) -> MessageDto:
+        async with self._session_factory() as session:
+            draft = await session.get(Message, draft_id, with_for_update=True)
+            if draft is None or draft.author_type != MessageAuthor.ASSISTANT:
+                raise ConflictError("Черновик ответа AI не найден")
+            dialog = await session.get(Dialog, draft.dialog_id, with_for_update=True)
+            if dialog is None or dialog.status != DialogStatus.ACTIVE:
+                raise ConflictError("Диалог уже закрыт")
+            draft.text = text
+            draft.confidence = confidence
+            draft.sources = sources
+            draft.processing_status = MessageProcessingStatus.COMPLETED
+            draft.processing_error = None
             if trigger_message_id is not None:
                 await self._set_trigger_status(
                     session,
@@ -1427,7 +1433,25 @@ class DialogService:
                 )
             dialog.updated_at = datetime.now(UTC)
             await session.commit()
-            return message_dto(message)
+            return message_dto(draft)
+
+    async def _mark_assistant_draft_failed(
+        self, draft_id: uuid.UUID, error: str
+    ) -> None:
+        try:
+            async with self._session_factory() as session:
+                draft = await session.get(Message, draft_id, with_for_update=True)
+                if (
+                    draft is None
+                    or draft.author_type != MessageAuthor.ASSISTANT
+                    or draft.processing_status != MessageProcessingStatus.PROCESSING
+                ):
+                    return
+                draft.processing_status = MessageProcessingStatus.FAILED
+                draft.processing_error = error[:4000]
+                await session.commit()
+        except Exception:
+            logger.exception("Unable to persist failed assistant draft %s", draft_id)
 
     async def _low_confidence_streak(
         self,
@@ -1605,6 +1629,10 @@ class DialogService:
             .where(
                 Message.dialog_id == trigger.dialog_id,
                 Message.author_type == MessageAuthor.ASSISTANT,
+                or_(
+                    Message.processing_status.is_(None),
+                    Message.processing_status == MessageProcessingStatus.COMPLETED,
+                ),
                 Message.created_at > trigger.created_at,
             )
             .limit(1)

@@ -106,6 +106,8 @@ async def operator_dialog_events(
     container: ApplicationContainer = Depends(get_container),
 ) -> StreamingResponse:
     await container.dialogs.assert_operator_sse_access(user, dialog_id)
+    detail = await container.dialogs.get_dialog(user, dialog_id)
+    messages = await container.dialogs.list_messages(user, dialog_id, None, 200)
     return StreamingResponse(
         operator_dialog_event_stream(
             request,
@@ -114,6 +116,11 @@ async def operator_dialog_events(
             container.settings.sse_heartbeat_seconds,
             str(user.id),
             lambda: container.dialogs.has_operator_sse_access(user, dialog_id),
+            {
+                "type": "dialog_sync",
+                "dialog": detail.model_dump(mode="json"),
+                "messages": [item.model_dump(mode="json") for item in messages.items],
+            },
         ),
         media_type="text/event-stream",
         headers=SSE_HEADERS,

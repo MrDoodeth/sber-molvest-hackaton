@@ -6,7 +6,7 @@ from pathlib import PurePath
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import StreamingResponse
 
 from app.api.deps import get_container, get_request_actor
 from app.api.openapi import API_RESPONSES
@@ -195,13 +195,15 @@ async def download_document(
     document_id: uuid.UUID,
     user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
-) -> Response:
+) -> StreamingResponse:
     require_admin(user)
-    data, media_type, file_name = await container.knowledge_base.read_document(
-        document_id
-    )
-    return Response(
-        content=data,
+    (
+        storage_key,
+        media_type,
+        file_name,
+    ) = await container.knowledge_base.document_download(document_id)
+    return StreamingResponse(
+        container.storage.iter_bytes(storage_key),
         media_type=media_type,
         headers={
             "Content-Disposition": (f"attachment; filename*=UTF-8''{quote(file_name)}")

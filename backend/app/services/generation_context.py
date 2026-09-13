@@ -35,7 +35,6 @@ class PreparedGenerationContext:
 
 
 MAX_GIGACHAT_IMAGES = 10
-MAX_GIGACHAT_MEDIA_BYTES = 80 * 1024 * 1024
 
 
 class GenerationContextService:
@@ -254,12 +253,6 @@ class GenerationContextService:
             raise UnprocessableError(
                 "GigaChat поддерживает не более 10 изображений за запрос",
                 {"max_images": MAX_GIGACHAT_IMAGES},
-            )
-        media_bytes = sum(attachment.size_bytes or 0 for attachment in images)
-        if media_bytes >= MAX_GIGACHAT_MEDIA_BYTES:
-            raise UnprocessableError(
-                "Суммарный размер изображений для GigaChat должен быть менее 80 МБ",
-                {"max_bytes": MAX_GIGACHAT_MEDIA_BYTES},
             )
 
     async def _dialog_snapshot(

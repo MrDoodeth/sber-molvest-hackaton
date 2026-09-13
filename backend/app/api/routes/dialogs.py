@@ -33,7 +33,6 @@ from app.models import User
 from app.services.attachments import (
     MAX_RUNTIME_ATTACHMENTS,
     MAX_RUNTIME_IMAGES,
-    MAX_RUNTIME_MEDIA_REQUEST_BYTES,
     ValidatedUpload,
     validate_upload_stream,
 )
@@ -147,7 +146,6 @@ async def send_message(
 
     validated: list[ValidatedUpload] = []
     if uploaded_files:
-        media_bytes = 0
         image_count = 0
         for attachment in uploaded_files:
             content_type = (attachment.content_type or "").split(";", 1)[0].lower()
@@ -155,11 +153,6 @@ async def send_message(
                 raise UnprocessableError(
                     "Аудиофайлы не поддерживаются",
                     {"mime_type": content_type},
-                )
-            if media_bytes >= MAX_RUNTIME_MEDIA_REQUEST_BYTES:
-                raise UnprocessableError(
-                    "Суммарный размер изображений должен быть менее 80 МБ",
-                    {"max_bytes": MAX_RUNTIME_MEDIA_REQUEST_BYTES},
                 )
             upload = await validate_upload_stream(
                 file_name=attachment.filename,
@@ -175,12 +168,6 @@ async def send_message(
                         "Можно прикрепить только одно изображение за сообщение",
                         {"max_images": MAX_RUNTIME_IMAGES},
                     )
-                media_bytes += upload.size_bytes
-            if media_bytes >= MAX_RUNTIME_MEDIA_REQUEST_BYTES:
-                raise UnprocessableError(
-                    "Суммарный размер изображений должен быть менее 80 МБ",
-                    {"max_bytes": MAX_RUNTIME_MEDIA_REQUEST_BYTES},
-                )
             validated.append(upload)
     message, created = await container.dialogs.persist_message(
         requester=user,
@@ -235,12 +222,19 @@ async def dialog_events(
     container: ApplicationContainer = Depends(get_container),
 ) -> StreamingResponse:
     await container.dialogs.assert_user_sse_access(user, dialog_id)
+    detail = await container.dialogs.get_dialog(user, dialog_id)
+    messages = await container.dialogs.list_messages(user, dialog_id, None, 200)
     return StreamingResponse(
         event_stream(
             request,
             container.broker,
             user_dialog_channel(dialog_id),
             container.settings.sse_heartbeat_seconds,
+            {
+                "type": "dialog_sync",
+                "dialog": detail.model_dump(mode="json"),
+                "messages": [item.model_dump(mode="json") for item in messages.items],
+            },
         ),
         media_type="text/event-stream",
         headers=SSE_HEADERS,
@@ -265,13 +259,13 @@ async def download_attachment(
     attachment_id: uuid.UUID,
     user: User = Depends(get_request_actor),
     container: ApplicationContainer = Depends(get_container),
-) -> Response:
-    data, mime_type, file_name = await container.dialogs.read_attachment(
+) -> StreamingResponse:
+    storage_key, mime_type, file_name = await container.dialogs.attachment_download(
         user, attachment_id
     )
     encoded_name = quote(file_name)
-    return Response(
-        content=data,
+    return StreamingResponse(
+        container.storage.iter_bytes(storage_key),
         media_type=mime_type,
         headers={
             "Content-Disposition": (f"attachment; filename*=UTF-8''{encoded_name}")

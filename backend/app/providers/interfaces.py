@@ -62,6 +62,10 @@ class ObjectStorage(Protocol):
 
     async def get(self, key: str) -> bytes: ...
 
+    def iter_bytes(
+        self, key: str, chunk_size: int = 1024 * 1024
+    ) -> AsyncIterator[bytes]: ...
+
     async def delete(self, key: str) -> None: ...
 
 

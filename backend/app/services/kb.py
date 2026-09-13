@@ -6,6 +6,7 @@ import logging
 import mimetypes
 import tempfile
 import uuid
+from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,7 @@ from app.contracts.schemas import (
 from app.core.constants import PROTECTED_SECTION_IDS
 from app.core.enums import CandidateStatus, DocumentSourceType, IndexStatus
 from app.core.errors import ConflictError, NotFoundError, ServiceUnavailableError
+from app.core.keyed_locks import KeyedLockRegistry
 from app.models import (
     Chunk,
     KnowledgeCandidate,
@@ -70,11 +72,11 @@ class KnowledgeBaseService:
         self._vector_store = vector_store
         self._tasks = tasks
         self._ingestion_gate = asyncio.Semaphore(index_concurrency)
-        self._document_locks: dict[uuid.UUID, asyncio.Lock] = {}
+        self._document_locks = KeyedLockRegistry()
         self._scheduled_document_ids: set[uuid.UUID] = set()
 
-    def _lock_for(self, document_id: uuid.UUID) -> asyncio.Lock:
-        return self._document_locks.setdefault(document_id, asyncio.Lock())
+    def _lock_for(self, document_id: uuid.UUID) -> AbstractAsyncContextManager[None]:
+        return self._document_locks.acquire(document_id)
 
     def _schedule_ingestion(self, document_id: uuid.UUID) -> None:
         if document_id in self._scheduled_document_ids:
@@ -231,7 +233,11 @@ class KnowledgeBaseService:
                     )
                 )
                 for document_id in document_ids:
-                    await self.delete_document(document_id)
+                    document = await session.get(
+                        KnowledgeDocument, document_id, with_for_update=True
+                    )
+                    if document is not None:
+                        await self._delete_document_locked(session, document)
                 # The section row remains locked until all document cleanup has
                 # completed, so concurrent uploads cannot orphan storage objects.
                 await session.delete(section)
@@ -283,7 +289,7 @@ class KnowledgeBaseService:
                 raise NotFoundError("Документ базы знаний не найден")
             return document_dto(row[0], row[1])
 
-    async def read_document(self, document_id: uuid.UUID) -> tuple[bytes, str, str]:
+    async def document_download(self, document_id: uuid.UUID) -> tuple[str, str, str]:
         async with self._session_factory() as session:
             document = await session.get(KnowledgeDocument, document_id)
             if document is None:
@@ -291,16 +297,10 @@ class KnowledgeBaseService:
             storage_key = document.storage_key
             title = document.title
 
-        try:
-            data = await self._storage.get(storage_key)
-        except StorageError as exc:
-            raise ServiceUnavailableError(
-                "Хранилище документов временно недоступно"
-            ) from exc
         suffix = Path(storage_key).suffix.lower()
         file_name = safe_file_name(f"{title}{suffix}")
         media_type = mimetypes.guess_type(file_name)[0] or "application/octet-stream"
-        return data, media_type, file_name
+        return storage_key, media_type, file_name
 
     async def create_document(
         self,
@@ -614,36 +614,39 @@ class KnowledgeBaseService:
                     )
                     if document is None:
                         raise NotFoundError("Документ базы знаний не найден")
-                    try:
-                        await self._vector_store.delete_document(document_id)
-                    except Exception as exc:
-                        raise ServiceUnavailableError(
-                            "Не удалось удалить документ из поискового индекса"
-                        ) from exc
-                    try:
-                        await self._storage.delete(document.storage_key)
-                    except Exception as exc:
-                        raise ServiceUnavailableError(
-                            "Не удалось очистить документ из storage; запись сохранена "
-                            "для повторной попытки"
-                        ) from exc
-                    candidates = list(
-                        await session.scalars(
-                            select(KnowledgeCandidate)
-                            .where(
-                                KnowledgeCandidate.resulting_document_id == document_id
-                            )
-                            .with_for_update()
-                        )
-                    )
-                    # Removing a published document revokes its publication. Do
-                    # not leave a candidate claiming that a missing document is
-                    # still approved.
-                    for candidate in candidates:
-                        candidate.status = CandidateStatus.REJECTED
-                        candidate.resulting_document_id = None
-                    await session.delete(document)
-                    await self._touch_rag_cache_version(session)
+                    await self._delete_document_locked(session, document)
+
+    async def _delete_document_locked(
+        self, session: AsyncSession, document: KnowledgeDocument
+    ) -> None:
+        """Delete one locked document within the caller's database transaction."""
+        try:
+            await self._vector_store.delete_document(document.id)
+        except Exception as exc:
+            raise ServiceUnavailableError(
+                "Не удалось удалить документ из поискового индекса"
+            ) from exc
+        try:
+            await self._storage.delete(document.storage_key)
+        except Exception as exc:
+            raise ServiceUnavailableError(
+                "Не удалось очистить документ из storage; запись сохранена "
+                "для повторной попытки"
+            ) from exc
+        candidates = list(
+            await session.scalars(
+                select(KnowledgeCandidate)
+                .where(KnowledgeCandidate.resulting_document_id == document.id)
+                .with_for_update()
+            )
+        )
+        # Removing a published document revokes its publication. Do not leave a
+        # candidate claiming that a missing document is still approved.
+        for candidate in candidates:
+            candidate.status = CandidateStatus.REJECTED
+            candidate.resulting_document_id = None
+        await session.delete(document)
+        await self._touch_rag_cache_version(session)
 
     @staticmethod
     async def _touch_rag_cache_version(session: AsyncSession) -> None:

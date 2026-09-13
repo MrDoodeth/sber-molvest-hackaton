@@ -4,6 +4,7 @@ import asyncio
 import os
 import shutil
 import uuid
+from collections.abc import AsyncIterator
 from pathlib import Path, PurePosixPath
 from typing import Any, BinaryIO
 
@@ -59,6 +60,19 @@ class LocalObjectStorage:
         try:
             async with asyncio.timeout(self._timeout_seconds):
                 return await asyncio.to_thread(path.read_bytes)
+        except FileNotFoundError as exc:
+            raise StorageError("Object not found in local storage") from exc
+        except OSError as exc:
+            raise StorageError("Unable to read object from local storage") from exc
+
+    async def iter_bytes(
+        self, key: str, chunk_size: int = 1024 * 1024
+    ) -> AsyncIterator[bytes]:
+        path = self._path(key)
+        try:
+            with path.open("rb") as source:
+                while chunk := await asyncio.to_thread(source.read, chunk_size):
+                    yield chunk
         except FileNotFoundError as exc:
             raise StorageError("Object not found in local storage") from exc
         except OSError as exc:
@@ -158,6 +172,24 @@ class S3ObjectStorage:
                     response = await client.get_object(Bucket=self._bucket, Key=key)
                     async with response["Body"] as body:
                         return bytes(await body.read())
+        except StorageError:
+            raise
+        except Exception as exc:
+            raise StorageError("Unable to read object from S3 storage") from exc
+
+    async def iter_bytes(
+        self, key: str, chunk_size: int = 1024 * 1024
+    ) -> AsyncIterator[bytes]:
+        _validate_key(key)
+        try:
+            async with asyncio.timeout(self._operation_timeout_seconds):
+                async with self._session().client(
+                    "s3", **self._client_options
+                ) as client:
+                    response = await client.get_object(Bucket=self._bucket, Key=key)
+                    async with response["Body"] as body:
+                        while chunk := await body.read(chunk_size):
+                            yield bytes(chunk)
         except StorageError:
             raise
         except Exception as exc:
