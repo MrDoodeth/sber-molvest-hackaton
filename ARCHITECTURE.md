@@ -55,10 +55,11 @@
 - **Backend — модульный монолит на FastAPI**, не микросервисы: меньше DevOps-расходов на хакатон, модули (RAG, Vision, Escalation, KB) изолированы и готовы к выносу в отдельные сервисы позже.
 - **GigaChat — центральная генеративная модель:** используем API для формирования финального ответа и анализа приложенных скриншотов. Для MVP основной кандидат — `GigaChat Pro`.
 - **Embeddings делаем локально:** Freemium предоставляет бесплатные токены генерации, но векторное представление текста оплачивается отдельно. Поэтому retrieval не зависит от платного Embeddings API; основной локальный кандидат — `BAAI/bge-m3`.
-- **Критичное ограничение Freemium — 1 поток генерации.** Каждый реальный GigaChat generation, vision и Files API вызов проходит через `GenerationGate`: локальный semaphore и PostgreSQL advisory lock сериализуют provider-вызовы между workers. Локальная подготовка контекста, RAG и storage I/O не удерживают этот gate. Обычный пользовательский turn использует два последовательных GigaChat generation-call с одним `GenerationContext`: structured `confidence` на фиксированной Lite-модели и streaming user answer на выбранной администратором модели. При screenshot его parse выполняется до retrieval. Confidence публикуется отдельным техническим SSE-событием: пользовательский UI его не показывает, но браузер получает и обрабатывает значение; operator/admin UI могут его отображать. Первый и второй подряд низкий confidence всё равно запускают streaming answer, а третий подряд ниже порога эскалирует без второго call. `operator_requested=true` эскалирует сразу, независимо от streak. Ручной шаблон оператора выполняется отдельным generation-call.
-- **Operator template context:** backend строит полный упорядоченный снимок сообщений
-  user/assistant/operator/system и всех вложений на момент вызова; затем общий
-  sliding-window выбирает самый свежий фрагмент истории в `gigachat_input_budget`.
+- **Критичное ограничение Freemium — 1 поток генерации.** Каждый реальный GigaChat generation, vision и Files API вызов проходит через `GenerationGate`: локальный semaphore и PostgreSQL advisory lock сериализуют provider-вызовы между workers. Локальная подготовка контекста, RAG и storage I/O не удерживают этот gate. Обычный пользовательский turn использует два последовательных GigaChat generation-call с одним `GenerationContext`: screenshot parse и structured `confidence` выполняются на фиксированной Lite-модели, а streaming user answer — на выбранной администратором модели. Vision выполняется до retrieval. Confidence публикуется отдельным техническим SSE-событием: пользовательский UI его не показывает, но браузер получает и обрабатывает значение; operator/admin UI могут его отображать. Первый и второй подряд низкий confidence всё равно запускают streaming answer, а третий подряд ниже порога эскалирует без второго call. `operator_requested=true` эскалирует сразу, независимо от streak. Ручной шаблон оператора выполняется отдельным generation-call.
+- **Operator template context:** backend строит полный упорядоченный снимок текстов
+  сообщений user/assistant/operator/system; затем общий sliding-window выбирает самый
+  свежий фрагмент истории в `gigachat_input_budget`. Runtime-вложения передаются в
+  GigaChat только для текущего user message и не переносятся через history.
 - **GigaChain используем точечно**, где он ускоряет интеграцию с GigaChat/LangChain, но не строим многошаговую agent-chain, которая последовательно занимает единственный поток.
 
 ## 2. Контекст, цели и требования
@@ -181,10 +182,12 @@ seed не скачивает внешний массив документов.
 ### ADR-3 · GigaChat как основная интеллектуальная модель + локальные embeddings
 
 - **GigaChat используется в основном пользовательском сценарии:** выбранная администратором модель отдельным structured-вызовом анализирует приложенный screenshot до retrieval, затем в одном `GenerationContext` фиксированная Lite-модель выполняет structured confidence call, а выбранная модель выполняет streaming user-answer call. Загруженные file ID переиспользуются в обоих вызовах; технический confidence prompt захардкожен в backend и не является `SystemPrompt`.
-- **Контекст screenshot:** после Vision parse confidence routing использует извлечённые
-  текст и visual summary без повторной передачи image attachment. Финальный answer
-  получает изображение; при подборе history и RAG evidence backend заранее резервирует
-  до 1792 visual tokens на каждое изображение согласно лимиту GigaChat.
+- **Контекст screenshot:** Vision parse всегда использует фиксированную Lite-модель
+  `GigaChat-2`. После него confidence routing использует извлечённые текст и visual
+  summary без повторной передачи image attachment. Финальный answer получает
+  изображение на выбранной администратором модели; при подборе history и RAG evidence
+  backend заранее резервирует до 1792 visual tokens на каждое изображение согласно
+  лимиту GigaChat.
 - **Embeddings API GigaChat в MVP не используем:** он оплачивается отдельно от Freemium-генерации, поэтому retrieval должен работать полностью локально и не зависеть от платной услуги.
 - **Единственная embedding-модель MVP:** `BAAI/bge-m3`.
 - **Почему `BGE-M3`:** мультиязычность (>100 языков), 1024-мерные dense-вектора, контекст до 8192 токенов, MIT-лицензия и возможность получать dense + sparse representations для hybrid retrieval.

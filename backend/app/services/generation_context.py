@@ -7,6 +7,7 @@ from pathlib import PurePosixPath
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.core.config import CONFIDENCE_MODEL_ID
 from app.core.enums import MessageAuthor
 from app.core.errors import (
     NotFoundError,
@@ -98,14 +99,14 @@ class GenerationContextService:
         latest_message = messages[-1]
         if latest_message.author_type == MessageAuthor.USER:
             current_text = latest_message.text
-            history = self._history(messages[:-1], attachments)
+            history = self._history(messages[:-1])
         else:
             # Keep operator replies in their original order. Moving an older user
             # question after them makes the model read the dialog backwards.
             current_text = (
                 "Сформируй следующий ответ клиенту с учётом актуальной истории диалога."
             )
-            history = self._history(messages, attachments)
+            history = self._history(messages)
         return await self._build_request(
             dialog_id=dialog_id,
             current_text=current_text,
@@ -124,7 +125,7 @@ class GenerationContextService:
         instruction: str,
     ) -> PreparedGenerationContext:
         messages, attachments = await self._dialog_snapshot(dialog_id)
-        history = self._history(messages, attachments)
+        history = self._history(messages)
         latest_user_message = next(
             (
                 message
@@ -163,7 +164,7 @@ class GenerationContextService:
             dialog_id=dialog_id,
             system_prompt=system_prompt,
             current_text=message.text,
-            history=self._history(messages[:message_index], attachments),
+            history=self._history(messages[:message_index]),
             attachments=attachments.get(message.id, []),
             settings=settings,
         )
@@ -195,7 +196,6 @@ class GenerationContextService:
             ) = await self._prepare_screenshot(
                 attachments,
                 current_text,
-                settings.active_model,
                 dialog_id,
             )
             prompt_search_context = (
@@ -376,7 +376,6 @@ class GenerationContextService:
         self,
         attachments: list[Attachment],
         current_text: str,
-        model: str,
         dialog_id: uuid.UUID,
     ) -> tuple[str | None, str | None]:
         screenshot = next(
@@ -399,7 +398,7 @@ class GenerationContextService:
         analysis = await self._llm_provider.analyze_screenshot(
             screenshot.gigachat_file_id,
             current_text,
-            model,
+            CONFIDENCE_MODEL_ID,
             dialog_id,
         )
         async with self._session_factory() as session:
@@ -413,23 +412,10 @@ class GenerationContextService:
         return analysis.extracted_text, analysis.visual_summary
 
     @staticmethod
-    def _history(
-        messages: list[Message],
-        attachments: dict[uuid.UUID, list[Attachment]],
-    ) -> list[ChatTurn]:
+    def _history(messages: list[Message]) -> list[ChatTurn]:
         history: list[ChatTurn] = []
         for message in messages:
-            parts = [message.text]
-            for attachment in attachments.get(message.id, []):
-                if attachment.extracted_text:
-                    parts.append(f"[Текст вложения] {attachment.extracted_text}")
-                if attachment.visual_summary:
-                    parts.append(f"[Описание вложения] {attachment.visual_summary}")
-                if not attachment.extracted_text and not attachment.visual_summary:
-                    parts.append(
-                        f"[Вложение] {PurePosixPath(attachment.storage_key).name}"
-                    )
-            text = "\n".join(part for part in parts if part).strip()
+            text = message.text.strip()
             if not text:
                 continue
             role = message.author_type.value
