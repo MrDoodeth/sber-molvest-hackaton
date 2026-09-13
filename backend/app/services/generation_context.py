@@ -7,7 +7,7 @@ from pathlib import PurePosixPath
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.core.config import CONFIDENCE_MODEL_ID
+from app.core.config import VISION_MODEL_ID
 from app.core.enums import MessageAuthor
 from app.core.errors import (
     NotFoundError,
@@ -398,7 +398,7 @@ class GenerationContextService:
         analysis = await self._llm_provider.analyze_screenshot(
             screenshot.gigachat_file_id,
             current_text,
-            CONFIDENCE_MODEL_ID,
+            VISION_MODEL_ID,
             dialog_id,
         )
         async with self._session_factory() as session:

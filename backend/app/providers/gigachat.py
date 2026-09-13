@@ -10,7 +10,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from app.contracts.schemas import CaseCard
-from app.core.config import Settings
+from app.core.config import Settings, VISION_MODEL_ID
 from app.core.generation_gate import GenerationGate
 from app.providers.interfaces import (
     ConfidenceAssessment,
@@ -277,6 +277,15 @@ class GigaChatProvider:
             for mime_type in request.attachment_mime_types
         )
 
+    @staticmethod
+    def _model_for_request(request: GenerationRequest, model: str) -> str:
+        if any(
+            mime_type.startswith("image/")
+            for mime_type in request.attachment_mime_types
+        ):
+            return VISION_MODEL_ID
+        return model
+
     async def _structured(
         self,
         *,
@@ -525,7 +534,9 @@ class GigaChatProvider:
         async with self._generation_gate.acquire(provider_request=True):
             messages = self._messages(request)
             result = await self._structured(
-                client=self._client(model, max_output_tokens),
+                client=self._client(
+                    self._model_for_request(request, model), max_output_tokens
+                ),
                 schema=CaseCard,
                 messages=messages,
                 session_id=session_id,
@@ -559,7 +570,9 @@ class GigaChatProvider:
         session_id: uuid.UUID,
     ) -> AsyncIterator[StreamChunk]:
         async with self._generation_gate.acquire(provider_request=True):
-            client = self._client(model, max_output_tokens)
+            client = self._client(
+                self._model_for_request(request, model), max_output_tokens
+            )
             messages = self._messages(request)
             usage: ProviderUsage | None = None
             try:
